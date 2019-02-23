@@ -1,6 +1,6 @@
 package com.sageserpent.plutonium.curium
 
-import cats.data.WriterT
+import cats.data.{ReaderT, WriterT}
 import cats.effect.IO
 import cats.implicits._
 import org.scalacheck.ScalacheckShapeless._
@@ -36,14 +36,8 @@ class ImmutableObjectStorageSpec
     with GeneratorDrivenPropertyChecks {
   import ImmutableObjectStorageSpec._
 
-  "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
-    spokeGenerator,
-    seedGenerator,
-    MinSuccessful(20)) { (spoke, seed) =>
-    println(spoke)
-
-    val randomBehaviour = new Random(seed)
-
+  private def somethingReachableFrom(randomBehaviour: Random)(
+      part: Part): Part = {
     def somethingReachableFrom(part: Part): Part = part match {
       case hub @ Hub(_, Some(parent)) =>
         if (randomBehaviour.nextBoolean()) hub
@@ -54,27 +48,76 @@ class ImmutableObjectStorageSpec
         else somethingReachableFrom(hub)
     }
 
+    somethingReachableFrom(part)
+  }
+
+  "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
+    spokeGenerator,
+    seedGenerator,
+    MinSuccessful(20)) { (spoke, seed) =>
+    val randomBehaviour = new Random(seed)
+
     // NOTE: there may indeed be duplicate parts - but we still expect
     // unique tranche ids when the same part is stored several times.
-    val parts = List.fill(10) { somethingReachableFrom(spoke) }
+    val parts = List.fill(10) { somethingReachableFrom(randomBehaviour)(spoke) }
 
-    type TrancheWriter[X] = WriterT[IO, List[TrancheOfData], X]
+    type TrancheWriter[X] =
+      WriterT[IO, List[(ImmutableObjectStorage.Id, TrancheOfData)], X]
 
     val storage: ImmutableObjectStorage[TrancheWriter] = ???
 
-    val session: TrancheWriter[List[ImmutableObjectStorage.Id]] =
+    val storageSession: TrancheWriter[List[ImmutableObjectStorage.Id]] =
       (parts :+ spoke).traverse(storage.store)
 
-    val (tranches: List[TrancheOfData],
+    val (tranches: List[(ImmutableObjectStorage.Id, TrancheOfData)],
          trancheIds: List[ImmutableObjectStorage.Id]) =
-      session.run.unsafeRunSync
+      storageSession.run.unsafeRunSync
 
     trancheIds should contain(theSameElementsAs(trancheIds.toSet))
 
-    tranches should have size trancheIds.size
+    tranches.map(_._1) should contain(theSameElementsAs(trancheIds))
   }
 
-  "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in {}
+  "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in forAll(
+    spokeGenerator,
+    seedGenerator,
+    MinSuccessful(20)) { (spoke, seed) =>
+    val randomBehaviour = new Random(seed)
+
+    val parts = List.fill(10) { somethingReachableFrom(randomBehaviour)(spoke) }
+
+    type TrancheWriter[X] =
+      WriterT[IO, List[(ImmutableObjectStorage.Id, TrancheOfData)], X]
+
+    val storage: ImmutableObjectStorage[TrancheWriter] = ???
+
+    val storageSession: TrancheWriter[List[ImmutableObjectStorage.Id]] =
+      (parts :+ spoke).traverse(storage.store)
+
+    val (tranches: List[(ImmutableObjectStorage.Id, TrancheOfData)],
+         trancheIds: List[ImmutableObjectStorage.Id]) =
+      storageSession.run.unsafeRunSync
+
+    // NOTE: as long as we have a complete chain of tranches, it shouldn't matter
+    // in what order tranche ids are submitted for retrieval.
+    val permutedTrancheIds: List[ImmutableObjectStorage.Id] =
+      randomBehaviour.shuffle(trancheIds)
+
+    type TrancheReader[X] =
+      ReaderT[IO, Map[ImmutableObjectStorage.Id, TrancheOfData], X]
+
+    val storageUsingTheSameTrancheChain: ImmutableObjectStorage[TrancheReader] =
+      ???
+
+    val retrievalSession: TrancheReader[List[Part]] =
+      permutedTrancheIds.traverse(
+        storageUsingTheSameTrancheChain.retrieve[Part])
+
+    val retrievedParts: List[Part] =
+      retrievalSession.run(tranches.toMap).unsafeRunSync
+
+    retrievedParts should contain(theSameElementsAs(parts :+ spoke))
+  }
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in {}
 
