@@ -1,14 +1,19 @@
 package com.sageserpent.plutonium.curium
 
-import cats.data.{ReaderT, WriterT}
+import java.util.UUID
+
+import cats.Monad
+import cats.data.{Kleisli, ReaderT, WriterT}
 import cats.effect.IO
 import cats.implicits._
+import com.sageserpent.plutonium.curium.ImmutableObjectStorage.Id
 import org.scalacheck.ScalacheckShapeless._
 import org.scalacheck.{Arbitrary, ScalacheckShapeless}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Matchers}
+import sun.reflect.generics.reflectiveObjects.NotImplementedException
 
-import scala.util.Random
+import scala.util.{Failure, Random, Try}
 
 object ImmutableObjectStorageSpec {
   sealed trait Part
@@ -28,13 +33,6 @@ object ImmutableObjectStorageSpec {
   }
 
   val seedGenerator = Arbitrary.arbInt.arbitrary
-}
-
-class ImmutableObjectStorageSpec
-    extends FlatSpec
-    with Matchers
-    with GeneratorDrivenPropertyChecks {
-  import ImmutableObjectStorageSpec._
 
   private def somethingReachableFrom(randomBehaviour: Random)(
       part: Part): Part = {
@@ -51,6 +49,40 @@ class ImmutableObjectStorageSpec
     somethingReachableFrom(part)
   }
 
+  type TrancheWriter[X] =
+    WriterT[IO, List[(ImmutableObjectStorage.Id, TrancheOfData)], X]
+
+  type TrancheReader[X] =
+    ReaderT[IO, Map[ImmutableObjectStorage.Id, TrancheOfData], X]
+
+  trait TranchesUsingWriter extends Tranches[TrancheWriter] {
+    override def store(tranche: TrancheOfData): TrancheWriter[Try[Id]] = {
+      val id = UUID.randomUUID()
+      Try(id).pure[TrancheWriter].tell(List(id -> tranche))
+    }
+
+    override def retrieve(id: Id): TrancheWriter[Try[TrancheOfData]] =
+      (Failure(new NotImplementedException()): Try[TrancheOfData])
+        .pure[TrancheWriter]
+  }
+
+  trait TranchesUsingReader extends Tranches[TrancheReader] {
+    override def store(tranche: TrancheOfData): TrancheReader[Try[Id]] =
+      (Failure(new NotImplementedException()): Try[Id]).pure[TrancheReader]
+
+    override def retrieve(id: Id): TrancheReader[Try[TrancheOfData]] =
+      Kleisli
+        .ask[IO, Map[ImmutableObjectStorage.Id, TrancheOfData]]
+        .flatMap(tranches => Try(tranches.apply(id)).pure[TrancheReader])
+  }
+}
+
+class ImmutableObjectStorageSpec
+    extends FlatSpec
+    with Matchers
+    with GeneratorDrivenPropertyChecks {
+  import ImmutableObjectStorageSpec._
+
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
     spokeGenerator,
     seedGenerator,
@@ -61,10 +93,12 @@ class ImmutableObjectStorageSpec
     // unique tranche ids when the same part is stored several times.
     val parts = List.fill(10) { somethingReachableFrom(randomBehaviour)(spoke) }
 
-    type TrancheWriter[X] =
-      WriterT[IO, List[(ImmutableObjectStorage.Id, TrancheOfData)], X]
-
-    val storage: ImmutableObjectStorage[TrancheWriter] = ???
+    val storage: ImmutableObjectStorage[TrancheWriter] =
+      new ImmutableObjectStorageImplementation[TrancheWriter]
+      with TranchesUsingWriter {
+        override implicit val monadEvidence: Monad[TrancheWriter] =
+          implicitly[Monad[TrancheWriter]]
+      }
 
     val storageSession: TrancheWriter[List[ImmutableObjectStorage.Id]] =
       (parts :+ spoke).traverse(storage.store)
@@ -86,10 +120,12 @@ class ImmutableObjectStorageSpec
 
     val parts = List.fill(10) { somethingReachableFrom(randomBehaviour)(spoke) }
 
-    type TrancheWriter[X] =
-      WriterT[IO, List[(ImmutableObjectStorage.Id, TrancheOfData)], X]
-
-    val storage: ImmutableObjectStorage[TrancheWriter] = ???
+    val storage: ImmutableObjectStorage[TrancheWriter] =
+      new ImmutableObjectStorageImplementation[TrancheWriter]
+      with TranchesUsingWriter {
+        override implicit val monadEvidence: Monad[TrancheWriter] =
+          implicitly[Monad[TrancheWriter]]
+      }
 
     val storageSession: TrancheWriter[List[ImmutableObjectStorage.Id]] =
       (parts :+ spoke).traverse(storage.store)
@@ -103,11 +139,12 @@ class ImmutableObjectStorageSpec
     val permutedTrancheIds: List[ImmutableObjectStorage.Id] =
       randomBehaviour.shuffle(trancheIds)
 
-    type TrancheReader[X] =
-      ReaderT[IO, Map[ImmutableObjectStorage.Id, TrancheOfData], X]
-
     val storageUsingTheSameTrancheChain: ImmutableObjectStorage[TrancheReader] =
-      ???
+      new ImmutableObjectStorageImplementation[TrancheReader]
+      with TranchesUsingReader {
+        override implicit val monadEvidence: Monad[TrancheReader] =
+          implicitly[Monad[TrancheReader]]
+      }
 
     val retrievalSession: TrancheReader[List[Part]] =
       permutedTrancheIds.traverse(
