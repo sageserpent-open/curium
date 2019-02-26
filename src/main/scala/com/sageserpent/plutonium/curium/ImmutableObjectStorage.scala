@@ -2,11 +2,11 @@ package com.sageserpent.plutonium.curium
 import java.util.UUID
 
 import cats.Monad
+import cats.data.EitherT
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.Id
 
 import scala.reflect.runtime.universe
 import scala.reflect.runtime.universe._
-import scala.util.Try
 
 object ImmutableObjectStorage {
   type Id = UUID
@@ -17,19 +17,23 @@ trait ImmutableObjectStorage[F[_]] {
   implicit val monadEvidence: Monad[F]
 
   // Imperative...
-  def store[X: TypeTag](immutableObject: X): F[ImmutableObjectStorage.Id]
+  def store[X: TypeTag](
+      immutableObject: X): EitherT[F, Throwable, ImmutableObjectStorage.Id]
 
   // Imperative...
-  def retrieve[X: TypeTag](id: ImmutableObjectStorage.Id): F[X]
+  def retrieve[X: TypeTag](
+      id: ImmutableObjectStorage.Id): EitherT[F, Throwable, X]
 }
 
 trait ImmutableObjectStorageImplementation[F[_]]
     extends ImmutableObjectStorage[F] {
   this: Tranches[F] =>
 
-  override def store[X: universe.TypeTag](immutableObject: X): F[Id] = ???
+  override def store[X: universe.TypeTag](
+      immutableObject: X): EitherT[F, Throwable, Id] = ???
 
-  override def retrieve[X: universe.TypeTag](id: Id): F[X] = ???
+  override def retrieve[X: universe.TypeTag](id: Id): EitherT[F, Throwable, X] =
+    ???
 }
 
 object TrancheOfData {
@@ -44,8 +48,10 @@ trait Tranches[F[_]] {
   implicit val monadEvidence: Monad[F]
 
   // Imperative...
-  def retrieve(id: ImmutableObjectStorage.Id): F[Try[TrancheOfData]]
+  def retrieve(
+      id: ImmutableObjectStorage.Id): EitherT[F, Throwable, TrancheOfData]
 
   // Imperative...
-  def store(tranche: TrancheOfData): F[Try[ImmutableObjectStorage.Id]]
+  def store(
+      tranche: TrancheOfData): EitherT[F, Throwable, ImmutableObjectStorage.Id]
 }

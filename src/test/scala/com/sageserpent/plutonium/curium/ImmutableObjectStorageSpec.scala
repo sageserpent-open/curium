@@ -3,7 +3,7 @@ package com.sageserpent.plutonium.curium
 import java.util.UUID
 
 import cats.Monad
-import cats.data.{Kleisli, ReaderT, WriterT}
+import cats.data.{EitherT, Kleisli, ReaderT, WriterT}
 import cats.effect.IO
 import cats.implicits._
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.Id
@@ -13,7 +13,7 @@ import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Matchers}
 import sun.reflect.generics.reflectiveObjects.NotImplementedException
 
-import scala.util.{Failure, Random, Try}
+import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
   sealed trait Part
@@ -56,24 +56,29 @@ object ImmutableObjectStorageSpec {
     ReaderT[IO, Map[ImmutableObjectStorage.Id, TrancheOfData], X]
 
   trait TranchesUsingWriter extends Tranches[TrancheWriter] {
-    override def store(tranche: TrancheOfData): TrancheWriter[Try[Id]] = {
+    override def store(
+        tranche: TrancheOfData): EitherT[TrancheWriter, Throwable, Id] = {
       val id = UUID.randomUUID()
-      Try(id).pure[TrancheWriter].tell(List(id -> tranche))
+      EitherT.right(id.pure[TrancheWriter].tell(List(id -> tranche)))
     }
 
-    override def retrieve(id: Id): TrancheWriter[Try[TrancheOfData]] =
-      (Failure(new NotImplementedException()): Try[TrancheOfData])
-        .pure[TrancheWriter]
+    override def retrieve(
+        id: Id): EitherT[TrancheWriter, Throwable, TrancheOfData] =
+      EitherT.leftT(new NotImplementedException())
   }
 
   trait TranchesUsingReader extends Tranches[TrancheReader] {
-    override def store(tranche: TrancheOfData): TrancheReader[Try[Id]] =
-      (Failure(new NotImplementedException()): Try[Id]).pure[TrancheReader]
+    override def store(
+        tranche: TrancheOfData): EitherT[TrancheReader, Throwable, Id] =
+      EitherT.leftT(new NotImplementedException())
 
-    override def retrieve(id: Id): TrancheReader[Try[TrancheOfData]] =
-      Kleisli
-        .ask[IO, Map[ImmutableObjectStorage.Id, TrancheOfData]]
-        .flatMap(tranches => Try(tranches.apply(id)).pure[TrancheReader])
+    override def retrieve(
+        id: Id): EitherT[TrancheReader, Throwable, TrancheOfData] =
+      EitherT(
+        Kleisli
+          .ask[IO, Map[ImmutableObjectStorage.Id, TrancheOfData]]
+          .flatMap(tranches =>
+            Try { tranches(id) }.toEither.pure[TrancheReader]))
   }
 }
 
@@ -100,16 +105,18 @@ class ImmutableObjectStorageSpec
           implicitly[Monad[TrancheWriter]]
       }
 
-    val storageSession: TrancheWriter[List[ImmutableObjectStorage.Id]] =
+    val storageSession
+      : EitherT[TrancheWriter, Throwable, List[ImmutableObjectStorage.Id]] =
       (parts :+ spoke).traverse(storage.store)
 
     val (tranches: List[(ImmutableObjectStorage.Id, TrancheOfData)],
-         trancheIds: List[ImmutableObjectStorage.Id]) =
-      storageSession.run.unsafeRunSync
+         Right(trancheIds: List[ImmutableObjectStorage.Id])) =
+      storageSession.value.run.unsafeRunSync
 
     trancheIds should contain(theSameElementsAs(trancheIds.toSet))
 
     tranches.map(_._1) should contain(theSameElementsAs(trancheIds))
+
   }
 
   "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in forAll(
@@ -127,12 +134,13 @@ class ImmutableObjectStorageSpec
           implicitly[Monad[TrancheWriter]]
       }
 
-    val storageSession: TrancheWriter[List[ImmutableObjectStorage.Id]] =
+    val storageSession
+      : EitherT[TrancheWriter, Throwable, List[ImmutableObjectStorage.Id]] =
       (parts :+ spoke).traverse(storage.store)
 
     val (tranches: List[(ImmutableObjectStorage.Id, TrancheOfData)],
-         trancheIds: List[ImmutableObjectStorage.Id]) =
-      storageSession.run.unsafeRunSync
+         Right(trancheIds: List[ImmutableObjectStorage.Id])) =
+      storageSession.value.run.unsafeRunSync
 
     // NOTE: as long as we have a complete chain of tranches, it shouldn't matter
     // in what order tranche ids are submitted for retrieval.
@@ -146,12 +154,12 @@ class ImmutableObjectStorageSpec
           implicitly[Monad[TrancheReader]]
       }
 
-    val retrievalSession: TrancheReader[List[Part]] =
+    val retrievalSession: EitherT[TrancheReader, Throwable, List[Part]] =
       permutedTrancheIds.traverse(
         storageUsingTheSameTrancheChain.retrieve[Part])
 
-    val retrievedParts: List[Part] =
-      retrievalSession.run(tranches.toMap).unsafeRunSync
+    val Right(retrievedParts: List[Part]) =
+      retrievalSession.value.run(tranches.toMap).unsafeRunSync
 
     retrievedParts should contain(theSameElementsAs(parts :+ spoke))
   }
