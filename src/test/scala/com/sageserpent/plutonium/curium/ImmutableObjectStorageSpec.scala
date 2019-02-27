@@ -100,10 +100,7 @@ class ImmutableObjectStorageSpec
 
     val storage: ImmutableObjectStorage[TrancheWriter] =
       new ImmutableObjectStorageImplementation[TrancheWriter]
-      with TranchesUsingWriter {
-        override implicit val monadEvidence: Monad[TrancheWriter] =
-          implicitly[Monad[TrancheWriter]]
-      }
+      with TranchesUsingWriter
 
     val storageSession
       : EitherT[TrancheWriter, Throwable, List[ImmutableObjectStorage.Id]] =
@@ -148,10 +145,7 @@ class ImmutableObjectStorageSpec
 
     val storageUsingTheSameTrancheChain: ImmutableObjectStorage[TrancheReader] =
       new ImmutableObjectStorageImplementation[TrancheReader]
-      with TranchesUsingReader {
-        override implicit val monadEvidence: Monad[TrancheReader] =
-          implicitly[Monad[TrancheReader]]
-      }
+      with TranchesUsingReader
 
     val retrievalSession: EitherT[TrancheReader, Throwable, List[Part]] =
       permutedTrancheIds.traverse(

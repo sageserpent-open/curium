@@ -27,7 +27,8 @@ trait ImmutableObjectStorage[F[_]] {
       id: ImmutableObjectStorage.Id): EitherT[F, Throwable, X]
 }
 
-trait ImmutableObjectStorageImplementation[F[_]]
+abstract class ImmutableObjectStorageImplementation[F[_]](
+    override implicit val monadEvidence: Monad[F])
     extends ImmutableObjectStorage[F] {
   this: Tranches[F] =>
 
