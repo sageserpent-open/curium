@@ -4,9 +4,11 @@ import java.util.UUID
 import cats.Monad
 import cats.data.EitherT
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.Id
+import com.twitter.chill.{KryoPool, ScalaKryoInstantiator}
 
 import scala.reflect.runtime.universe
-import scala.reflect.runtime.universe._
+import scala.reflect.runtime.universe.{Try => _, _}
+import scala.util.Try
 
 object ImmutableObjectStorage {
   type Id = UUID
@@ -29,11 +31,23 @@ trait ImmutableObjectStorageImplementation[F[_]]
     extends ImmutableObjectStorage[F] {
   this: Tranches[F] =>
 
+  val kryoPool: KryoPool = ScalaKryoInstantiator.defaultPool
+
   override def store[X: universe.TypeTag](
-      immutableObject: X): EitherT[F, Throwable, Id] = ???
+      immutableObject: X): EitherT[F, Throwable, Id] = {
+    val serializedRepresentation: Array[Byte] =
+      kryoPool.toBytesWithClass(immutableObject)
+
+    storeTranche(TrancheOfData(serializedRepresentation))
+  }
 
   override def retrieve[X: universe.TypeTag](id: Id): EitherT[F, Throwable, X] =
-    ???
+    for {
+      tranche <- retrieveTranche(id)
+      result <- EitherT.fromEither[F](Try {
+        kryoPool.fromBytes(tranche.serializedRepresentation).asInstanceOf[X]
+      }.toEither)
+    } yield result
 }
 
 object TrancheOfData {
@@ -42,16 +56,14 @@ object TrancheOfData {
   // TODO - need to be able to create a tranche from an object.
 }
 
-trait TrancheOfData // TODO - add operations, somehow we need to be able to reconstitute an object conforming to a type.
+case class TrancheOfData(serializedRepresentation: Array[Byte])
 
 trait Tranches[F[_]] {
-  implicit val monadEvidence: Monad[F]
-
   // Imperative...
-  def retrieve(
+  def retrieveTranche(
       id: ImmutableObjectStorage.Id): EitherT[F, Throwable, TrancheOfData]
 
   // Imperative...
-  def store(
+  def storeTranche(
       tranche: TrancheOfData): EitherT[F, Throwable, ImmutableObjectStorage.Id]
 }

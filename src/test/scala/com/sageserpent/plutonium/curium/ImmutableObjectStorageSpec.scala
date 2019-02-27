@@ -56,23 +56,23 @@ object ImmutableObjectStorageSpec {
     ReaderT[IO, Map[ImmutableObjectStorage.Id, TrancheOfData], X]
 
   trait TranchesUsingWriter extends Tranches[TrancheWriter] {
-    override def store(
+    override def storeTranche(
         tranche: TrancheOfData): EitherT[TrancheWriter, Throwable, Id] = {
       val id = UUID.randomUUID()
       EitherT.right(id.pure[TrancheWriter].tell(List(id -> tranche)))
     }
 
-    override def retrieve(
+    override def retrieveTranche(
         id: Id): EitherT[TrancheWriter, Throwable, TrancheOfData] =
       EitherT.leftT(new NotImplementedException())
   }
 
   trait TranchesUsingReader extends Tranches[TrancheReader] {
-    override def store(
+    override def storeTranche(
         tranche: TrancheOfData): EitherT[TrancheReader, Throwable, Id] =
-      EitherT.leftT(new NotImplementedException())
+      EitherT.leftT[TrancheReader, Id][Throwable](new NotImplementedException())
 
-    override def retrieve(
+    override def retrieveTranche(
         id: Id): EitherT[TrancheReader, Throwable, TrancheOfData] =
       EitherT(
         Kleisli
@@ -116,7 +116,6 @@ class ImmutableObjectStorageSpec
     trancheIds should contain(theSameElementsAs(trancheIds.toSet))
 
     tranches.map(_._1) should contain(theSameElementsAs(trancheIds))
-
   }
 
   "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in forAll(
