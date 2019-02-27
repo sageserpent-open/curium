@@ -113,9 +113,9 @@ class ImmutableObjectStorageSpec
          Right(trancheIds: List[ImmutableObjectStorage.Id])) =
       storageSession.value.run.unsafeRunSync
 
-    trancheIds should contain(theSameElementsAs(trancheIds.toSet))
+    trancheIds should contain theSameElementsAs (trancheIds.toSet)
 
-    tranches.map(_._1) should contain(theSameElementsAs(trancheIds))
+    tranches.map(_._1) should contain theSameElementsAs (trancheIds)
   }
 
   "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in forAll(
@@ -160,7 +160,7 @@ class ImmutableObjectStorageSpec
     val Right(retrievedParts: List[Part]) =
       retrievalSession.value.run(tranches.toMap).unsafeRunSync
 
-    retrievedParts should contain(theSameElementsAs(parts :+ spoke))
+    retrievedParts should contain theSameElementsAs (parts :+ spoke)
   }
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in {}
