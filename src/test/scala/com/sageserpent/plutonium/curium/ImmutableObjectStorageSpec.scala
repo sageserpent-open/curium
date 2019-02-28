@@ -254,7 +254,7 @@ class ImmutableObjectStorageSpec
     val spokeTrancheId = trancheIds.last
 
     val idOfCorruptedTranche =
-      randomBehaviour.chooseOneOf(trancheIds.take(trancheIds.size - 1))
+      randomBehaviour.chooseOneOf(trancheIds)
 
     val storageUsingTheSameTrancheChain: ImmutableObjectStorage[TrancheReader] =
       new ImmutableObjectStorageImplementation[TrancheReader]
