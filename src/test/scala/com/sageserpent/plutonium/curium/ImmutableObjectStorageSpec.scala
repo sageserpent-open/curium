@@ -422,6 +422,6 @@ class ImmutableObjectStorageSpec
 
     val (_, spokeTranche) = tranches.last
 
-    isolatedSpokeTranche.serializedRepresentation.length should be < spokeTranche.serializedRepresentation.length
+    spokeTranche.serializedRepresentation.length should be < isolatedSpokeTranche.serializedRepresentation.length
   }
 }
