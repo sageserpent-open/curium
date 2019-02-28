@@ -8,7 +8,7 @@ import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.Id
 import org.scalacheck.ScalacheckShapeless._
-import org.scalacheck.{Arbitrary, ScalacheckShapeless}
+import org.scalacheck.{Arbitrary, Gen, ScalacheckShapeless}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Inspectors, Matchers}
 import sun.reflect.generics.reflectiveObjects.NotImplementedException
@@ -25,14 +25,14 @@ object ImmutableObjectStorageSpec {
   val _ = ScalacheckShapeless // HACK: prevent IntelliJ from removing the
   // import, as it doesn't spot the implicit macro usage.
 
-  implicit val arbitraryName = Arbitrary(
+  implicit val arbitraryName: Arbitrary[String] = Arbitrary(
     Arbitrary.arbInt.arbitrary.map(_.toString))
 
-  val spokeGenerator = {
+  val spokeGenerator: Gen[Spoke] = {
     implicitly[Arbitrary[Spoke]].arbitrary
   }
 
-  val seedGenerator = Arbitrary.arbInt.arbitrary
+  val seedGenerator: Gen[Int] = Arbitrary.arbInt.arbitrary
 
   private def somethingReachableFrom(randomBehaviour: Random)(
       part: Part): Part = {
@@ -50,7 +50,7 @@ object ImmutableObjectStorageSpec {
   }
 
   type TrancheWriter[X] =
-    WriterT[IO, List[(ImmutableObjectStorage.Id, TrancheOfData)], X]
+    WriterT[IO, Vector[(ImmutableObjectStorage.Id, TrancheOfData)], X]
 
   type TrancheReader[X] =
     ReaderT[IO, Map[ImmutableObjectStorage.Id, TrancheOfData], X]
@@ -59,7 +59,7 @@ object ImmutableObjectStorageSpec {
     override def storeTranche(
         tranche: TrancheOfData): EitherT[TrancheWriter, Throwable, Id] = {
       val id = UUID.randomUUID()
-      EitherT.right(id.pure[TrancheWriter].tell(List(id -> tranche)))
+      EitherT.right(id.pure[TrancheWriter].tell(Vector(id -> tranche)))
     }
 
     override def retrieveTranche(
@@ -100,21 +100,21 @@ class ImmutableObjectStorageSpec
 
     // NOTE: there may indeed be duplicate parts - but we still expect
     // unique tranche ids when the same part is stored several times.
-    val originalParts = List.fill(10) {
+    val originalParts = Vector.fill(10) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
     val storageSession
-      : EitherT[TrancheWriter, Throwable, List[ImmutableObjectStorage.Id]] =
+      : EitherT[TrancheWriter, Throwable, Vector[ImmutableObjectStorage.Id]] =
       originalParts.traverse(storage.store)
 
-    val (tranches: List[(ImmutableObjectStorage.Id, TrancheOfData)],
-         Right(trancheIds: List[ImmutableObjectStorage.Id])) =
+    val (tranches: Vector[(ImmutableObjectStorage.Id, TrancheOfData)],
+         Right(trancheIds: Vector[ImmutableObjectStorage.Id])) =
       storageSession.value.run.unsafeRunSync
 
-    trancheIds should contain theSameElementsAs (trancheIds.toSet)
+    trancheIds should contain theSameElementsAs trancheIds.toSet
 
-    tranches.map(_._1) should contain theSameElementsAs (trancheIds)
+    tranches.map(_._1) should contain theSameElementsAs trancheIds
   }
 
   "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in forAll(
@@ -127,32 +127,32 @@ class ImmutableObjectStorageSpec
       new ImmutableObjectStorageImplementation[TrancheWriter]
       with TranchesUsingWriter
 
-    val originalParts = List.fill(10) {
+    val originalParts = Vector.fill(10) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
     val storageSession
-      : EitherT[TrancheWriter, Throwable, List[ImmutableObjectStorage.Id]] =
+      : EitherT[TrancheWriter, Throwable, Vector[ImmutableObjectStorage.Id]] =
       originalParts.traverse(storage.store)
 
-    val (tranches: List[(ImmutableObjectStorage.Id, TrancheOfData)],
-         Right(trancheIds: List[ImmutableObjectStorage.Id])) =
+    val (tranches: Vector[(ImmutableObjectStorage.Id, TrancheOfData)],
+         Right(trancheIds: Vector[ImmutableObjectStorage.Id])) =
       storageSession.value.run.unsafeRunSync
 
     // NOTE: as long as we have a complete chain of tranches, it shouldn't matter
     // in what order tranche ids are submitted for retrieval.
-    val permutedTrancheIds: List[ImmutableObjectStorage.Id] =
+    val permutedTrancheIds: Vector[ImmutableObjectStorage.Id] =
       randomBehaviour.shuffle(trancheIds)
 
     val storageUsingTheSameTrancheChain: ImmutableObjectStorage[TrancheReader] =
       new ImmutableObjectStorageImplementation[TrancheReader]
       with TranchesUsingReader
 
-    val retrievalSession: EitherT[TrancheReader, Throwable, List[Part]] =
+    val retrievalSession: EitherT[TrancheReader, Throwable, Vector[Part]] =
       permutedTrancheIds.traverse(
         storageUsingTheSameTrancheChain.retrieve[Part])
 
-    val Right(retrievedParts: List[Part]) =
+    val Right(retrievedParts: Vector[Part]) =
       retrievalSession.value.run(tranches.toMap).unsafeRunSync
 
     retrievedParts should contain theSameElementsAs originalParts
@@ -172,19 +172,19 @@ class ImmutableObjectStorageSpec
       new ImmutableObjectStorageImplementation[TrancheWriter]
       with TranchesUsingWriter
 
-    val originalParts = List.fill(10) {
+    val originalParts = Vector.fill(10) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
     val storageSession
-      : EitherT[TrancheWriter, Throwable, List[ImmutableObjectStorage.Id]] =
+      : EitherT[TrancheWriter, Throwable, Vector[ImmutableObjectStorage.Id]] =
       originalParts.traverse(storage.store)
 
-    val (tranches: List[(ImmutableObjectStorage.Id, TrancheOfData)],
-         Right(trancheIds: List[ImmutableObjectStorage.Id])) =
+    val (tranches: Vector[(ImmutableObjectStorage.Id, TrancheOfData)],
+         Right(trancheIds: Vector[ImmutableObjectStorage.Id])) =
       storageSession.value.run.unsafeRunSync
 
-    val originalPartsByTrancheId = trancheIds zip originalParts toMap
+    val originalPartsByTrancheId = (trancheIds zip originalParts).toMap
 
     val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
 
