@@ -2,7 +2,6 @@ package com.sageserpent.plutonium.curium
 
 import java.util.UUID
 
-import cats.Monad
 import cats.data.{EitherT, Kleisli, ReaderT, WriterT}
 import cats.effect.IO
 import cats.implicits._
@@ -10,7 +9,7 @@ import com.sageserpent.plutonium.curium.ImmutableObjectStorage.Id
 import org.scalacheck.ScalacheckShapeless._
 import org.scalacheck.{Arbitrary, ScalacheckShapeless}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.{FlatSpec, Inspectors, Matchers}
 import sun.reflect.generics.reflectiveObjects.NotImplementedException
 
 import scala.util.{Random, Try}
@@ -152,6 +151,10 @@ class ImmutableObjectStorageSpec
       retrievalSession.value.run(tranches.toMap).unsafeRunSync
 
     retrievedParts should contain theSameElementsAs (parts :+ spoke)
+
+    Inspectors.forAll(retrievedParts)(retrievedPart =>
+      Inspectors.forAll(parts :+ spoke)(originalPart =>
+        retrievedPart should not be theSameInstanceAs(originalPart)))
   }
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in {}
