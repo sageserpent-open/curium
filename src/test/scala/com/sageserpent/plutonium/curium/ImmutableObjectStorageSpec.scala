@@ -18,9 +18,9 @@ import scala.util.{Random, Try}
 object ImmutableObjectStorageSpec {
   sealed trait Part
 
-  case class Hub(name: String, parent: Option[Hub]) extends Part
+  case class Hub(id: Int, parent: Option[Hub]) extends Part
 
-  case class Spoke(name: String, hub: Hub) extends Part
+  case class Spoke(id: Int, hub: Hub) extends Part
 
   val _ = ScalacheckShapeless // HACK: prevent IntelliJ from removing the
   // import, as it doesn't spot the implicit macro usage.
@@ -220,7 +220,59 @@ class ImmutableObjectStorageSpec
     }
   }
 
-  it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in {}
+  it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
+    spokeGenerator,
+    seedGenerator,
+    MinSuccessful(20)) { (spoke, seed) =>
+    val randomBehaviour = new Random(seed)
+
+    val storage: ImmutableObjectStorage[TrancheWriter] =
+      new ImmutableObjectStorageImplementation[TrancheWriter]
+      with TranchesUsingWriter
+
+    val originalParts = Vector.fill(10) {
+      somethingReachableFrom(randomBehaviour)(spoke)
+    } :+ spoke
+
+    val storageSession
+      : EitherT[TrancheWriter, Throwable, Vector[ImmutableObjectStorage.Id]] =
+      originalParts.traverse(storage.store)
+
+    val (tranches: Vector[(ImmutableObjectStorage.Id, TrancheOfData)],
+         Right(trancheIds: Vector[ImmutableObjectStorage.Id])) =
+      storageSession.value.run.unsafeRunSync
+
+    assert(
+      originalParts.size == tranches.size && originalParts.size == trancheIds.size)
+
+    val spokeTrancheId = trancheIds.last
+
+    val idOfCorruptedTranche =
+      randomBehaviour.chooseOneOf(trancheIds.take(trancheIds.size - 1))
+
+    val storageUsingTheSameTrancheChain: ImmutableObjectStorage[TrancheReader] =
+      new ImmutableObjectStorageImplementation[TrancheReader]
+      with TranchesUsingReader
+
+    val retrievalSession: EitherT[TrancheReader, Throwable, Part] =
+      storageUsingTheSameTrancheChain.retrieve[Part](spokeTrancheId)
+
+    val tranchesMap = tranches.toMap
+
+    retrievalSession.value
+      .run(tranchesMap.updated(
+        idOfCorruptedTranche, {
+          val trancheToCorrupt = tranchesMap(idOfCorruptedTranche)
+          val (firstHalf, secondHalf) =
+            trancheToCorrupt.serializedRepresentation.splitAt(
+              randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
+                1 + trancheToCorrupt.serializedRepresentation.length))
+          trancheToCorrupt.copy(
+            firstHalf ++ "*** CORRUPTION! ***".map(_.toByte) ++ secondHalf)
+        }
+      ))
+      .unsafeRunSync shouldBe a[Left[_, _]]
+  }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in {}
 
