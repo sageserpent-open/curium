@@ -384,4 +384,44 @@ class ImmutableObjectStorageSpec
                                tranchesMap(trancheIds.head)))
       .unsafeRunSync shouldBe a[Left[_, _]]
   }
+
+  it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in forAll(
+    spokeGenerator,
+    seedGenerator,
+    oneLessThanNumberOfPartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, twoLessThanNumberOfParts) =>
+    val randomBehaviour = new Random(seed)
+
+    val storage: ImmutableObjectStorage[TrancheWriter] =
+      new ImmutableObjectStorageImplementation[TrancheWriter]
+      with TranchesUsingWriter
+
+    // NOTE: there may indeed be duplicate parts - but we still expect
+    // unique tranche ids when the same part is stored several times.
+    val originalParts = Vector.fill(2 + twoLessThanNumberOfParts) {
+      somethingReachableFrom(randomBehaviour)(spoke)
+    } :+ spoke
+
+    val storageSession
+      : EitherT[TrancheWriter, Throwable, Vector[ImmutableObjectStorage.Id]] =
+      originalParts.traverse(storage.store)
+
+    val (tranches: Vector[(ImmutableObjectStorage.Id, TrancheOfData)], _) =
+      storageSession.value.run.unsafeRunSync
+
+    val isolatedSpokeStorage: ImmutableObjectStorage[TrancheWriter] =
+      new ImmutableObjectStorageImplementation[TrancheWriter]
+      with TranchesUsingWriter
+
+    val isolatedSpokeStorageSession
+      : EitherT[TrancheWriter, Throwable, ImmutableObjectStorage.Id] =
+      storage.store(spoke)
+
+    val (Vector((_, isolatedSpokeTranche: TrancheOfData)), _) =
+      isolatedSpokeStorageSession.value.run.unsafeRunSync
+
+    val (_, spokeTranche) = tranches.last
+
+    isolatedSpokeTranche.serializedRepresentation.length should be < spokeTranche.serializedRepresentation.length
+  }
 }
