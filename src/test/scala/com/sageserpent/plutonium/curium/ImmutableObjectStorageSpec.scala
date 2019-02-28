@@ -22,6 +22,8 @@ object ImmutableObjectStorageSpec {
 
   case class Spoke(id: Int, hub: Hub) extends Part
 
+  case object alien extends Part
+
   val _ = ScalacheckShapeless // HACK: prevent IntelliJ from removing the
   // import, as it doesn't spot the implicit macro usage.
 
@@ -187,7 +189,9 @@ class ImmutableObjectStorageSpec
       new ImmutableObjectStorageImplementation[TrancheWriter]
       with TranchesUsingWriter
 
-    val originalParts = Vector.fill(1 + oneLessThanNumberOfParts) {
+    val numberOfParts = 1 + oneLessThanNumberOfParts
+
+    val originalParts = Vector.fill(numberOfParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
@@ -207,20 +211,22 @@ class ImmutableObjectStorageSpec
       new ImmutableObjectStorageImplementation[TrancheReader]
       with TranchesUsingReader
 
+    val tranchesMap = tranches.toMap
+
     originalPartsByTrancheId(sampleTrancheId) match {
       case _: Spoke =>
         val retrievalSession: EitherT[TrancheReader, Throwable, Hub] =
           storageUsingTheSameTrancheChain.retrieve[Hub](sampleTrancheId)
 
         retrievalSession.value
-          .run(tranches.toMap)
+          .run(tranchesMap)
           .unsafeRunSync shouldBe a[Left[_, _]]
       case _: Hub =>
         val retrievalSession: EitherT[TrancheReader, Throwable, Spoke] =
           storageUsingTheSameTrancheChain.retrieve[Spoke](sampleTrancheId)
 
         retrievalSession.value
-          .run(tranches.toMap)
+          .run(tranchesMap)
           .unsafeRunSync shouldBe a[Left[_, _]]
     }
   }
@@ -236,7 +242,9 @@ class ImmutableObjectStorageSpec
       new ImmutableObjectStorageImplementation[TrancheWriter]
       with TranchesUsingWriter
 
-    val originalParts = Vector.fill(1 + oneLessThanNumberOfParts) {
+    val numberOfParts = 1 + oneLessThanNumberOfParts
+
+    val originalParts = Vector.fill(numberOfParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
@@ -251,8 +259,6 @@ class ImmutableObjectStorageSpec
     assert(
       originalParts.size == tranches.size && originalParts.size == trancheIds.size)
 
-    val spokeTrancheId = trancheIds.last
-
     val idOfCorruptedTranche =
       randomBehaviour.chooseOneOf(trancheIds)
 
@@ -260,8 +266,10 @@ class ImmutableObjectStorageSpec
       new ImmutableObjectStorageImplementation[TrancheReader]
       with TranchesUsingReader
 
-    val retrievalSession: EitherT[TrancheReader, Throwable, Part] =
-      storageUsingTheSameTrancheChain.retrieve[Part](spokeTrancheId)
+    val spokeTrancheId = trancheIds.last
+
+    val retrievalSession: EitherT[TrancheReader, Throwable, Spoke] =
+      storageUsingTheSameTrancheChain.retrieve[Spoke](spokeTrancheId)
 
     val tranchesMap = tranches.toMap
 
@@ -280,7 +288,100 @@ class ImmutableObjectStorageSpec
       .unsafeRunSync shouldBe a[Left[_, _]]
   }
 
-  it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in {}
+  it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
+    spokeGenerator,
+    seedGenerator,
+    oneLessThanNumberOfPartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, oneLessThanNumberOfParts) =>
+    val randomBehaviour = new Random(seed)
 
-  it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in {}
+    val storage: ImmutableObjectStorage[TrancheWriter] =
+      new ImmutableObjectStorageImplementation[TrancheWriter]
+      with TranchesUsingWriter
+
+    val numberOfParts = 1 + oneLessThanNumberOfParts
+
+    val originalParts = Vector.fill(numberOfParts) {
+      somethingReachableFrom(randomBehaviour)(spoke)
+    } :+ spoke
+
+    val storageSession
+      : EitherT[TrancheWriter, Throwable, Vector[ImmutableObjectStorage.Id]] =
+      originalParts.traverse(storage.store)
+
+    val (tranches: Vector[(ImmutableObjectStorage.Id, TrancheOfData)],
+         Right(trancheIds: Vector[ImmutableObjectStorage.Id])) =
+      storageSession.value.run.unsafeRunSync
+
+    assert(
+      originalParts.size == tranches.size && originalParts.size == trancheIds.size)
+
+    val idOfMissingTranche =
+      randomBehaviour.chooseOneOf(trancheIds)
+
+    val storageUsingTheSameTrancheChain: ImmutableObjectStorage[TrancheReader] =
+      new ImmutableObjectStorageImplementation[TrancheReader]
+      with TranchesUsingReader
+
+    val spokeTrancheId = trancheIds.last
+
+    val retrievalSession: EitherT[TrancheReader, Throwable, Spoke] =
+      storageUsingTheSameTrancheChain.retrieve[Spoke](spokeTrancheId)
+
+    val tranchesMap = tranches.toMap
+
+    retrievalSession.value
+      .run(tranchesMap - idOfMissingTranche)
+      .unsafeRunSync shouldBe a[Left[_, _]]
+  }
+
+  it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
+    spokeGenerator,
+    seedGenerator,
+    oneLessThanNumberOfPartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, oneLessThanNumberOfParts) =>
+    val randomBehaviour = new Random(seed)
+
+    val storage: ImmutableObjectStorage[TrancheWriter] =
+      new ImmutableObjectStorageImplementation[TrancheWriter]
+      with TranchesUsingWriter
+
+    val numberOfParts = 1 + oneLessThanNumberOfParts
+
+    val originalParts = Vector.fill(numberOfParts) {
+      somethingReachableFrom(randomBehaviour)(spoke)
+    } :+ spoke
+
+    val storageSession
+      : EitherT[TrancheWriter, Throwable, Vector[ImmutableObjectStorage.Id]] =
+      (alien +: originalParts).traverse(storage.store)
+
+    val (tranches: Vector[(ImmutableObjectStorage.Id, TrancheOfData)],
+         Right(trancheIds: Vector[ImmutableObjectStorage.Id])) =
+      storageSession.value.run.unsafeRunSync
+
+    assert(
+      1 + originalParts.size == tranches.size && 1 + originalParts.size == trancheIds.size)
+
+    val nonAlienTrancheIds = trancheIds.drop(1)
+
+    val idOfIncorrectlyTypedTranche =
+      randomBehaviour.chooseOneOf(nonAlienTrancheIds)
+
+    val storageUsingTheSameTrancheChain: ImmutableObjectStorage[TrancheReader] =
+      new ImmutableObjectStorageImplementation[TrancheReader]
+      with TranchesUsingReader
+
+    val spokeTrancheId = trancheIds.last
+
+    val retrievalSession: EitherT[TrancheReader, Throwable, Spoke] =
+      storageUsingTheSameTrancheChain.retrieve[Spoke](spokeTrancheId)
+
+    val tranchesMap = tranches.toMap
+
+    retrievalSession.value
+      .run(tranchesMap.updated(idOfIncorrectlyTypedTranche,
+                               tranchesMap(trancheIds.head)))
+      .unsafeRunSync shouldBe a[Left[_, _]]
+  }
 }
