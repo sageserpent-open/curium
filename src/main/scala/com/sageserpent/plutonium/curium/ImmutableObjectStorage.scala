@@ -3,6 +3,7 @@ import java.util.UUID
 
 import cats.Monad
 import cats.data.EitherT
+import com.sageserpent.plutonium.classFromType
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.Id
 import com.twitter.chill.{KryoPool, ScalaKryoInstantiator}
 
@@ -42,13 +43,17 @@ abstract class ImmutableObjectStorageImplementation[F[_]](
     storeTranche(TrancheOfData(serializedRepresentation))
   }
 
-  override def retrieve[X: universe.TypeTag](id: Id): EitherT[F, Throwable, X] =
+  override def retrieve[X: universe.TypeTag](
+      id: Id): EitherT[F, Throwable, X] = {
+    val clazz: Class[X] = classFromType(typeOf[X])
     for {
       tranche <- retrieveTranche(id)
       result <- EitherT.fromEither[F](Try {
-        kryoPool.fromBytes(tranche.serializedRepresentation).asInstanceOf[X]
+        val deserialized = kryoPool.fromBytes(tranche.serializedRepresentation)
+        clazz.cast(deserialized)
       }.toEither)
     } yield result
+  }
 }
 
 object TrancheOfData {
