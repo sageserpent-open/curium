@@ -139,10 +139,17 @@ class ImmutableObjectStorageSpec
          Right(trancheIds: Vector[ImmutableObjectStorage.Id])) =
       storageSession.value.run.unsafeRunSync
 
+    val forwardPermutation: Map[Int, Int] = randomBehaviour
+      .shuffle(Vector.tabulate(trancheIds.size)(identity))
+      .zipWithIndex
+      .toMap
+
+    val backwardsPermutation = forwardPermutation.map(_.swap)
+
     // NOTE: as long as we have a complete chain of tranches, it shouldn't matter
     // in what order tranche ids are submitted for retrieval.
-    val permutedTrancheIds: Vector[ImmutableObjectStorage.Id] =
-      randomBehaviour.shuffle(trancheIds)
+    val permutedTrancheIds = Vector(trancheIds.indices map (index =>
+      trancheIds(forwardPermutation(index))): _*)
 
     val storageUsingTheSameTrancheChain: ImmutableObjectStorage[TrancheReader] =
       new ImmutableObjectStorageImplementation[TrancheReader]
@@ -155,7 +162,10 @@ class ImmutableObjectStorageSpec
     val Right(retrievedParts: Vector[Part]) =
       retrievalSession.value.run(tranches.toMap).unsafeRunSync
 
-    retrievedParts should contain theSameElementsAs originalParts
+    val unpermutedRetrievedParts = retrievedParts.indices map (index =>
+      retrievedParts(backwardsPermutation(index)))
+
+    unpermutedRetrievedParts should contain theSameElementsInOrderAs originalParts
 
     Inspectors.forAll(retrievedParts)(retrievedPart =>
       Inspectors.forAll(originalParts)(originalPart =>
