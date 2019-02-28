@@ -125,10 +125,7 @@ class ImmutableObjectStorageSpec
 
     val storage: ImmutableObjectStorage[TrancheWriter] =
       new ImmutableObjectStorageImplementation[TrancheWriter]
-      with TranchesUsingWriter {
-        override implicit val monadEvidence: Monad[TrancheWriter] =
-          implicitly[Monad[TrancheWriter]]
-      }
+      with TranchesUsingWriter
 
     val storageSession
       : EitherT[TrancheWriter, Throwable, List[ImmutableObjectStorage.Id]] =
