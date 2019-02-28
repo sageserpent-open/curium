@@ -5,6 +5,7 @@ import java.util.UUID
 import cats.data.{EitherT, Kleisli, ReaderT, WriterT}
 import cats.effect.IO
 import cats.implicits._
+import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.Id
 import org.scalacheck.ScalacheckShapeless._
 import org.scalacheck.{Arbitrary, ScalacheckShapeless}
@@ -93,17 +94,19 @@ class ImmutableObjectStorageSpec
     MinSuccessful(20)) { (spoke, seed) =>
     val randomBehaviour = new Random(seed)
 
-    // NOTE: there may indeed be duplicate parts - but we still expect
-    // unique tranche ids when the same part is stored several times.
-    val parts = List.fill(10) { somethingReachableFrom(randomBehaviour)(spoke) }
-
     val storage: ImmutableObjectStorage[TrancheWriter] =
       new ImmutableObjectStorageImplementation[TrancheWriter]
       with TranchesUsingWriter
 
+    // NOTE: there may indeed be duplicate parts - but we still expect
+    // unique tranche ids when the same part is stored several times.
+    val originalParts = List.fill(10) {
+      somethingReachableFrom(randomBehaviour)(spoke)
+    } :+ spoke
+
     val storageSession
       : EitherT[TrancheWriter, Throwable, List[ImmutableObjectStorage.Id]] =
-      (parts :+ spoke).traverse(storage.store)
+      originalParts.traverse(storage.store)
 
     val (tranches: List[(ImmutableObjectStorage.Id, TrancheOfData)],
          Right(trancheIds: List[ImmutableObjectStorage.Id])) =
@@ -120,15 +123,17 @@ class ImmutableObjectStorageSpec
     MinSuccessful(20)) { (spoke, seed) =>
     val randomBehaviour = new Random(seed)
 
-    val parts = List.fill(10) { somethingReachableFrom(randomBehaviour)(spoke) }
-
     val storage: ImmutableObjectStorage[TrancheWriter] =
       new ImmutableObjectStorageImplementation[TrancheWriter]
       with TranchesUsingWriter
 
+    val originalParts = List.fill(10) {
+      somethingReachableFrom(randomBehaviour)(spoke)
+    } :+ spoke
+
     val storageSession
       : EitherT[TrancheWriter, Throwable, List[ImmutableObjectStorage.Id]] =
-      (parts :+ spoke).traverse(storage.store)
+      originalParts.traverse(storage.store)
 
     val (tranches: List[(ImmutableObjectStorage.Id, TrancheOfData)],
          Right(trancheIds: List[ImmutableObjectStorage.Id])) =
@@ -150,14 +155,60 @@ class ImmutableObjectStorageSpec
     val Right(retrievedParts: List[Part]) =
       retrievalSession.value.run(tranches.toMap).unsafeRunSync
 
-    retrievedParts should contain theSameElementsAs (parts :+ spoke)
+    retrievedParts should contain theSameElementsAs originalParts
 
     Inspectors.forAll(retrievedParts)(retrievedPart =>
-      Inspectors.forAll(parts :+ spoke)(originalPart =>
+      Inspectors.forAll(originalParts)(originalPart =>
         retrievedPart should not be theSameInstanceAs(originalPart)))
   }
 
-  it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in {}
+  it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
+    spokeGenerator,
+    seedGenerator,
+    MinSuccessful(20)) { (spoke, seed) =>
+    val randomBehaviour = new Random(seed)
+
+    val storage: ImmutableObjectStorage[TrancheWriter] =
+      new ImmutableObjectStorageImplementation[TrancheWriter]
+      with TranchesUsingWriter
+
+    val originalParts = List.fill(10) {
+      somethingReachableFrom(randomBehaviour)(spoke)
+    } :+ spoke
+
+    val storageSession
+      : EitherT[TrancheWriter, Throwable, List[ImmutableObjectStorage.Id]] =
+      originalParts.traverse(storage.store)
+
+    val (tranches: List[(ImmutableObjectStorage.Id, TrancheOfData)],
+         Right(trancheIds: List[ImmutableObjectStorage.Id])) =
+      storageSession.value.run.unsafeRunSync
+
+    val originalPartsByTrancheId = trancheIds zip originalParts toMap
+
+    val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
+
+    val storageUsingTheSameTrancheChain: ImmutableObjectStorage[TrancheReader] =
+      new ImmutableObjectStorageImplementation[TrancheReader]
+      with TranchesUsingReader
+
+    originalPartsByTrancheId(sampleTrancheId) match {
+      case _: Spoke =>
+        val retrievalSession: EitherT[TrancheReader, Throwable, Hub] =
+          storageUsingTheSameTrancheChain.retrieve[Hub](sampleTrancheId)
+
+        retrievalSession.value
+          .run(tranches.toMap)
+          .unsafeRunSync shouldBe a[Left[_, _]]
+      case _: Hub =>
+        val retrievalSession: EitherT[TrancheReader, Throwable, Spoke] =
+          storageUsingTheSameTrancheChain.retrieve[Spoke](sampleTrancheId)
+
+        retrievalSession.value
+          .run(tranches.toMap)
+          .unsafeRunSync shouldBe a[Left[_, _]]
+    }
+  }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in {}
 
