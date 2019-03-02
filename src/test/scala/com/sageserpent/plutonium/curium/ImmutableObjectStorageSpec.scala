@@ -2,13 +2,12 @@ package com.sageserpent.plutonium.curium
 
 import java.util.UUID
 
-import cats.data.{EitherT, Kleisli, ReaderT, WriterT}
-import cats.effect.IO
+import cats.Id
+import cats.data._
 import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
   ObjectReferenceId,
-  ProxyState,
   TrancheId,
   TrancheOfData
 }
@@ -59,14 +58,15 @@ object ImmutableObjectStorageSpec {
   }
 
   type TrancheWriter[X] =
-    WriterT[IO, Vector[(TrancheId, TrancheOfData)], X]
+    Writer[Vector[(TrancheId, TrancheOfData)], X]
 
   type TrancheReader[X] =
-    ReaderT[IO, Map[TrancheId, TrancheOfData], X]
+    Reader[Map[TrancheId, TrancheOfData], X]
 
   trait TranchesUsingWriter extends Tranches[TrancheWriter] {
-    override def createTrancheInStorage(serializedRepresentation: Array[Byte],
-                                        proxyStates: Seq[ProxyState])
+    override def createTrancheInStorage(
+        serializedRepresentation: Array[Byte],
+        objectReferenceIds: Seq[ObjectReferenceId])
       : EitherT[TrancheWriter, Throwable, TrancheId] = {
       val id = UUID.randomUUID()
       EitherT.right(
@@ -78,13 +78,14 @@ object ImmutableObjectStorageSpec {
         id: TrancheId): EitherT[TrancheWriter, Throwable, TrancheOfData] =
       EitherT.leftT(new NotImplementedException())
 
-    override def retrieveProxyState(objectReferenceId: ObjectReferenceId)
-      : EitherT[TrancheWriter, Throwable, ProxyState] = ???
+    override def retrieveTrancheId(objectReferenceId: ObjectReferenceId)
+      : EitherT[TrancheWriter, Throwable, TrancheId] = ???
   }
 
   trait TranchesUsingReader extends Tranches[TrancheReader] {
-    override def createTrancheInStorage(serializedRepresentation: Array[Byte],
-                                        proxyStates: Seq[ProxyState])
+    override def createTrancheInStorage(
+        serializedRepresentation: Array[Byte],
+        objectReferenceIds: Seq[ObjectReferenceId])
       : EitherT[TrancheReader, Throwable, TrancheId] =
       EitherT.leftT[TrancheReader, TrancheId][Throwable](
         new NotImplementedException())
@@ -93,12 +94,12 @@ object ImmutableObjectStorageSpec {
         id: TrancheId): EitherT[TrancheReader, Throwable, TrancheOfData] =
       EitherT(
         Kleisli
-          .ask[IO, Map[TrancheId, TrancheOfData]]
+          .ask[Id, Map[TrancheId, TrancheOfData]]
           .flatMap(tranches =>
             Try { tranches(id) }.toEither.pure[TrancheReader]))
 
-    override def retrieveProxyState(objectReferenceId: ObjectReferenceId)
-      : EitherT[TrancheReader, Throwable, ProxyState] = ???
+    override def retrieveTrancheId(objectReferenceId: ObjectReferenceId)
+      : EitherT[TrancheReader, Throwable, TrancheId] = ???
   }
 }
 
@@ -130,7 +131,7 @@ class ImmutableObjectStorageSpec
 
     val (tranches: Vector[(TrancheId, TrancheOfData)],
          Right(trancheIds: Vector[TrancheId])) =
-      storageSession.value.run.unsafeRunSync
+      storageSession.value.run
 
     trancheIds should contain theSameElementsAs trancheIds.toSet
 
@@ -157,7 +158,7 @@ class ImmutableObjectStorageSpec
 
     val (tranches: Vector[(TrancheId, TrancheOfData)],
          Right(trancheIds: Vector[TrancheId])) =
-      storageSession.value.run.unsafeRunSync
+      storageSession.value.run
 
     val forwardPermutation: Map[Int, Int] = randomBehaviour
       .shuffle(Vector.tabulate(trancheIds.size)(identity))
@@ -180,7 +181,7 @@ class ImmutableObjectStorageSpec
         storageUsingTheSameTrancheChain.retrieve[Part])
 
     val Right(retrievedParts: Vector[Part]) =
-      retrievalSession.value.run(tranches.toMap).unsafeRunSync
+      retrievalSession.value.run(tranches.toMap)
 
     val unpermutedRetrievedParts = retrievedParts.indices map (index =>
       retrievedParts(backwardsPermutation(index)))
@@ -214,7 +215,7 @@ class ImmutableObjectStorageSpec
 
     val (tranches: Vector[(TrancheId, TrancheOfData)],
          Right(trancheIds: Vector[TrancheId])) =
-      storageSession.value.run.unsafeRunSync
+      storageSession.value.run
 
     val originalPartsByTrancheId = (trancheIds zip originalParts).toMap
 
@@ -232,15 +233,13 @@ class ImmutableObjectStorageSpec
           storageUsingTheSameTrancheChain.retrieve[Hub](sampleTrancheId)
 
         retrievalSession.value
-          .run(tranchesMap)
-          .unsafeRunSync shouldBe a[Left[_, _]]
+          .run(tranchesMap) shouldBe a[Left[_, _]]
       case _: Hub =>
         val retrievalSession: EitherT[TrancheReader, Throwable, Spoke] =
           storageUsingTheSameTrancheChain.retrieve[Spoke](sampleTrancheId)
 
         retrievalSession.value
-          .run(tranchesMap)
-          .unsafeRunSync shouldBe a[Left[_, _]]
+          .run(tranchesMap) shouldBe a[Left[_, _]]
     }
   }
 
@@ -266,7 +265,7 @@ class ImmutableObjectStorageSpec
 
     val (tranches: Vector[(TrancheId, TrancheOfData)],
          Right(trancheIds: Vector[TrancheId])) =
-      storageSession.value.run.unsafeRunSync
+      storageSession.value.run
 
     assert(
       originalParts.size == tranches.size && originalParts.size == trancheIds.size)
@@ -286,18 +285,18 @@ class ImmutableObjectStorageSpec
     val tranchesMap = tranches.toMap
 
     retrievalSession.value
-      .run(tranchesMap.updated(
-        idOfCorruptedTranche, {
-          val trancheToCorrupt = tranchesMap(idOfCorruptedTranche)
-          val (firstHalf, secondHalf) =
-            trancheToCorrupt.serializedRepresentation.splitAt(
-              randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
-                1 + trancheToCorrupt.serializedRepresentation.length))
-          trancheToCorrupt.copy(
-            firstHalf ++ "*** CORRUPTION! ***".map(_.toByte) ++ secondHalf)
-        }
-      ))
-      .unsafeRunSync shouldBe a[Left[_, _]]
+      .run(
+        tranchesMap.updated(
+          idOfCorruptedTranche, {
+            val trancheToCorrupt = tranchesMap(idOfCorruptedTranche)
+            val (firstHalf, secondHalf) =
+              trancheToCorrupt.serializedRepresentation.splitAt(
+                randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
+                  1 + trancheToCorrupt.serializedRepresentation.length))
+            trancheToCorrupt.copy(
+              firstHalf ++ "*** CORRUPTION! ***".map(_.toByte) ++ secondHalf)
+          }
+        )) shouldBe a[Left[_, _]]
   }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
@@ -322,7 +321,7 @@ class ImmutableObjectStorageSpec
 
     val (tranches: Vector[(TrancheId, TrancheOfData)],
          Right(trancheIds: Vector[TrancheId])) =
-      storageSession.value.run.unsafeRunSync
+      storageSession.value.run
 
     assert(
       originalParts.size == tranches.size && originalParts.size == trancheIds.size)
@@ -342,8 +341,7 @@ class ImmutableObjectStorageSpec
     val tranchesMap = tranches.toMap
 
     retrievalSession.value
-      .run(tranchesMap - idOfMissingTranche)
-      .unsafeRunSync shouldBe a[Left[_, _]]
+      .run(tranchesMap - idOfMissingTranche) shouldBe a[Left[_, _]]
   }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
@@ -368,7 +366,7 @@ class ImmutableObjectStorageSpec
 
     val (tranches: Vector[(TrancheId, TrancheOfData)],
          Right(trancheIds: Vector[TrancheId])) =
-      storageSession.value.run.unsafeRunSync
+      storageSession.value.run
 
     assert(
       1 + originalParts.size == tranches.size && 1 + originalParts.size == trancheIds.size)
@@ -390,9 +388,10 @@ class ImmutableObjectStorageSpec
     val tranchesMap = tranches.toMap
 
     retrievalSession.value
-      .run(tranchesMap.updated(idOfIncorrectlyTypedTranche,
-                               tranchesMap(trancheIds.head)))
-      .unsafeRunSync shouldBe a[Left[_, _]]
+      .run(
+        tranchesMap.updated(
+          idOfIncorrectlyTypedTranche,
+          tranchesMap(trancheIds.head))) shouldBe a[Left[_, _]]
   }
 
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in forAll(
@@ -416,7 +415,7 @@ class ImmutableObjectStorageSpec
       originalParts.traverse(storage.store)
 
     val (tranches: Vector[(TrancheId, TrancheOfData)], _) =
-      storageSession.value.run.unsafeRunSync
+      storageSession.value.run
 
     val isolatedSpokeStorage: ImmutableObjectStorage[TrancheWriter] =
       new ImmutableObjectStorageImplementation[TrancheWriter]
@@ -427,7 +426,7 @@ class ImmutableObjectStorageSpec
       storage.store(spoke)
 
     val (Vector((_, isolatedSpokeTranche: TrancheOfData)), _) =
-      isolatedSpokeStorageSession.value.run.unsafeRunSync
+      isolatedSpokeStorageSession.value.run
 
     val (_, spokeTranche) = tranches.last
 

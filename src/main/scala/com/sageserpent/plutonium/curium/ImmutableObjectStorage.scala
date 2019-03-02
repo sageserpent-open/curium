@@ -3,15 +3,11 @@ import java.util.UUID
 
 import cats.Monad
 import cats.data.EitherT
+import cats.implicits._
 import com.esotericsoftware.kryo.ReferenceResolver
 import com.esotericsoftware.kryo.util.MapReferenceResolver
 import com.sageserpent.plutonium.classFromType
-import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
-  ObjectReferenceId,
-  ProxyState,
-  TrancheId,
-  TrancheOfData
-}
+import com.sageserpent.plutonium.curium.ImmutableObjectStorage._
 import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
 
 import scala.collection.mutable.{SortedMap => MutableSortedMap}
@@ -26,8 +22,6 @@ object ImmutableObjectStorage {
 
   case class TrancheOfData(serializedRepresentation: Array[Byte],
                            minimumObjectReferenceId: ObjectReferenceId)
-
-  case class ProxyState(trancheId: TrancheId, clazz: Class[_])
 }
 
 trait ImmutableObjectStorage[F[_]] {
@@ -93,16 +87,13 @@ abstract class ImmutableObjectStorageImplementation[F[_]](
       tranche <- retrieveTranche(trancheId)
       result <- EitherT.fromEither[F](Try {
         object trancheSpecificReferenceResolver extends MapReferenceResolver {
-          private def proxyFrom[T](objectReferenceId: ObjectReferenceId,
-                                   clazz: Class[T]): T =
-            ???
-
           override def getReadObject(
-              `type`: Class[_],
+              clazz: Class[_],
               objectReferenceId: ObjectReferenceId): AnyRef =
             if (objectReferenceId >= tranche.minimumObjectReferenceId)
-              super.getReadObject(`type`, objectReferenceId)
-            else proxyFrom(objectReferenceId, `type`).asInstanceOf[AnyRef]
+              super.getReadObject(clazz, objectReferenceId)
+            else
+              proxyFor(objectReferenceId, clazz)
         }
 
         val deserialized = retrievalSessionReferenceResolver.withValue(
@@ -116,14 +107,17 @@ abstract class ImmutableObjectStorageImplementation[F[_]](
       }.toEither)
     } yield result
   }
+
+  private def proxyFor(objectReferenceId: ObjectReferenceId,
+                       clazz: Class[_]): AnyRef = ???
 }
 
 trait Tranches[F[_]] {
-  def createTrancheInStorage(
-      serializedRepresentation: Array[Byte],
-      proxyStates: Seq[ProxyState]): EitherT[F, Throwable, TrancheId]
+  def createTrancheInStorage(serializedRepresentation: Array[Byte],
+                             objectReferenceIds: Seq[ObjectReferenceId])
+    : EitherT[F, Throwable, TrancheId]
 
   def retrieveTranche(id: TrancheId): EitherT[F, Throwable, TrancheOfData]
-  def retrieveProxyState(
-      objectReferenceId: ObjectReferenceId): EitherT[F, Throwable, ProxyState]
+  def retrieveTrancheId(
+      objectReferenceId: ObjectReferenceId): EitherT[F, Throwable, TrancheId]
 }
