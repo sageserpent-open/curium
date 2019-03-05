@@ -71,7 +71,8 @@ object ImmutableObjectStorageSpec {
       val id = UUID.randomUUID()
       EitherT.right(
         id.pure[TrancheWriter]
-          .tell(Vector(id -> TrancheOfData(serializedRepresentation, ???))))
+          .tell(Vector(id -> TrancheOfData(serializedRepresentation,
+                                           -1 /*BOGUS PLACEHOLDER*/ ))))
     }
 
     override def retrieveTranche(
@@ -433,5 +434,5 @@ class ImmutableObjectStorageSpec
     spokeTranche.serializedRepresentation.length should be < isolatedSpokeTranche.serializedRepresentation.length
   }
 
-  it should "be idempotent when retrieving using the same tranche id" in {}
+  ignore should "be idempotent when retrieving using the same tranche id" in {}
 }

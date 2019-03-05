@@ -3,14 +3,11 @@ import java.util.UUID
 
 import cats.Monad
 import cats.data.EitherT
-import cats.implicits._
 import com.esotericsoftware.kryo.ReferenceResolver
-import com.esotericsoftware.kryo.util.MapReferenceResolver
 import com.sageserpent.plutonium.classFromType
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage._
-import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
+import com.twitter.chill.{KryoPool, ScalaKryoInstantiator}
 
-import scala.collection.mutable.{SortedMap => MutableSortedMap}
 import scala.reflect.runtime.universe
 import scala.reflect.runtime.universe.{Try => _, _}
 import scala.util.{DynamicVariable, Try}
@@ -41,36 +38,8 @@ abstract class ImmutableObjectStorageImplementation[F[_]](
 
   val retrievalSessionReferenceResolver
     : DynamicVariable[Option[ReferenceResolver]] = new DynamicVariable(None)
-
-  object referenceResolver extends MapReferenceResolver {
-    override def getReadObject(`type`: Class[_],
-                               objectReferenceId: ObjectReferenceId): AnyRef =
-      retrievalSessionReferenceResolver.value.get
-        .getReadObject(`type`, objectReferenceId)
-
-    override def nextReadId(`type`: Class[_]): ObjectReferenceId =
-      retrievalSessionReferenceResolver.value.get.nextReadId(`type`)
-  }
-
-  // TODO - cutover to using weak references, perhaps via 'WeakCache'?
-  val refererenceResolversByTrancheId
-    : MutableSortedMap[TrancheId, ReferenceResolver] =
-    MutableSortedMap.empty
-
-  val kryoInstantiator: ScalaKryoInstantiator = new ScalaKryoInstantiator {
-    override def newKryo(): KryoBase = {
-      val result = super.newKryo()
-
-      result.setReferenceResolver(referenceResolver)
-
-      result.setAutoReset(false)
-
-      result
-    }
-  }
-
   val kryoPool: KryoPool =
-    KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
+    ScalaKryoInstantiator.defaultPool
 
   override def store[X: universe.TypeTag](
       immutableObject: X): EitherT[F, Throwable, TrancheId] = {
@@ -86,22 +55,7 @@ abstract class ImmutableObjectStorageImplementation[F[_]](
     for {
       tranche <- retrieveTranche(trancheId)
       result <- EitherT.fromEither[F](Try {
-        object trancheSpecificReferenceResolver extends MapReferenceResolver {
-          override def getReadObject(
-              clazz: Class[_],
-              objectReferenceId: ObjectReferenceId): AnyRef =
-            if (objectReferenceId >= tranche.minimumObjectReferenceId)
-              super.getReadObject(clazz, objectReferenceId)
-            else
-              proxyFor(objectReferenceId, clazz)
-        }
-
-        val deserialized = retrievalSessionReferenceResolver.withValue(
-          Some(trancheSpecificReferenceResolver)) {
-          kryoPool.fromBytes(tranche.serializedRepresentation)
-        }
-
-        refererenceResolversByTrancheId += trancheId -> trancheSpecificReferenceResolver
+        val deserialized = kryoPool.fromBytes(tranche.serializedRepresentation)
 
         clazz.cast(deserialized)
       }.toEither)
