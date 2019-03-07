@@ -1,16 +1,14 @@
 package com.sageserpent.plutonium.curium
 import java.util.UUID
 
-import cats.Monad
-import cats.data.EitherT
-import com.esotericsoftware.kryo.ReferenceResolver
+import cats.arrow.FunctionK
+import cats.free.FreeT
+import cats.implicits._
 import com.sageserpent.plutonium.classFromType
-import com.sageserpent.plutonium.curium.ImmutableObjectStorage._
 import com.twitter.chill.{KryoPool, ScalaKryoInstantiator}
 
-import scala.reflect.runtime.universe
 import scala.reflect.runtime.universe.{Try => _, _}
-import scala.util.{DynamicVariable, Try}
+import scala.util.Try
 
 object ImmutableObjectStorage {
   type TrancheId = UUID
@@ -19,59 +17,64 @@ object ImmutableObjectStorage {
 
   case class TrancheOfData(serializedRepresentation: Array[Byte],
                            minimumObjectReferenceId: ObjectReferenceId)
-}
 
-trait ImmutableObjectStorage[F[_]] {
-  implicit val monadEvidence: Monad[F]
+  type EitherThrowableOr[X] = Either[Throwable, X]
 
-  // Imperative...
-  def store[X: TypeTag](immutableObject: X): EitherT[F, Throwable, TrancheId]
+  trait Tranches {
+    def createTrancheInStorage(serializedRepresentation: Array[Byte],
+                               objectReferenceIds: Seq[ObjectReferenceId])
+      : EitherThrowableOr[TrancheId]
 
-  // Imperative...
-  def retrieve[X: TypeTag](id: TrancheId): EitherT[F, Throwable, X]
-}
-
-abstract class ImmutableObjectStorageImplementation[F[_]](
-    override implicit val monadEvidence: Monad[F])
-    extends ImmutableObjectStorage[F] {
-  this: Tranches[F] =>
-
-  val retrievalSessionReferenceResolver
-    : DynamicVariable[Option[ReferenceResolver]] = new DynamicVariable(None)
-  val kryoPool: KryoPool =
-    ScalaKryoInstantiator.defaultPool
-
-  override def store[X: universe.TypeTag](
-      immutableObject: X): EitherT[F, Throwable, TrancheId] = {
-    val serializedRepresentation: Array[Byte] =
-      kryoPool.toBytesWithClass(immutableObject)
-
-    createTrancheInStorage(serializedRepresentation, Seq.empty /* TODO */ )
+    def retrieveTranche(id: TrancheId): EitherThrowableOr[TrancheOfData]
+    def retrieveTrancheId(
+        objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
   }
 
-  override def retrieve[X: universe.TypeTag](
-      trancheId: TrancheId): EitherT[F, Throwable, X] = {
-    val clazz: Class[X] = classFromType(typeOf[X])
-    for {
-      tranche <- retrieveTranche(trancheId)
-      result <- EitherT.fromEither[F](Try {
-        val deserialized = kryoPool.fromBytes(tranche.serializedRepresentation)
+  trait Operation[Result]
 
-        clazz.cast(deserialized)
-      }.toEither)
-    } yield result
+  case class Store[X](immutableObject: X) extends Operation[TrancheId]
+
+  case class Retrieve[X: TypeTag](trancheId: TrancheId) extends Operation[X] {
+    val capturedTypeTag = implicitly[TypeTag[X]]
   }
 
-  private def proxyFor(objectReferenceId: ObjectReferenceId,
-                       clazz: Class[_]): AnyRef = ???
-}
+  type Session[X] = FreeT[Operation, EitherThrowableOr, X]
 
-trait Tranches[F[_]] {
-  def createTrancheInStorage(serializedRepresentation: Array[Byte],
-                             objectReferenceIds: Seq[ObjectReferenceId])
-    : EitherT[F, Throwable, TrancheId]
+  def store[X](immutableObject: X): Session[TrancheId] =
+    FreeT.liftF[Operation, EitherThrowableOr, TrancheId](Store(immutableObject))
 
-  def retrieveTranche(id: TrancheId): EitherT[F, Throwable, TrancheOfData]
-  def retrieveTrancheId(
-      objectReferenceId: ObjectReferenceId): EitherT[F, Throwable, TrancheId]
+  def retrieve[X: TypeTag](id: TrancheId): Session[X] =
+    FreeT.liftF[Operation, EitherThrowableOr, X](Retrieve(id))
+
+  def run(session: Session[Unit], tranches: Tranches): Unit = {
+    object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
+      val kryoPool: KryoPool =
+        ScalaKryoInstantiator.defaultPool
+
+      override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
+        operation match {
+          case Store(immutableObject) => {
+            val serializedRepresentation: Array[Byte] =
+              kryoPool.toBytesWithClass(immutableObject)
+
+            tranches
+              .createTrancheInStorage(serializedRepresentation,
+                                      Seq.empty /* TODO */ )
+          }
+          case retrieve @ Retrieve(trancheId) =>
+            for {
+              tranche <- tranches.retrieveTranche(trancheId)
+              result <- Try {
+                val deserialized =
+                  kryoPool.fromBytes(tranche.serializedRepresentation)
+                classFromType(retrieve.capturedTypeTag.tpe)
+                  .cast(deserialized)
+                  .asInstanceOf[X]
+              }.toEither
+            } yield result
+        }
+    }
+
+    session.foldMap(sessionInterpreter)
+  }
 }
