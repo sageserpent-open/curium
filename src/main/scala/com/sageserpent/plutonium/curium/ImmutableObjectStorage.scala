@@ -46,7 +46,8 @@ object ImmutableObjectStorage {
   def retrieve[X: TypeTag](id: TrancheId): Session[X] =
     FreeT.liftF[Operation, EitherThrowableOr, X](Retrieve(id))
 
-  def run(session: Session[Unit], tranches: Tranches): Unit = {
+  def run(session: Session[Unit],
+          tranches: Tranches): EitherThrowableOr[Unit] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       val kryoPool: KryoPool =
         ScalaKryoInstantiator.defaultPool

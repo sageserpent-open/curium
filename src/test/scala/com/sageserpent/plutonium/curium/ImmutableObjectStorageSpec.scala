@@ -177,10 +177,9 @@ class ImmutableObjectStorageSpec
 
       sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
 
-      _ <- originalPartsByTrancheId(sampleTrancheId) match {
+      bogus <- originalPartsByTrancheId(sampleTrancheId) match {
         case _: Spoke => ImmutableObjectStorage.retrieve[Hub](sampleTrancheId)
-        case _: Hub =>
-          ImmutableObjectStorage.retrieve[Spoke](sampleTrancheId)
+        case _: Hub   => ImmutableObjectStorage.retrieve[Spoke](sampleTrancheId)
       }
     } yield ()
 
@@ -315,21 +314,21 @@ class ImmutableObjectStorageSpec
     MinSuccessful(20)) { (spoke, seed, twoLessThanNumberOfParts) =>
     val randomBehaviour = new Random(seed)
 
-    // NOTE: there may indeed be duplicate parts - but we still expect
-    // unique tranche ids when the same part is stored several times.
     val originalParts = Vector.fill(2 + twoLessThanNumberOfParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
-    val isolatedSpokeTranches = new FakeTranches
+    val (_, isolatedSpokeTranche) = {
+      val isolatedSpokeTranches = new FakeTranches
 
-    val isolatedSpokeStorageSession =
-      for (_ <- ImmutableObjectStorage.store(spoke)) yield ()
+      val isolatedSpokeStorageSession =
+        for (_ <- ImmutableObjectStorage.store(spoke)) yield ()
 
-    ImmutableObjectStorage.run(isolatedSpokeStorageSession,
-                               isolatedSpokeTranches)
+      ImmutableObjectStorage.run(isolatedSpokeStorageSession,
+                                 isolatedSpokeTranches)
 
-    val (_, isolatedSpokeTranche) = isolatedSpokeTranches.tranchesById.head
+      isolatedSpokeTranches.tranchesById.head
+    }
 
     val tranches = new FakeTranches
 
