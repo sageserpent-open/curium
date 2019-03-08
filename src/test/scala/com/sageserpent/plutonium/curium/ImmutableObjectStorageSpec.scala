@@ -343,5 +343,36 @@ class ImmutableObjectStorageSpec
     ImmutableObjectStorage.run(storageSession, tranches)
   }
 
-  ignore should "be idempotent when retrieving using the same tranche id" in {}
+  it should "be idempotent when retrieving using the same tranche id" in forAll(
+    spokeGenerator,
+    seedGenerator,
+    oneLessThanNumberOfPartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, oneLessThanNumberOfParts) =>
+    val randomBehaviour = new Random(seed)
+
+    val numberOfParts = 1 + oneLessThanNumberOfParts
+
+    val originalParts = Vector.fill(numberOfParts) {
+      somethingReachableFrom(randomBehaviour)(spoke)
+    } :+ spoke
+
+    val tranches = new FakeTranches
+
+    val storageAndSamplingSession: Session[Unit] = for {
+      trancheIds <- originalParts.traverse(ImmutableObjectStorage.store)
+
+      originalPartsByTrancheId = (trancheIds zip originalParts).toMap
+
+      sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
+
+      retrievedPartTakeOne <- ImmutableObjectStorage.retrieve[Part](
+        sampleTrancheId)
+      retrievedPartTakeTwo <- ImmutableObjectStorage.retrieve[Part](
+        sampleTrancheId)
+    } yield {
+      retrievedPartTakeTwo should be(retrievedPartTakeTwo)
+    }
+
+    ImmutableObjectStorage.run(storageAndSamplingSession, tranches)
+  }
 }
