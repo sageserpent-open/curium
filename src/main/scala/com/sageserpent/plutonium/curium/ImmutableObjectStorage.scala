@@ -4,11 +4,14 @@ import java.util.UUID
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
+import com.esotericsoftware.kryo.ReferenceResolver
+import com.esotericsoftware.kryo.util.MapReferenceResolver
 import com.sageserpent.plutonium.classFromType
-import com.twitter.chill.{KryoPool, ScalaKryoInstantiator}
+import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
 
+import scala.collection.mutable.{SortedMap => MutableSortedMap}
 import scala.reflect.runtime.universe.{Try => _, _}
-import scala.util.Try
+import scala.util.{DynamicVariable, Try}
 
 object ImmutableObjectStorage {
   type TrancheId = UUID
@@ -49,8 +52,39 @@ object ImmutableObjectStorage {
   def run(session: Session[Unit],
           tranches: Tranches): EitherThrowableOr[Unit] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
+      val retrievalSessionReferenceResolver
+        : DynamicVariable[Option[ReferenceResolver]] = new DynamicVariable(None)
+
+      object referenceResolver extends MapReferenceResolver {
+        override def getReadObject(
+            `type`: Class[_],
+            objectReferenceId: ObjectReferenceId): AnyRef =
+          retrievalSessionReferenceResolver.value.get
+            .getReadObject(`type`, objectReferenceId)
+
+        override def nextReadId(`type`: Class[_]): ObjectReferenceId =
+          retrievalSessionReferenceResolver.value.get.nextReadId(`type`)
+      }
+
+      // TODO - cutover to using weak references, perhaps via 'WeakCache'?
+      val refererenceResolversByTrancheId
+        : MutableSortedMap[TrancheId, ReferenceResolver] =
+        MutableSortedMap.empty
+
+      val kryoInstantiator: ScalaKryoInstantiator = new ScalaKryoInstantiator {
+        override def newKryo(): KryoBase = {
+          val result = super.newKryo()
+
+          result.setReferenceResolver(referenceResolver)
+
+          result.setAutoReset(false)
+
+          result
+        }
+      }
+
       val kryoPool: KryoPool =
-        ScalaKryoInstantiator.defaultPool
+        KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
 
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
@@ -66,14 +100,33 @@ object ImmutableObjectStorage {
             for {
               tranche <- tranches.retrieveTranche(trancheId)
               result <- Try {
+                object trancheSpecificReferenceResolver
+                    extends MapReferenceResolver {
+                  override def getReadObject(
+                      clazz: Class[_],
+                      objectReferenceId: ObjectReferenceId): AnyRef =
+                    if (objectReferenceId >= tranche.minimumObjectReferenceId)
+                      super.getReadObject(clazz, objectReferenceId)
+                    else
+                      proxyFor(objectReferenceId, clazz)
+                }
+
                 val deserialized =
-                  kryoPool.fromBytes(tranche.serializedRepresentation)
+                  retrievalSessionReferenceResolver.withValue(
+                    Some(trancheSpecificReferenceResolver)) {
+                    kryoPool.fromBytes(tranche.serializedRepresentation)
+                  }
+
+                refererenceResolversByTrancheId += trancheId -> trancheSpecificReferenceResolver
                 classFromType(retrieve.capturedTypeTag.tpe)
                   .cast(deserialized)
                   .asInstanceOf[X]
               }.toEither
             } yield result
         }
+
+      private def proxyFor(objectReferenceId: ObjectReferenceId,
+                           clazz: Class[_]): AnyRef = ???
     }
 
     session.foldMap(sessionInterpreter)
