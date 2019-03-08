@@ -82,10 +82,11 @@ object ImmutableObjectStorage {
       val kryoInstantiator: ScalaKryoInstantiator = new ScalaKryoInstantiator {
         override def newKryo(): KryoBase = {
           val result = super.newKryo()
-
+          /*
           result.setReferenceResolver(referenceResolver)
 
           result.setAutoReset(false)
+		      */
 
           result
         }
