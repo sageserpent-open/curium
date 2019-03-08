@@ -49,8 +49,9 @@ object ImmutableObjectStorage {
   def retrieve[X: TypeTag](id: TrancheId): Session[X] =
     FreeT.liftF[Operation, EitherThrowableOr, X](Retrieve(id))
 
-  def runStorage(session: Session[Vector[TrancheId]])
-    : Tranches => EitherThrowableOr[Vector[TrancheId]] = run(session) _
+  def runStorage(
+      session: Session[TrancheId]): Tranches => EitherThrowableOr[TrancheId] =
+    run(session) _
 
   def runRetrieval(
       session: Session[Unit]): Tranches => EitherThrowableOr[Unit] =

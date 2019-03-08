@@ -75,6 +75,15 @@ object ImmutableObjectStorageSpec {
       : scala.Either[scala.Throwable, TrancheId] =
       ???
   }
+
+  def storeViaMultipleSessions(parts: Vector[Part],
+                               tranches: Tranches): Vector[TrancheId] =
+    parts
+      .map(ImmutableObjectStorage.store)
+      .map(ImmutableObjectStorage.runStorage(_)(tranches)) // NASTY HACK: 'tranches' is mutated here.
+      .collect {
+        case Right(trancheId) => trancheId
+      }
 }
 
 class ImmutableObjectStorageSpec
@@ -98,11 +107,7 @@ class ImmutableObjectStorageSpec
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
-    val storageSession: Session[Vector[TrancheId]] =
-      originalParts.traverse(ImmutableObjectStorage.store)
-
-    val Right(trancheIds) =
-      ImmutableObjectStorage.runStorage(storageSession)(tranches)
+    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
 
     trancheIds should contain theSameElementsAs trancheIds.toSet
 
@@ -122,11 +127,7 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val storageSession: Session[Vector[TrancheId]] =
-      originalParts.traverse(ImmutableObjectStorage.store)
-
-    val Right(trancheIds) =
-      ImmutableObjectStorage.runStorage(storageSession)(tranches)
+    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
 
     val forwardPermutation: Map[Int, Int] = randomBehaviour
       .shuffle(Vector.tabulate(trancheIds.size)(identity))
@@ -156,7 +157,8 @@ class ImmutableObjectStorageSpec
             retrievedPart should not be theSameInstanceAs(originalPart)))
       }
 
-    ImmutableObjectStorage.runRetrieval(retrievalSession)(tranches)
+    ImmutableObjectStorage.runRetrieval(retrievalSession)(tranches) shouldBe a[
+      Right[_, _]]
   }
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
@@ -174,11 +176,7 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val storageSession: Session[Vector[TrancheId]] =
-      originalParts.traverse(ImmutableObjectStorage.store)
-
-    val Right(trancheIds) =
-      ImmutableObjectStorage.runStorage(storageSession)(tranches)
+    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
 
     val originalPartsByTrancheId = (trancheIds zip originalParts).toMap
 
@@ -210,11 +208,7 @@ class ImmutableObjectStorageSpec
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
-    val storageSession: Session[Vector[TrancheId]] =
-      originalParts.traverse(ImmutableObjectStorage.store)
-
-    val Right(trancheIds) =
-      ImmutableObjectStorage.runStorage(storageSession)(tranches)
+    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
 
     assert(
       originalParts.size == tranches.tranchesById.size && originalParts.size == trancheIds.size)
@@ -256,11 +250,7 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val storageSession: Session[Vector[TrancheId]] =
-      originalParts.traverse(ImmutableObjectStorage.store)
-
-    val Right(trancheIds) =
-      ImmutableObjectStorage.runStorage(storageSession)(tranches)
+    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
 
     assert(
       originalParts.size == tranches.tranchesById.size && originalParts.size == trancheIds.size)
@@ -295,11 +285,7 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val storageSession: Session[Vector[TrancheId]] =
-      (alien +: originalParts).traverse(ImmutableObjectStorage.store)
-
-    val Right(trancheIds) =
-      ImmutableObjectStorage.runStorage(storageSession)(tranches)
+    val trancheIds = storeViaMultipleSessions(alien +: originalParts, tranches)
 
     assert(
       1 + originalParts.size == tranches.tranchesById.size && 1 + originalParts.size == trancheIds.size)
@@ -338,10 +324,10 @@ class ImmutableObjectStorageSpec
     val isolatedSpokeTranche = {
       val isolatedSpokeTranches = new FakeTranches
 
-      val isolatedSpokeStorageSession: Session[Vector[TrancheId]] =
-        Vector(ImmutableObjectStorage.store(spoke)).sequence
+      val isolatedSpokeStorageSession: Session[TrancheId] =
+        ImmutableObjectStorage.store(spoke)
 
-      val Right(Vector(isolatedTrancheId)) =
+      val Right(isolatedTrancheId) =
         ImmutableObjectStorage.runStorage(isolatedSpokeStorageSession)(
           isolatedSpokeTranches)
 
@@ -350,11 +336,7 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val storageSession: Session[Vector[TrancheId]] =
-      originalParts.traverse(ImmutableObjectStorage.store)
-
-    val Right(trancheIds) =
-      ImmutableObjectStorage.runStorage(storageSession)(tranches)
+    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
 
     val spokeTrancheId = trancheIds.last
 
@@ -378,11 +360,7 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val storageSession: Session[Vector[TrancheId]] =
-      originalParts.traverse(ImmutableObjectStorage.store)
-
-    val Right(trancheIds) =
-      ImmutableObjectStorage.runStorage(storageSession)(tranches)
+    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
 
     val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
 
@@ -395,6 +373,7 @@ class ImmutableObjectStorageSpec
       retrievedPartTakeTwo should be(retrievedPartTakeTwo)
     }
 
-    ImmutableObjectStorage.runRetrieval(samplingSession)(tranches)
+    ImmutableObjectStorage.runRetrieval(samplingSession)(tranches) shouldBe a[
+      Right[_, _]]
   }
 }
