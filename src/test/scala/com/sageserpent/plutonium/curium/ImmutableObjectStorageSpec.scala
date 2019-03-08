@@ -101,7 +101,8 @@ class ImmutableObjectStorageSpec
     val storageSession: Session[Vector[TrancheId]] =
       originalParts.traverse(ImmutableObjectStorage.store)
 
-    val Right(trancheIds) = ImmutableObjectStorage.run(storageSession, tranches)
+    val Right(trancheIds) =
+      ImmutableObjectStorage.runStorage(storageSession)(tranches)
 
     trancheIds should contain theSameElementsAs trancheIds.toSet
 
@@ -124,7 +125,8 @@ class ImmutableObjectStorageSpec
     val storageSession: Session[Vector[TrancheId]] =
       originalParts.traverse(ImmutableObjectStorage.store)
 
-    val Right(trancheIds) = ImmutableObjectStorage.run(storageSession, tranches)
+    val Right(trancheIds) =
+      ImmutableObjectStorage.runStorage(storageSession)(tranches)
 
     val forwardPermutation: Map[Int, Int] = randomBehaviour
       .shuffle(Vector.tabulate(trancheIds.size)(identity))
@@ -154,7 +156,7 @@ class ImmutableObjectStorageSpec
             retrievedPart should not be theSameInstanceAs(originalPart)))
       }
 
-    ImmutableObjectStorage.run(retrievalSession, tranches)
+    ImmutableObjectStorage.runRetrieval(retrievalSession)(tranches)
   }
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
@@ -175,7 +177,8 @@ class ImmutableObjectStorageSpec
     val storageSession: Session[Vector[TrancheId]] =
       originalParts.traverse(ImmutableObjectStorage.store)
 
-    val Right(trancheIds) = ImmutableObjectStorage.run(storageSession, tranches)
+    val Right(trancheIds) =
+      ImmutableObjectStorage.runStorage(storageSession)(tranches)
 
     val originalPartsByTrancheId = (trancheIds zip originalParts).toMap
 
@@ -188,7 +191,8 @@ class ImmutableObjectStorageSpec
       }
     } yield ()
 
-    ImmutableObjectStorage.run(samplingSession, tranches) shouldBe a[Left[_, _]]
+    ImmutableObjectStorage.runRetrieval(samplingSession)(tranches) shouldBe a[
+      Left[_, _]]
   }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
@@ -209,7 +213,8 @@ class ImmutableObjectStorageSpec
     val storageSession: Session[Vector[TrancheId]] =
       originalParts.traverse(ImmutableObjectStorage.store)
 
-    val Right(trancheIds) = ImmutableObjectStorage.run(storageSession, tranches)
+    val Right(trancheIds) =
+      ImmutableObjectStorage.runStorage(storageSession)(tranches)
 
     assert(
       originalParts.size == tranches.tranchesById.size && originalParts.size == trancheIds.size)
@@ -232,8 +237,8 @@ class ImmutableObjectStorageSpec
       _ <- ImmutableObjectStorage.retrieve[Spoke](spokeTrancheId)
     } yield ()
 
-    ImmutableObjectStorage.run(samplingSessionWithCorruptedTranche, tranches) shouldBe a[
-      Left[_, _]]
+    ImmutableObjectStorage.runRetrieval(samplingSessionWithCorruptedTranche)(
+      tranches) shouldBe a[Left[_, _]]
   }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
@@ -254,7 +259,8 @@ class ImmutableObjectStorageSpec
     val storageSession: Session[Vector[TrancheId]] =
       originalParts.traverse(ImmutableObjectStorage.store)
 
-    val Right(trancheIds) = ImmutableObjectStorage.run(storageSession, tranches)
+    val Right(trancheIds) =
+      ImmutableObjectStorage.runStorage(storageSession)(tranches)
 
     assert(
       originalParts.size == tranches.tranchesById.size && originalParts.size == trancheIds.size)
@@ -270,8 +276,8 @@ class ImmutableObjectStorageSpec
       _ <- ImmutableObjectStorage.retrieve[Spoke](spokeTrancheId)
     } yield ()
 
-    ImmutableObjectStorage.run(samplingSessionWithMissingTranche, tranches) shouldBe a[
-      Left[_, _]]
+    ImmutableObjectStorage.runRetrieval(samplingSessionWithMissingTranche)(
+      tranches) shouldBe a[Left[_, _]]
   }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
@@ -292,7 +298,8 @@ class ImmutableObjectStorageSpec
     val storageSession: Session[Vector[TrancheId]] =
       (alien +: originalParts).traverse(ImmutableObjectStorage.store)
 
-    val Right(trancheIds) = ImmutableObjectStorage.run(storageSession, tranches)
+    val Right(trancheIds) =
+      ImmutableObjectStorage.runStorage(storageSession)(tranches)
 
     assert(
       1 + originalParts.size == tranches.tranchesById.size && 1 + originalParts.size == trancheIds.size)
@@ -312,8 +319,9 @@ class ImmutableObjectStorageSpec
 
     } yield ()
 
-    ImmutableObjectStorage.run(samplingSessionWithTrancheForIncompatibleType,
-                               tranches) shouldBe a[Left[_, _]]
+    ImmutableObjectStorage.runRetrieval(
+      samplingSessionWithTrancheForIncompatibleType)(tranches) shouldBe a[
+      Left[_, _]]
   }
 
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in forAll(
@@ -330,12 +338,12 @@ class ImmutableObjectStorageSpec
     val isolatedSpokeTranche = {
       val isolatedSpokeTranches = new FakeTranches
 
-      val isolatedSpokeStorageSession: Session[TrancheId] =
-        ImmutableObjectStorage.store(spoke)
+      val isolatedSpokeStorageSession: Session[Vector[TrancheId]] =
+        Vector(ImmutableObjectStorage.store(spoke)).sequence
 
-      val Right(isolatedTrancheId) =
-        ImmutableObjectStorage.run(isolatedSpokeStorageSession,
-                                   isolatedSpokeTranches)
+      val Right(Vector(isolatedTrancheId)) =
+        ImmutableObjectStorage.runStorage(isolatedSpokeStorageSession)(
+          isolatedSpokeTranches)
 
       isolatedSpokeTranches.tranchesById(isolatedTrancheId)
     }
@@ -345,7 +353,8 @@ class ImmutableObjectStorageSpec
     val storageSession: Session[Vector[TrancheId]] =
       originalParts.traverse(ImmutableObjectStorage.store)
 
-    val Right(trancheIds) = ImmutableObjectStorage.run(storageSession, tranches)
+    val Right(trancheIds) =
+      ImmutableObjectStorage.runStorage(storageSession)(tranches)
 
     val spokeTrancheId = trancheIds.last
 
@@ -372,7 +381,8 @@ class ImmutableObjectStorageSpec
     val storageSession: Session[Vector[TrancheId]] =
       originalParts.traverse(ImmutableObjectStorage.store)
 
-    val Right(trancheIds) = ImmutableObjectStorage.run(storageSession, tranches)
+    val Right(trancheIds) =
+      ImmutableObjectStorage.runStorage(storageSession)(tranches)
 
     val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
 
@@ -385,6 +395,6 @@ class ImmutableObjectStorageSpec
       retrievedPartTakeTwo should be(retrievedPartTakeTwo)
     }
 
-    ImmutableObjectStorage.run(samplingSession, tranches)
+    ImmutableObjectStorage.runRetrieval(samplingSession)(tranches)
   }
 }
