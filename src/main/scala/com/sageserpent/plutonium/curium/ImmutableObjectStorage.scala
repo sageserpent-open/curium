@@ -24,9 +24,29 @@ object ImmutableObjectStorage {
   type EitherThrowableOr[X] = Either[Throwable, X]
 
   trait Tranches {
+    // TODO: either move 'createTrancheInStorage' into 'ImmutableObjectStorage', making tranche ids the responsibility of said class,
+    //  or go the other way and delegate the creation of the tranche id to the implementing subclass, so that say, a database backend
+    // can automatically generate the tranche ids as primary keys. The current state of affairs works, but seems to be sitting on the fence
+    // regarding tranche id responsibility.
+
     def createTrancheInStorage(serializedRepresentation: Array[Byte],
                                objectReferenceIds: Seq[ObjectReferenceId])
-      : EitherThrowableOr[TrancheId]
+      : EitherThrowableOr[TrancheId] = {
+      val id = UUID.randomUUID()
+
+      val tranche =
+        TrancheOfData(serializedRepresentation, objectReferenceIds.min)
+      for {
+        _ <- storeTrancheAndAssociatedObjectReferenceIds(id,
+                                                         tranche,
+                                                         objectReferenceIds)
+      } yield id
+    }
+
+    protected def storeTrancheAndAssociatedObjectReferenceIds(
+        trancheId: TrancheId,
+        tranche: TrancheOfData,
+        objectReferenceIds: Seq[ObjectReferenceId]): EitherThrowableOr[Unit]
 
     def retrieveTranche(id: TrancheId): EitherThrowableOr[TrancheOfData]
     def retrieveTrancheId(
@@ -102,8 +122,7 @@ object ImmutableObjectStorage {
               kryoPool.toBytesWithClass(immutableObject)
 
             tranches
-              .createTrancheInStorage(serializedRepresentation,
-                                      Seq.empty /* TODO */ )
+              .createTrancheInStorage(serializedRepresentation, Seq(-3463567))
           }
           case retrieve @ Retrieve(trancheId) =>
             for {

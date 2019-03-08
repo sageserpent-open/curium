@@ -1,7 +1,5 @@
 package com.sageserpent.plutonium.curium
 
-import java.util.UUID
-
 import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage._
@@ -56,16 +54,12 @@ object ImmutableObjectStorageSpec {
   class FakeTranches extends Tranches {
     val tranchesById: MutableMap[TrancheId, TrancheOfData] = MutableMap.empty
 
-    override def createTrancheInStorage(
-        serializedRepresentation: Array[Byte],
-        objectReferenceIds: scala.Seq[ObjectReferenceId])
-      : scala.Either[scala.Throwable, TrancheId] = {
+    override protected def storeTrancheAndAssociatedObjectReferenceIds(
+        trancheId: TrancheId,
+        tranche: TrancheOfData,
+        objectReferenceIds: Seq[ObjectReferenceId]): EitherThrowableOr[Unit] = {
       Try {
-        val id = UUID.randomUUID()
-
-        tranchesById(id) =
-          TrancheOfData(serializedRepresentation, -1 /*BOGUS PLACEHOLDER*/ )
-        id
+        tranchesById(trancheId) = tranche
       }.toEither
     }
     override def retrieveTranche(
