@@ -72,12 +72,11 @@ object ImmutableObjectStorageSpec {
 
   def storeViaMultipleSessions(parts: Vector[Part],
                                tranches: Tranches): Vector[TrancheId] =
-    parts
-      .map(ImmutableObjectStorage.store)
-      .map(ImmutableObjectStorage.runStorage(_)(tranches)) // NASTY HACK: 'tranches' is mutated here.
-      .collect {
-        case Right(trancheId) => trancheId
-      }
+    ImmutableObjectStorage
+      .runToYieldTrancheIds(parts.map(ImmutableObjectStorage.store).sequence)(
+        tranches)
+      .right
+      .get
 }
 
 class ImmutableObjectStorageSpec
@@ -151,7 +150,7 @@ class ImmutableObjectStorageSpec
             retrievedPart should not be theSameInstanceAs(originalPart)))
       }
 
-    ImmutableObjectStorage.runRetrieval(retrievalSession)(tranches) shouldBe a[
+    ImmutableObjectStorage.runForEffectsOnly(retrievalSession)(tranches) shouldBe a[
       Right[_, _]]
   }
 
@@ -183,7 +182,7 @@ class ImmutableObjectStorageSpec
       }
     } yield ()
 
-    ImmutableObjectStorage.runRetrieval(samplingSession)(tranches) shouldBe a[
+    ImmutableObjectStorage.runForEffectsOnly(samplingSession)(tranches) shouldBe a[
       Left[_, _]]
   }
 
@@ -225,8 +224,8 @@ class ImmutableObjectStorageSpec
       _ <- ImmutableObjectStorage.retrieve[Spoke](spokeTrancheId)
     } yield ()
 
-    ImmutableObjectStorage.runRetrieval(samplingSessionWithCorruptedTranche)(
-      tranches) shouldBe a[Left[_, _]]
+    ImmutableObjectStorage.runForEffectsOnly(
+      samplingSessionWithCorruptedTranche)(tranches) shouldBe a[Left[_, _]]
   }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
@@ -260,7 +259,7 @@ class ImmutableObjectStorageSpec
       _ <- ImmutableObjectStorage.retrieve[Spoke](spokeTrancheId)
     } yield ()
 
-    ImmutableObjectStorage.runRetrieval(samplingSessionWithMissingTranche)(
+    ImmutableObjectStorage.runForEffectsOnly(samplingSessionWithMissingTranche)(
       tranches) shouldBe a[Left[_, _]]
   }
 
@@ -299,7 +298,7 @@ class ImmutableObjectStorageSpec
 
     } yield ()
 
-    ImmutableObjectStorage.runRetrieval(
+    ImmutableObjectStorage.runForEffectsOnly(
       samplingSessionWithTrancheForIncompatibleType)(tranches) shouldBe a[
       Left[_, _]]
   }
@@ -322,7 +321,7 @@ class ImmutableObjectStorageSpec
         ImmutableObjectStorage.store(spoke)
 
       val Right(isolatedTrancheId) =
-        ImmutableObjectStorage.runStorage(isolatedSpokeStorageSession)(
+        ImmutableObjectStorage.runToYieldTrancheId(isolatedSpokeStorageSession)(
           isolatedSpokeTranches)
 
       isolatedSpokeTranches.tranchesById(isolatedTrancheId)
@@ -367,7 +366,7 @@ class ImmutableObjectStorageSpec
       retrievedPartTakeTwo should be(retrievedPartTakeTwo)
     }
 
-    ImmutableObjectStorage.runRetrieval(samplingSession)(tranches) shouldBe a[
+    ImmutableObjectStorage.runForEffectsOnly(samplingSession)(tranches) shouldBe a[
       Right[_, _]]
   }
 }
