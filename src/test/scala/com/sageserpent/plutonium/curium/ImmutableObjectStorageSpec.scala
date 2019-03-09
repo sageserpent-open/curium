@@ -71,12 +71,28 @@ object ImmutableObjectStorageSpec {
   }
 
   def storeViaMultipleSessions(parts: Vector[Part],
-                               tranches: Tranches): Vector[TrancheId] =
-    ImmutableObjectStorage
-      .runToYieldTrancheIds(parts.map(ImmutableObjectStorage.store).sequence)(
-        tranches)
-      .right
-      .get
+                               tranches: Tranches,
+                               randomBehaviour: Random): Vector[TrancheId] = {
+    var trancheIdsSoFar: Vector[TrancheId] = Vector.empty
+
+    val partsInChunks: Stream[Vector[Part]] =
+      randomBehaviour.splitIntoNonEmptyPieces(parts)
+
+    for (chunk <- partsInChunks) {
+      val retrievalAndStorageSession: Session[Vector[TrancheId]] = for {
+        _          <- trancheIdsSoFar.traverse(ImmutableObjectStorage.retrieve[Part])
+        trancheIds <- chunk.traverse(ImmutableObjectStorage.store)
+      } yield trancheIds
+
+      val Right(trancheIdsForChunk) =
+        ImmutableObjectStorage
+          .runToYieldTrancheIds(retrievalAndStorageSession)(tranches)
+
+      trancheIdsSoFar ++= trancheIdsForChunk
+    }
+
+    trancheIdsSoFar
+  }
 }
 
 class ImmutableObjectStorageSpec
@@ -100,7 +116,8 @@ class ImmutableObjectStorageSpec
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
-    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
+    val trancheIds =
+      storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
 
     trancheIds should contain theSameElementsAs trancheIds.toSet
 
@@ -120,7 +137,8 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
+    val trancheIds =
+      storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
 
     val forwardPermutation: Map[Int, Int] = randomBehaviour
       .shuffle(Vector.tabulate(trancheIds.size)(identity))
@@ -167,7 +185,8 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
+    val trancheIds =
+      storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
 
     val originalPartsByTrancheId = (trancheIds zip originalParts).toMap
 
@@ -197,7 +216,8 @@ class ImmutableObjectStorageSpec
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
-    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
+    val trancheIds =
+      storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
 
     assert(
       originalParts.size == tranches.tranchesById.size && originalParts.size == trancheIds.size)
@@ -237,7 +257,8 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
+    val trancheIds =
+      storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
 
     assert(
       originalParts.size == tranches.tranchesById.size && originalParts.size == trancheIds.size)
@@ -270,7 +291,9 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val trancheIds = storeViaMultipleSessions(alien +: originalParts, tranches)
+    val trancheIds = storeViaMultipleSessions(alien +: originalParts,
+                                              tranches,
+                                              randomBehaviour)
 
     assert(
       1 + originalParts.size == tranches.tranchesById.size && 1 + originalParts.size == trancheIds.size)
@@ -323,7 +346,8 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
+    val trancheIds =
+      storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
 
     val spokeTrancheId = trancheIds.last
 
@@ -345,7 +369,8 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val trancheIds = storeViaMultipleSessions(originalParts, tranches)
+    val trancheIds =
+      storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
 
     val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
 
