@@ -32,7 +32,7 @@ object ImmutableObjectStorageSpec {
 
   val seedGenerator: Gen[Int] = Arbitrary.arbInt.arbitrary
 
-  val numberOfPartsGenerator: Gen[Int] = Gen.posNum[Int] map (_ - 1)
+  val numberOfReachablePartsGenerator: Gen[Int] = Gen.posNum[Int] map (_ - 1)
 
   private def somethingReachableFrom(randomBehaviour: Random)(
       part: Part): Part = {
@@ -88,15 +88,15 @@ class ImmutableObjectStorageSpec
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
     spokeGenerator,
     seedGenerator,
-    numberOfPartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfParts) =>
+    numberOfReachablePartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
 
     // NOTE: there may indeed be duplicate parts - but we still expect
     // unique tranche ids when the same part is stored several times.
-    val originalParts = Vector.fill(numberOfParts) {
+    val originalParts = Vector.fill(numberOfReachableParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
@@ -110,11 +110,11 @@ class ImmutableObjectStorageSpec
   "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in forAll(
     spokeGenerator,
     seedGenerator,
-    numberOfPartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfParts) =>
+    numberOfReachablePartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(numberOfParts) {
+    val originalParts = Vector.fill(numberOfReachableParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
@@ -157,11 +157,11 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
     spokeGenerator,
     seedGenerator,
-    numberOfPartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfParts) =>
+    numberOfReachablePartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(numberOfParts) {
+    val originalParts = Vector.fill(numberOfReachableParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
@@ -187,13 +187,13 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
     spokeGenerator,
     seedGenerator,
-    numberOfPartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfParts) =>
+    numberOfReachablePartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
 
-    val originalParts = Vector.fill(numberOfParts) {
+    val originalParts = Vector.fill(numberOfReachableParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
@@ -227,11 +227,11 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
     spokeGenerator,
     seedGenerator,
-    numberOfPartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfParts) =>
+    numberOfReachablePartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(numberOfParts) {
+    val originalParts = Vector.fill(numberOfReachableParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
@@ -260,11 +260,11 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
     spokeGenerator,
     seedGenerator,
-    numberOfPartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfParts) =>
+    numberOfReachablePartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(numberOfParts) {
+    val originalParts = Vector.fill(numberOfReachableParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
@@ -298,11 +298,13 @@ class ImmutableObjectStorageSpec
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in forAll(
     spokeGenerator,
     seedGenerator,
-    numberOfPartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, twoLessThanNumberOfParts) =>
+    numberOfReachablePartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, oneLessThanNumberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(2 + twoLessThanNumberOfParts) {
+    val numberOfReachableParts = 1 + oneLessThanNumberOfReachableParts // Have to have at least one reachable part in addition to the spoke to force sharing of substructure.
+
+    val originalParts = Vector.fill(numberOfReachableParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
@@ -333,11 +335,11 @@ class ImmutableObjectStorageSpec
   it should "be idempotent when retrieving using the same tranche id" in forAll(
     spokeGenerator,
     seedGenerator,
-    numberOfPartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfParts) =>
+    numberOfReachablePartsGenerator,
+    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(numberOfParts) {
+    val originalParts = Vector.fill(numberOfReachableParts) {
       somethingReachableFrom(randomBehaviour)(spoke)
     } :+ spoke
 
