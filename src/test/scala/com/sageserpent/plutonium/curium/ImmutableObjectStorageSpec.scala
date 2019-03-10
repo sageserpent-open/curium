@@ -3,41 +3,44 @@ package com.sageserpent.plutonium.curium
 import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage._
-import org.scalacheck.ScalacheckShapeless._
-import org.scalacheck.{Arbitrary, Gen, ScalacheckShapeless}
+
+import org.scalacheck.{Arbitrary, Gen, ScalacheckShapeless, Shrink}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Inspectors, Matchers}
 
 import scala.collection.mutable.{Map => MutableMap}
+import scala.reflect.runtime.universe.TypeTag
 import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
   sealed trait Part {
     def subPart(randomBehaviour: Random): Part = this match {
-      case hub @ Hub(_, Some(parent)) =>
-        if (randomBehaviour.nextBoolean()) hub
-        else parent.subPart(randomBehaviour)
-      case hub @ Hub(_, None) => hub
-      case spoke @ Spoke(_, hub) =>
-        if (randomBehaviour.nextBoolean()) spoke
-        else hub.subPart(randomBehaviour)
+      case Leaf(_) =>
+        this
+      case Fork(left, _, right) =>
+        randomBehaviour.chooseAnyNumberFromOneTo(3) match {
+          case 1 => left.subPart(randomBehaviour)
+          case 2 => right.subPart(randomBehaviour)
+          case 3 => this
+        }
     }
+
+    def shareSubstructureWithOneOf(parts: Seq[Part]): Part = ???
   }
 
-  case class Hub(id: Int, parent: Option[Hub]) extends Part
+  case class Leaf(id: Int) extends Part
 
-  case class Spoke(id: Int, hub: Hub) extends Part
+  case class Fork(left: Part, id: Int, right: Part) extends Part
 
-  case object alien extends Part
+  case object alien
 
-  val _ = ScalacheckShapeless // HACK: prevent IntelliJ from removing the
-  // import, as it doesn't spot the implicit macro usage.
+  val rootGenerator: Gen[Fork] = {
+    import org.scalacheck.ScalacheckShapeless._
 
-  implicit val arbitraryName: Arbitrary[String] = Arbitrary(
-    Arbitrary.arbInt.arbitrary.map(_.toString))
+    val _ = ScalacheckShapeless // HACK: prevent IntelliJ from removing the
+    // import, as it doesn't spot the implicit macro usage.
 
-  val spokeGenerator: Gen[Spoke] = {
-    implicitly[Arbitrary[Spoke]].arbitrary
+    implicitly[Arbitrary[Fork]].arbitrary
   }
 
   val seedGenerator: Gen[Int] = Arbitrary.arbInt.arbitrary
@@ -65,17 +68,18 @@ object ImmutableObjectStorageSpec {
       ???
   }
 
-  def storeViaMultipleSessions(parts: Vector[Part],
-                               tranches: Tranches,
-                               randomBehaviour: Random): Vector[TrancheId] = {
+  def storeViaMultipleSessions[X: TypeTag](
+      things: Vector[X],
+      tranches: Tranches,
+      randomBehaviour: Random): Vector[TrancheId] = {
     var trancheIdsSoFar: Vector[TrancheId] = Vector.empty
 
-    val partsInChunks: Stream[Vector[Part]] =
-      randomBehaviour.splitIntoNonEmptyPieces(parts)
+    val thingsInChunks: Stream[Vector[X]] =
+      randomBehaviour.splitIntoNonEmptyPieces(things)
 
-    for (chunk <- partsInChunks) {
+    for (chunk <- thingsInChunks) {
       val retrievalAndStorageSession: Session[Vector[TrancheId]] = for {
-        _          <- trancheIdsSoFar.traverse(ImmutableObjectStorage.retrieve[Part])
+        _          <- trancheIdsSoFar.traverse(ImmutableObjectStorage.retrieve[X])
         trancheIds <- chunk.traverse(ImmutableObjectStorage.store)
       } yield trancheIds
 
@@ -96,11 +100,13 @@ class ImmutableObjectStorageSpec
     with GeneratorDrivenPropertyChecks {
   import ImmutableObjectStorageSpec._
 
+  implicit def shrinkAny[T]: Shrink[T] = Shrink(_ => Stream.empty)
+
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
-    spokeGenerator,
+    rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
+    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
@@ -108,8 +114,8 @@ class ImmutableObjectStorageSpec
     // NOTE: there may indeed be duplicate parts - but we still expect
     // unique tranche ids when the same part is stored several times.
     val originalParts = Vector.fill(numberOfReachableParts) {
-      spoke.subPart(randomBehaviour)
-    } :+ spoke
+      root.subPart(randomBehaviour)
+    } :+ root
 
     val trancheIds =
       storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
@@ -120,15 +126,15 @@ class ImmutableObjectStorageSpec
   }
 
   "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in forAll(
-    spokeGenerator,
+    rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
+    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      spoke.subPart(randomBehaviour)
-    } :+ spoke
+      root.subPart(randomBehaviour)
+    } :+ root
 
     val tranches = new FakeTranches
 
@@ -168,15 +174,15 @@ class ImmutableObjectStorageSpec
   }
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
-    spokeGenerator,
+    rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
+    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      spoke.subPart(randomBehaviour)
-    } :+ spoke
+      root.subPart(randomBehaviour)
+    } :+ root
 
     val tranches = new FakeTranches
 
@@ -189,8 +195,8 @@ class ImmutableObjectStorageSpec
 
     val samplingSession: Session[Unit] = for {
       bogus <- originalPartsByTrancheId(sampleTrancheId) match {
-        case _: Spoke => ImmutableObjectStorage.retrieve[Hub](sampleTrancheId)
-        case _: Hub   => ImmutableObjectStorage.retrieve[Spoke](sampleTrancheId)
+        case _: Fork => ImmutableObjectStorage.retrieve[Leaf](sampleTrancheId)
+        case _: Leaf => ImmutableObjectStorage.retrieve[Fork](sampleTrancheId)
       }
     } yield ()
 
@@ -199,17 +205,17 @@ class ImmutableObjectStorageSpec
   }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
-    spokeGenerator,
+    rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
+    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      spoke.subPart(randomBehaviour)
-    } :+ spoke
+      root.subPart(randomBehaviour)
+    } :+ root
 
     val trancheIds =
       storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
@@ -229,10 +235,10 @@ class ImmutableObjectStorageSpec
         firstHalf ++ "*** CORRUPTION! ***".map(_.toByte) ++ secondHalf)
     }
 
-    val spokeTrancheId = trancheIds.last
+    val rootTrancheId = trancheIds.last
 
     val samplingSessionWithCorruptedTranche: Session[Unit] = for {
-      _ <- ImmutableObjectStorage.retrieve[Spoke](spokeTrancheId)
+      _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
     } yield ()
 
     ImmutableObjectStorage.runForEffectsOnly(
@@ -240,15 +246,15 @@ class ImmutableObjectStorageSpec
   }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
-    spokeGenerator,
+    rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
+    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      spoke.subPart(randomBehaviour)
-    } :+ spoke
+      root.subPart(randomBehaviour)
+    } :+ root
 
     val tranches = new FakeTranches
 
@@ -263,10 +269,10 @@ class ImmutableObjectStorageSpec
 
     tranches.tranchesById -= idOfMissingTranche
 
-    val spokeTrancheId = trancheIds.last
+    val rootTrancheId = trancheIds.last
 
     val samplingSessionWithMissingTranche: Session[Unit] = for {
-      _ <- ImmutableObjectStorage.retrieve[Spoke](spokeTrancheId)
+      _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
     } yield ()
 
     ImmutableObjectStorage.runForEffectsOnly(samplingSessionWithMissingTranche)(
@@ -274,15 +280,15 @@ class ImmutableObjectStorageSpec
   }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
-    spokeGenerator,
+    rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
+    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      spoke.subPart(randomBehaviour)
-    } :+ spoke
+      root.subPart(randomBehaviour)
+    } :+ root
 
     val tranches = new FakeTranches
 
@@ -301,11 +307,10 @@ class ImmutableObjectStorageSpec
     tranches.tranchesById(idOfIncorrectlyTypedTranche) =
       tranches.tranchesById(alienTrancheId)
 
-    val spokeTrancheId = trancheIds.last
+    val rootTrancheId = trancheIds.last
 
     val samplingSessionWithTrancheForIncompatibleType: Session[Unit] = for {
-      _ <- ImmutableObjectStorage.retrieve[Spoke](spokeTrancheId)
-
+      _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
     } yield ()
 
     ImmutableObjectStorage.runForEffectsOnly(
@@ -314,23 +319,23 @@ class ImmutableObjectStorageSpec
   }
 
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in forAll(
-    spokeGenerator,
+    rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, oneLessThanNumberOfReachableParts) =>
+    MinSuccessful(20)) { (root, seed, oneLessThanNumberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val numberOfReachableParts = 1 + oneLessThanNumberOfReachableParts // Have to have at least one reachable part in addition to the spoke to force sharing of substructure.
+    val numberOfReachableParts = 1 + oneLessThanNumberOfReachableParts // Have to have at least one reachable part in addition to the root to force sharing of substructure.
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      spoke.subPart(randomBehaviour)
-    } :+ spoke
+      root.subPart(randomBehaviour)
+    } :+ root
 
     val isolatedSpokeTranche = {
       val isolatedSpokeTranches = new FakeTranches
 
       val isolatedSpokeStorageSession: Session[TrancheId] =
-        ImmutableObjectStorage.store(spoke)
+        ImmutableObjectStorage.store(root)
 
       val Right(isolatedTrancheId) =
         ImmutableObjectStorage.runToYieldTrancheId(isolatedSpokeStorageSession)(
@@ -344,23 +349,23 @@ class ImmutableObjectStorageSpec
     val trancheIds =
       storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
 
-    val spokeTrancheId = trancheIds.last
+    val rootTrancheId = trancheIds.last
 
-    val spokeTranche = tranches.tranchesById(spokeTrancheId)
+    val rootTranche = tranches.tranchesById(rootTrancheId)
 
-    spokeTranche.serializedRepresentation.length should be < isolatedSpokeTranche.serializedRepresentation.length
+    rootTranche.serializedRepresentation.length should be < isolatedSpokeTranche.serializedRepresentation.length
   }
 
   it should "be idempotent when retrieving using the same tranche id" in forAll(
-    spokeGenerator,
+    rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (spoke, seed, numberOfReachableParts) =>
+    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      spoke.subPart(randomBehaviour)
-    } :+ spoke
+      root.subPart(randomBehaviour)
+    } :+ root
 
     val tranches = new FakeTranches
 

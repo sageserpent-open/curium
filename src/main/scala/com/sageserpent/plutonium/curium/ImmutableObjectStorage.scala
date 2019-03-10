@@ -10,7 +10,7 @@ import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
 
 import scala.collection.mutable.{SortedMap => MutableSortedMap}
-import scala.reflect.runtime.universe.{Try => _, _}
+import scala.reflect.runtime.universe.TypeTag
 import scala.util.{DynamicVariable, Try}
 
 object ImmutableObjectStorage {
