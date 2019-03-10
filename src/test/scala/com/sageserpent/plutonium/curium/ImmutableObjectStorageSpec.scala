@@ -13,18 +13,14 @@ import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
   sealed trait Part {
-    def subPart(randomBehaviour: Random): Part = {
-      def subPartOf(part: Part): Part = part match {
-        case hub @ Hub(_, Some(parent)) =>
-          if (randomBehaviour.nextBoolean()) hub
-          else subPartOf(parent)
-        case hub @ Hub(_, None) => hub
-        case spoke @ Spoke(_, hub) =>
-          if (randomBehaviour.nextBoolean()) spoke
-          else subPartOf(hub)
-      }
-
-      subPartOf(this)
+    def subPart(randomBehaviour: Random): Part = this match {
+      case hub @ Hub(_, Some(parent)) =>
+        if (randomBehaviour.nextBoolean()) hub
+        else parent.subPart(randomBehaviour)
+      case hub @ Hub(_, None) => hub
+      case spoke @ Spoke(_, hub) =>
+        if (randomBehaviour.nextBoolean()) spoke
+        else hub.subPart(randomBehaviour)
     }
   }
 
