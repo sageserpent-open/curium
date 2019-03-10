@@ -3,13 +3,11 @@ package com.sageserpent.plutonium.curium
 import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage._
-
-import org.scalacheck.{Arbitrary, Gen, ScalacheckShapeless, Shrink}
+import org.scalacheck.{Arbitrary, Gen, Shrink}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Inspectors, Matchers}
 
 import scala.collection.mutable.{Map => MutableMap}
-import scala.reflect.runtime.universe.TypeTag
 import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
@@ -25,7 +23,16 @@ object ImmutableObjectStorageSpec {
         }
     }
 
-    def shareSubstructureWithOneOf(parts: Seq[Part]): Part = ???
+    def shareSubstructureWithOneOf(parts: Set[Part]): Part =
+      parts.find(_ == this).getOrElse {
+        this match {
+          case Leaf(_) => this
+          case Fork(left, id, right) =>
+            Fork(left.shareSubstructureWithOneOf(parts),
+                 id,
+                 right.shareSubstructureWithOneOf(parts))
+        }
+      }
   }
 
   case class Leaf(id: Int) extends Part
@@ -36,9 +43,6 @@ object ImmutableObjectStorageSpec {
 
   val rootGenerator: Gen[Fork] = {
     import org.scalacheck.ScalacheckShapeless._
-
-    val _ = ScalacheckShapeless // HACK: prevent IntelliJ from removing the
-    // import, as it doesn't spot the implicit macro usage.
 
     implicitly[Arbitrary[Fork]].arbitrary
   }
@@ -68,19 +72,23 @@ object ImmutableObjectStorageSpec {
       ???
   }
 
-  def storeViaMultipleSessions[X: TypeTag](
-      things: Vector[X],
-      tranches: Tranches,
-      randomBehaviour: Random): Vector[TrancheId] = {
+  def storeViaMultipleSessions(things: Vector[Part],
+                               tranches: Tranches,
+                               randomBehaviour: Random): Vector[TrancheId] = {
     var trancheIdsSoFar: Vector[TrancheId] = Vector.empty
 
-    val thingsInChunks: Stream[Vector[X]] =
+    val thingsInChunks: Stream[Vector[Part]] =
       randomBehaviour.splitIntoNonEmptyPieces(things)
 
     for (chunk <- thingsInChunks) {
       val retrievalAndStorageSession: Session[Vector[TrancheId]] = for {
-        _          <- trancheIdsSoFar.traverse(ImmutableObjectStorage.retrieve[X])
-        trancheIds <- chunk.traverse(ImmutableObjectStorage.store)
+        retrievedPartsToShareStructureWith <- trancheIdsSoFar.traverse(
+          ImmutableObjectStorage.retrieve[Part])
+        trancheIds <- chunk
+          .map(
+            _.shareSubstructureWithOneOf(
+              retrievedPartsToShareStructureWith.toSet))
+          .traverse(ImmutableObjectStorage.store)
       } yield trancheIds
 
       val Right(trancheIdsForChunk) =
@@ -292,14 +300,14 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val trancheIds = storeViaMultipleSessions(alien +: originalParts,
-                                              tranches,
-                                              randomBehaviour)
+    val Right(alienTrancheId) = ImmutableObjectStorage.runToYieldTrancheId(
+      ImmutableObjectStorage.store(alien))(tranches)
+
+    val nonAlienTrancheIds =
+      storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
 
     assert(
-      1 + originalParts.size == tranches.tranchesById.size && 1 + originalParts.size == trancheIds.size)
-
-    val (Vector(alienTrancheId), nonAlienTrancheIds) = trancheIds.splitAt(1)
+      1 + originalParts.size == tranches.tranchesById.size && originalParts.size == nonAlienTrancheIds.size)
 
     val idOfIncorrectlyTypedTranche =
       randomBehaviour.chooseOneOf(nonAlienTrancheIds)
@@ -307,7 +315,7 @@ class ImmutableObjectStorageSpec
     tranches.tranchesById(idOfIncorrectlyTypedTranche) =
       tranches.tranchesById(alienTrancheId)
 
-    val rootTrancheId = trancheIds.last
+    val rootTrancheId = nonAlienTrancheIds.last
 
     val samplingSessionWithTrancheForIncompatibleType: Session[Unit] = for {
       _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
