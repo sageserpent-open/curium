@@ -12,7 +12,21 @@ import scala.collection.mutable.{Map => MutableMap}
 import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
-  sealed trait Part
+  sealed trait Part {
+    def subPart(randomBehaviour: Random): Part = {
+      def subPartOf(part: Part): Part = part match {
+        case hub @ Hub(_, Some(parent)) =>
+          if (randomBehaviour.nextBoolean()) hub
+          else subPartOf(parent)
+        case hub @ Hub(_, None) => hub
+        case spoke @ Spoke(_, hub) =>
+          if (randomBehaviour.nextBoolean()) spoke
+          else subPartOf(hub)
+      }
+
+      subPartOf(this)
+    }
+  }
 
   case class Hub(id: Int, parent: Option[Hub]) extends Part
 
@@ -33,21 +47,6 @@ object ImmutableObjectStorageSpec {
   val seedGenerator: Gen[Int] = Arbitrary.arbInt.arbitrary
 
   val numberOfReachablePartsGenerator: Gen[Int] = Gen.posNum[Int] map (_ - 1)
-
-  private def somethingReachableFrom(randomBehaviour: Random)(
-      part: Part): Part = {
-    def somethingReachableFrom(part: Part): Part = part match {
-      case hub @ Hub(_, Some(parent)) =>
-        if (randomBehaviour.nextBoolean()) hub
-        else somethingReachableFrom(parent)
-      case hub @ Hub(_, None) => hub
-      case spoke @ Spoke(_, hub) =>
-        if (randomBehaviour.nextBoolean()) spoke
-        else somethingReachableFrom(hub)
-    }
-
-    somethingReachableFrom(part)
-  }
 
   import ImmutableObjectStorage._
 
@@ -113,7 +112,7 @@ class ImmutableObjectStorageSpec
     // NOTE: there may indeed be duplicate parts - but we still expect
     // unique tranche ids when the same part is stored several times.
     val originalParts = Vector.fill(numberOfReachableParts) {
-      somethingReachableFrom(randomBehaviour)(spoke)
+      spoke.subPart(randomBehaviour)
     } :+ spoke
 
     val trancheIds =
@@ -132,7 +131,7 @@ class ImmutableObjectStorageSpec
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      somethingReachableFrom(randomBehaviour)(spoke)
+      spoke.subPart(randomBehaviour)
     } :+ spoke
 
     val tranches = new FakeTranches
@@ -180,7 +179,7 @@ class ImmutableObjectStorageSpec
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      somethingReachableFrom(randomBehaviour)(spoke)
+      spoke.subPart(randomBehaviour)
     } :+ spoke
 
     val tranches = new FakeTranches
@@ -213,7 +212,7 @@ class ImmutableObjectStorageSpec
     val tranches = new FakeTranches
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      somethingReachableFrom(randomBehaviour)(spoke)
+      spoke.subPart(randomBehaviour)
     } :+ spoke
 
     val trancheIds =
@@ -252,7 +251,7 @@ class ImmutableObjectStorageSpec
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      somethingReachableFrom(randomBehaviour)(spoke)
+      spoke.subPart(randomBehaviour)
     } :+ spoke
 
     val tranches = new FakeTranches
@@ -286,7 +285,7 @@ class ImmutableObjectStorageSpec
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      somethingReachableFrom(randomBehaviour)(spoke)
+      spoke.subPart(randomBehaviour)
     } :+ spoke
 
     val tranches = new FakeTranches
@@ -328,7 +327,7 @@ class ImmutableObjectStorageSpec
     val numberOfReachableParts = 1 + oneLessThanNumberOfReachableParts // Have to have at least one reachable part in addition to the spoke to force sharing of substructure.
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      somethingReachableFrom(randomBehaviour)(spoke)
+      spoke.subPart(randomBehaviour)
     } :+ spoke
 
     val isolatedSpokeTranche = {
@@ -364,7 +363,7 @@ class ImmutableObjectStorageSpec
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
-      somethingReachableFrom(randomBehaviour)(spoke)
+      spoke.subPart(randomBehaviour)
     } :+ spoke
 
     val tranches = new FakeTranches
