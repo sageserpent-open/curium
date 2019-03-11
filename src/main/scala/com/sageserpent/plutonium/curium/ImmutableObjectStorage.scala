@@ -4,11 +4,12 @@ import java.util.UUID
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
-import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
 import com.esotericsoftware.kryo.util.MapReferenceResolver
+import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
 
+import scala.collection.immutable
 import scala.collection.mutable.{SortedMap => MutableSortedMap}
 import scala.reflect.runtime.universe.TypeTag
 import scala.util.{DynamicVariable, Try}
@@ -33,6 +34,9 @@ object ImmutableObjectStorage {
                                objectReferenceIdOffset: ObjectReferenceId,
                                objectReferenceIds: Seq[ObjectReferenceId])
       : EitherThrowableOr[TrancheId] = {
+      require(objectReferenceIds.nonEmpty)
+      require(objectReferenceIdOffset <= objectReferenceIds.min)
+
       val id = UUID.randomUUID()
 
       val tranche =
@@ -114,11 +118,65 @@ object ImmutableObjectStorage {
           sessionReferenceResolver.value.get
             .getReadObject(clazz, objectReferenceId)
         override def reset(): Unit = {
-          sessionReferenceResolver.value.get.reset()
+          // NOTE: prevent Kryo from resetting the underlying reference resolver as it will be
+          // cached and used to resolve inter-tranche object references once it has been fully built.
         }
         override def useReferences(clazz: Class[_]): Boolean =
           sessionReferenceResolver.value.get.useReferences(clazz)
 
+      }
+
+      class TrancheSpecificReferenceResolver(
+          objectReferenceIdOffset: ObjectReferenceId)
+          extends MapReferenceResolver {
+        // TODO: use 'objectReferenceIdOffsetForNewTranche'.
+        def writtenObjectReferenceIds: immutable.IndexedSeq[ObjectReferenceId] =
+          (0 until writtenObjects.size) map (objectReferenceIdOffset + _)
+
+        override def getWrittenId(immutableObject: Any): ObjectReferenceId =
+          // TODO - how are we going to find an inter-tranche object reference? If the idea is to assume that structure sharing
+          // is only possible for objects in the same session, will it enough to scan through the cached reference resolvers?
+          {
+            val resultFromSuperImplementation =
+              super.getWrittenId(immutableObject)
+            if (resultFromSuperImplementation != -1)
+              objectReferenceIdOffset + resultFromSuperImplementation
+            else resultFromSuperImplementation
+          }
+
+        override def addWrittenObject(immutableObject: Any): ObjectReferenceId =
+          objectReferenceIdOffset + super.addWrittenObject(immutableObject)
+
+        override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
+          objectReferenceIdOffset + super.nextReadId(clazz)
+        }
+
+        override def setReadObject(objectReferenceId: ObjectReferenceId,
+                                   immutableObject: Any): Unit = {
+          super.setReadObject(objectReferenceId - objectReferenceIdOffset,
+                              immutableObject)
+        }
+
+        override def getReadObject(
+            clazz: Class[_],
+            objectReferenceId: ObjectReferenceId): AnyRef =
+          if (objectReferenceId >= objectReferenceIdOffset)
+            super
+              .getReadObject(clazz, objectReferenceId - objectReferenceIdOffset)
+          else {
+            val Right(trancheIdForExternalObjectReference) =
+              tranches
+                .retrieveTrancheId(objectReferenceId) // TODO - what happens if the call results in a left-value? I think it will propagate up nicely, but this needs to be checked.
+            if (!refererenceResolversByTrancheId.contains(
+                  trancheIdForExternalObjectReference)) {
+              val _ =
+                thisSessionInterpreter(
+                  Retrieve(trancheIdForExternalObjectReference))
+            }
+
+            refererenceResolversByTrancheId(trancheIdForExternalObjectReference)
+              .getReadObject(clazz, objectReferenceId)
+          }
       }
 
       // TODO - cutover to using weak references, perhaps via 'WeakCache'?
@@ -132,7 +190,7 @@ object ImmutableObjectStorage {
 
           result.setReferenceResolver(referenceResolver)
 
-          result.setAutoReset(false)
+          result.setAutoReset(true) // Kryo should reset its *own* state (but not the reference resolvers') after a tranche has been stored and retrieved.
 
           result
         }
@@ -146,10 +204,8 @@ object ImmutableObjectStorage {
           case Store(immutableObject) =>
             for {
               objectReferenceIdOffsetForNewTranche <- tranches.objectReferenceIdOffsetForNewTranche
-              trancheSpecificReferenceResolver = new MapReferenceResolver {
-                // TODO: use 'objectReferenceIdOffsetForNewTranche'.
-                def objectReferenceIds = 0 until writtenObjects.size
-              }
+              trancheSpecificReferenceResolver = new TrancheSpecificReferenceResolver(
+                objectReferenceIdOffsetForNewTranche)
               trancheId <- {
                 val serializedRepresentation: Array[Byte] =
                   sessionReferenceResolver.withValue(
@@ -157,11 +213,14 @@ object ImmutableObjectStorage {
                     kryoPool.toBytesWithClass(immutableObject)
                   }
 
+                assert(
+                  trancheSpecificReferenceResolver.writtenObjectReferenceIds.nonEmpty)
+
                 tranches
                   .createTrancheInStorage(
                     serializedRepresentation,
                     objectReferenceIdOffsetForNewTranche,
-                    trancheSpecificReferenceResolver.objectReferenceIds)
+                    trancheSpecificReferenceResolver.writtenObjectReferenceIds)
               }
             } yield {
               refererenceResolversByTrancheId += trancheId -> trancheSpecificReferenceResolver
@@ -174,29 +233,7 @@ object ImmutableObjectStorage {
               result <- Try {
                 val objectReferenceIdOffset = tranche.objectReferenceIdOffset
                 val trancheSpecificReferenceResolver =
-                  new MapReferenceResolver {
-                    override def getReadObject(
-                        clazz: Class[_],
-                        objectReferenceId: ObjectReferenceId): AnyRef =
-                      if (objectReferenceId >= objectReferenceIdOffset)
-                        super.getReadObject(clazz, objectReferenceId)
-                      else {
-                        val Right(trancheIdForExternalObjectReference) =
-                          tranches
-                            .retrieveTrancheId(objectReferenceId) // TODO - what happens if the call results in a left-value? I think it will propagate up nicely, but this needs to be checked.
-                        if (!refererenceResolversByTrancheId.contains(
-                              trancheIdForExternalObjectReference)) {
-                          val _ =
-                            thisSessionInterpreter(
-                              Retrieve(trancheIdForExternalObjectReference))
-                        }
-
-                        refererenceResolversByTrancheId(
-                          trancheIdForExternalObjectReference).getReadObject(
-                          clazz,
-                          objectReferenceId)
-                      }
-                  }
+                  new TrancheSpecificReferenceResolver(objectReferenceIdOffset)
 
                 val deserialized =
                   sessionReferenceResolver.withValue(
@@ -210,6 +247,7 @@ object ImmutableObjectStorage {
                   .asInstanceOf[X]
               }.toEither
             } yield result
+
         }
     }
 

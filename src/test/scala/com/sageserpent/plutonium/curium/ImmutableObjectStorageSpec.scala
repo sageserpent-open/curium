@@ -57,16 +57,16 @@ object ImmutableObjectStorageSpec {
   } yield {
     val randomBehaviour = new Random(seed)
     val parts = (Vector.empty[Part] /: forkChoices) {
-      case (subParts, chooseFork) =>
-        val numberOfSubparts = subParts.size
-        subParts :+ (if (chooseFork) {
+      case (subparts, chooseFork) =>
+        val numberOfSubparts = subparts.size
+        subparts :+ (if (chooseFork) {
                        val indexOfLeftSubpart = randomBehaviour
                          .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
                        val indexOfRightSubpart = randomBehaviour
                          .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
-                       Fork(subParts(indexOfLeftSubpart),
+                       Fork(subparts(indexOfLeftSubpart),
                             numberOfSubparts,
-                            subParts(indexOfRightSubpart))
+                            subparts(indexOfRightSubpart))
                      } else Leaf(numberOfSubparts))
     }
 
@@ -104,9 +104,12 @@ object ImmutableObjectStorageSpec {
       : EitherThrowableOr[ObjectReferenceId] =
       Try {
         val maximumObjectReferenceId =
-          objectReferenceIdsToAssociatedTrancheIdMap.maxBy(_._1)._1
+          objectReferenceIdsToAssociatedTrancheIdMap.keys
+            .reduceOption((leftObjectReferenceId, rightObjectReferenceId) =>
+              leftObjectReferenceId max rightObjectReferenceId)
         val alignmentMultipleForObjectReferenceIdsInSeparateTranches = 100
-        (1 + maximumObjectReferenceId / alignmentMultipleForObjectReferenceIdsInSeparateTranches) * alignmentMultipleForObjectReferenceIdsInSeparateTranches
+        maximumObjectReferenceId.fold(0)(
+          1 + _ / alignmentMultipleForObjectReferenceIdsInSeparateTranches) * alignmentMultipleForObjectReferenceIdsInSeparateTranches
       }.toEither
   }
 
