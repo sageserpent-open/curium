@@ -3,7 +3,7 @@ package com.sageserpent.plutonium.curium
 import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage._
-import org.scalacheck.{Arbitrary, Gen, Shrink}
+import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Inspectors, Matchers}
 
@@ -41,13 +41,34 @@ object ImmutableObjectStorageSpec {
 
   case object alien
 
-  val rootGenerator: Gen[Fork] = {
-    import org.scalacheck.ScalacheckShapeless._
-
-    implicitly[Arbitrary[Fork]].arbitrary
-  }
-
   val seedGenerator: Gen[Int] = Arbitrary.arbInt.arbitrary
+
+  val rootGenerator: Gen[Fork] = for {
+    size <- Gen
+      .posNum[Int]
+      .map(1 + _) // Need at least two parts - a leaf and an overall fork.
+    seed <- seedGenerator
+    forkChoices <- Gen
+      .listOfN(size - 2, Arbitrary.arbBool.arbitrary)
+      .map(false +: _ :+ true) // Start with a leaf, end with a fork.
+  } yield {
+    val randomBehaviour = new Random(seed)
+    val parts = (Vector.empty[Part] /: forkChoices) {
+      case (subParts, chooseFork) =>
+        val numberOfSubparts = subParts.size
+        subParts :+ (if (chooseFork) {
+                       val indexOfLeftSubpart = randomBehaviour
+                         .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
+                       val indexOfRightSubpart = randomBehaviour
+                         .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
+                       Fork(subParts(indexOfLeftSubpart),
+                            numberOfSubparts,
+                            subParts(indexOfRightSubpart))
+                     } else Leaf(numberOfSubparts))
+    }
+
+    parts.last.asInstanceOf[Fork]
+  }
 
   val numberOfReachablePartsGenerator: Gen[Int] = Gen.posNum[Int] map (_ - 1)
 
@@ -107,8 +128,6 @@ class ImmutableObjectStorageSpec
     with Matchers
     with GeneratorDrivenPropertyChecks {
   import ImmutableObjectStorageSpec._
-
-  implicit def shrinkAny[T]: Shrink[T] = Shrink(_ => Stream.empty)
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
     rootGenerator,
