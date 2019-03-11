@@ -4,7 +4,7 @@ import java.util.UUID
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
-import com.esotericsoftware.kryo.ReferenceResolver
+import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
 import com.esotericsoftware.kryo.util.MapReferenceResolver
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
@@ -19,7 +19,7 @@ object ImmutableObjectStorage {
   type ObjectReferenceId = Int
 
   case class TrancheOfData(serializedRepresentation: Array[Byte],
-                           minimumObjectReferenceId: ObjectReferenceId)
+                           objectReferenceIdOffset: ObjectReferenceId)
 
   type EitherThrowableOr[X] = Either[Throwable, X]
 
@@ -30,12 +30,13 @@ object ImmutableObjectStorage {
     // regarding tranche id responsibility.
 
     def createTrancheInStorage(serializedRepresentation: Array[Byte],
+                               objectReferenceIdOffset: ObjectReferenceId,
                                objectReferenceIds: Seq[ObjectReferenceId])
       : EitherThrowableOr[TrancheId] = {
       val id = UUID.randomUUID()
 
       val tranche =
-        TrancheOfData(serializedRepresentation, objectReferenceIds.min)
+        TrancheOfData(serializedRepresentation, objectReferenceIdOffset)
       for {
         _ <- storeTrancheAndAssociatedObjectReferenceIds(id,
                                                          tranche,
@@ -87,18 +88,37 @@ object ImmutableObjectStorage {
   private def run[Result](session: Session[Result])(
       tranches: Tranches): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
-      val retrievalSessionReferenceResolver
-        : DynamicVariable[Option[ReferenceResolver]] = new DynamicVariable(None)
+      thisSessionInterpreter =>
+      val sessionReferenceResolver: DynamicVariable[Option[ReferenceResolver]] =
+        new DynamicVariable(None)
 
-      object referenceResolver extends MapReferenceResolver {
+      object referenceResolver extends ReferenceResolver {
+        override def setKryo(kryo: Kryo): Unit = {
+          sessionReferenceResolver.value.get.setKryo(kryo)
+        }
+
+        override def getWrittenId(anObject: Any): ObjectReferenceId =
+          sessionReferenceResolver.value.get.getWrittenId(anObject)
+        override def addWrittenObject(anObject: Any): ObjectReferenceId =
+          sessionReferenceResolver.value.get.addWrittenObject(anObject)
+        override def nextReadId(clazz: Class[_]): ObjectReferenceId =
+          sessionReferenceResolver.value.get.nextReadId(clazz)
+        override def setReadObject(objectReferenceId: ObjectReferenceId,
+                                   anObject: Any): Unit = {
+          sessionReferenceResolver.value.get
+            .setReadObject(objectReferenceId, anObject)
+        }
         override def getReadObject(
-            `type`: Class[_],
+            clazz: Class[_],
             objectReferenceId: ObjectReferenceId): AnyRef =
-          retrievalSessionReferenceResolver.value.get
-            .getReadObject(`type`, objectReferenceId)
+          sessionReferenceResolver.value.get
+            .getReadObject(clazz, objectReferenceId)
+        override def reset(): Unit = {
+          sessionReferenceResolver.value.get.reset()
+        }
+        override def useReferences(clazz: Class[_]): Boolean =
+          sessionReferenceResolver.value.get.useReferences(clazz)
 
-        override def nextReadId(`type`: Class[_]): ObjectReferenceId =
-          retrievalSessionReferenceResolver.value.get.nextReadId(`type`)
       }
 
       // TODO - cutover to using weak references, perhaps via 'WeakCache'?
@@ -109,11 +129,10 @@ object ImmutableObjectStorage {
       val kryoInstantiator: ScalaKryoInstantiator = new ScalaKryoInstantiator {
         override def newKryo(): KryoBase = {
           val result = super.newKryo()
-          /*
+
           result.setReferenceResolver(referenceResolver)
 
           result.setAutoReset(false)
-		      */
 
           result
         }
@@ -124,30 +143,63 @@ object ImmutableObjectStorage {
 
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
-          case Store(immutableObject) => {
-            val serializedRepresentation: Array[Byte] =
-              kryoPool.toBytesWithClass(immutableObject)
+          case Store(immutableObject) =>
+            for {
+              objectReferenceIdOffsetForNewTranche <- tranches.objectReferenceIdOffsetForNewTranche
+              trancheSpecificReferenceResolver = new MapReferenceResolver {
+                // TODO: use 'objectReferenceIdOffsetForNewTranche'.
+                def objectReferenceIds = 0 until writtenObjects.size
+              }
+              trancheId <- {
+                val serializedRepresentation: Array[Byte] =
+                  sessionReferenceResolver.withValue(
+                    Some(trancheSpecificReferenceResolver)) {
+                    kryoPool.toBytesWithClass(immutableObject)
+                  }
 
-            tranches
-              .createTrancheInStorage(serializedRepresentation, Seq(-3463567))
-          }
+                tranches
+                  .createTrancheInStorage(
+                    serializedRepresentation,
+                    objectReferenceIdOffsetForNewTranche,
+                    trancheSpecificReferenceResolver.objectReferenceIds)
+              }
+            } yield {
+              refererenceResolversByTrancheId += trancheId -> trancheSpecificReferenceResolver
+              trancheId
+            }
+
           case retrieve @ Retrieve(trancheId) =>
             for {
               tranche <- tranches.retrieveTranche(trancheId)
               result <- Try {
-                object trancheSpecificReferenceResolver
-                    extends MapReferenceResolver {
-                  override def getReadObject(
-                      clazz: Class[_],
-                      objectReferenceId: ObjectReferenceId): AnyRef =
-                    if (objectReferenceId >= tranche.minimumObjectReferenceId)
-                      super.getReadObject(clazz, objectReferenceId)
-                    else
-                      proxyFor(objectReferenceId, clazz)
-                }
+                val objectReferenceIdOffset = tranche.objectReferenceIdOffset
+                val trancheSpecificReferenceResolver =
+                  new MapReferenceResolver {
+                    override def getReadObject(
+                        clazz: Class[_],
+                        objectReferenceId: ObjectReferenceId): AnyRef =
+                      if (objectReferenceId >= objectReferenceIdOffset)
+                        super.getReadObject(clazz, objectReferenceId)
+                      else {
+                        val Right(trancheIdForExternalObjectReference) =
+                          tranches
+                            .retrieveTrancheId(objectReferenceId) // TODO - what happens if the call results in a left-value? I think it will propagate up nicely, but this needs to be checked.
+                        if (!refererenceResolversByTrancheId.contains(
+                              trancheIdForExternalObjectReference)) {
+                          val _ =
+                            thisSessionInterpreter(
+                              Retrieve(trancheIdForExternalObjectReference))
+                        }
+
+                        refererenceResolversByTrancheId(
+                          trancheIdForExternalObjectReference).getReadObject(
+                          clazz,
+                          objectReferenceId)
+                      }
+                  }
 
                 val deserialized =
-                  retrievalSessionReferenceResolver.withValue(
+                  sessionReferenceResolver.withValue(
                     Some(trancheSpecificReferenceResolver)) {
                     kryoPool.fromBytes(tranche.serializedRepresentation)
                   }
@@ -159,9 +211,6 @@ object ImmutableObjectStorage {
               }.toEither
             } yield result
         }
-
-      private def proxyFor(objectReferenceId: ObjectReferenceId,
-                           clazz: Class[_]): AnyRef = ???
     }
 
     session.foldMap(sessionInterpreter)
