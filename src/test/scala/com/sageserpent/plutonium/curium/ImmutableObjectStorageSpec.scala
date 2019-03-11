@@ -7,7 +7,10 @@ import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Inspectors, Matchers}
 
-import scala.collection.mutable.{Map => MutableMap}
+import scala.collection.mutable.{
+  Map => MutableMap,
+  SortedMap => MutableSortedMap
+}
 import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
@@ -76,6 +79,8 @@ object ImmutableObjectStorageSpec {
 
   class FakeTranches extends Tranches {
     val tranchesById: MutableMap[TrancheId, TrancheOfData] = MutableMap.empty
+    val objectReferenceIdsToAssociatedTrancheIdMap
+      : MutableSortedMap[ObjectReferenceId, TrancheId] = MutableSortedMap.empty
 
     override protected def storeTrancheAndAssociatedObjectReferenceIds(
         trancheId: TrancheId,
@@ -83,14 +88,26 @@ object ImmutableObjectStorageSpec {
         objectReferenceIds: Seq[ObjectReferenceId]): EitherThrowableOr[Unit] = {
       Try {
         tranchesById(trancheId) = tranche
+        for (objectReferenceId <- objectReferenceIds) {
+          objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) =
+            trancheId
+        }
       }.toEither
     }
     override def retrieveTranche(
-        id: TrancheId): scala.Either[scala.Throwable, TrancheOfData] =
-      Try { tranchesById(id) }.toEither
+        trancheId: TrancheId): scala.Either[scala.Throwable, TrancheOfData] =
+      Try { tranchesById(trancheId) }.toEither
     override def retrieveTrancheId(objectReferenceId: ObjectReferenceId)
       : scala.Either[scala.Throwable, TrancheId] =
-      ???
+      Try { objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) }.toEither
+    override def objectReferenceIdOffsetForNewTranche
+      : EitherThrowableOr[ObjectReferenceId] =
+      Try {
+        val maximumObjectReferenceId =
+          objectReferenceIdsToAssociatedTrancheIdMap.maxBy(_._1)._1
+        val alignmentMultipleForObjectReferenceIdsInSeparateTranches = 100
+        (1 + maximumObjectReferenceId / alignmentMultipleForObjectReferenceIdsInSeparateTranches) * alignmentMultipleForObjectReferenceIdsInSeparateTranches
+      }.toEither
   }
 
   def storeViaMultipleSessions(things: Vector[Part],
