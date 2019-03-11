@@ -133,7 +133,7 @@ class ImmutableObjectStorageSpec
     rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
@@ -156,7 +156,7 @@ class ImmutableObjectStorageSpec
     rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
@@ -204,7 +204,7 @@ class ImmutableObjectStorageSpec
     rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
@@ -235,7 +235,7 @@ class ImmutableObjectStorageSpec
     rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
@@ -276,7 +276,7 @@ class ImmutableObjectStorageSpec
     rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
@@ -310,7 +310,7 @@ class ImmutableObjectStorageSpec
     rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
@@ -349,7 +349,7 @@ class ImmutableObjectStorageSpec
     rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (root, seed, oneLessThanNumberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed, oneLessThanNumberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val numberOfReachableParts = 1 + oneLessThanNumberOfReachableParts // Have to have at least one reachable part in addition to the root to force sharing of substructure.
@@ -387,7 +387,7 @@ class ImmutableObjectStorageSpec
     rootGenerator,
     seedGenerator,
     numberOfReachablePartsGenerator,
-    MinSuccessful(20)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = Vector.fill(numberOfReachableParts) {
