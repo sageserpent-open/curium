@@ -34,8 +34,8 @@ object ImmutableObjectStorage {
                                objectReferenceIdOffset: ObjectReferenceId,
                                objectReferenceIds: Seq[ObjectReferenceId])
       : EitherThrowableOr[TrancheId] = {
-      require(objectReferenceIds.nonEmpty)
-      require(objectReferenceIdOffset <= objectReferenceIds.min)
+      require(
+        objectReferenceIds.isEmpty || objectReferenceIdOffset <= objectReferenceIds.min)
 
       val id = UUID.randomUUID()
 
@@ -101,10 +101,23 @@ object ImmutableObjectStorage {
           sessionReferenceResolver.value.get.setKryo(kryo)
         }
 
-        override def getWrittenId(anObject: Any): ObjectReferenceId =
-          sessionReferenceResolver.value.get.getWrittenId(anObject)
-        override def addWrittenObject(anObject: Any): ObjectReferenceId =
-          sessionReferenceResolver.value.get.addWrittenObject(anObject)
+        override def getWrittenId(immutableObject: Any): ObjectReferenceId = {
+          val resultFromExSessionReferenceResolver =
+            exSessionReferenceResolversByTrancheId.view
+              .map {
+                case (_, referenceResolver) =>
+                  val objectReferenceId =
+                    referenceResolver.getWrittenId(immutableObject)
+                  if (-1 != objectReferenceId) Some(objectReferenceId) else None
+              }
+              .collectFirst {
+                case Some(objectReferenceId) => objectReferenceId
+              }
+          resultFromExSessionReferenceResolver.getOrElse(
+            sessionReferenceResolver.value.get.getWrittenId(immutableObject))
+        }
+        override def addWrittenObject(immutableObject: Any): ObjectReferenceId =
+          sessionReferenceResolver.value.get.addWrittenObject(immutableObject)
         override def nextReadId(clazz: Class[_]): ObjectReferenceId =
           sessionReferenceResolver.value.get.nextReadId(clazz)
         override def setReadObject(objectReferenceId: ObjectReferenceId,
@@ -118,8 +131,9 @@ object ImmutableObjectStorage {
           sessionReferenceResolver.value.get
             .getReadObject(clazz, objectReferenceId)
         override def reset(): Unit = {
-          // NOTE: prevent Kryo from resetting the underlying reference resolver as it will be
-          // cached and used to resolve inter-tranche object references once it has been fully built.
+          // NOTE: prevent Kryo from resetting the session reference resolver as it will be
+          // cached and used to resolve inter-tranche object references once a storage or
+          // retrieval operation completes.
         }
         override def useReferences(clazz: Class[_]): Boolean =
           sessionReferenceResolver.value.get.useReferences(clazz)
@@ -129,20 +143,16 @@ object ImmutableObjectStorage {
       class TrancheSpecificReferenceResolver(
           objectReferenceIdOffset: ObjectReferenceId)
           extends MapReferenceResolver {
-        // TODO: use 'objectReferenceIdOffsetForNewTranche'.
         def writtenObjectReferenceIds: immutable.IndexedSeq[ObjectReferenceId] =
           (0 until writtenObjects.size) map (objectReferenceIdOffset + _)
 
-        override def getWrittenId(immutableObject: Any): ObjectReferenceId =
-          // TODO - how are we going to find an inter-tranche object reference? If the idea is to assume that structure sharing
-          // is only possible for objects in the same session, will it enough to scan through the cached reference resolvers?
-          {
-            val resultFromSuperImplementation =
-              super.getWrittenId(immutableObject)
-            if (resultFromSuperImplementation != -1)
-              objectReferenceIdOffset + resultFromSuperImplementation
-            else resultFromSuperImplementation
-          }
+        override def getWrittenId(immutableObject: Any): ObjectReferenceId = {
+          val resultFromSuperImplementation =
+            super.getWrittenId(immutableObject)
+          if (resultFromSuperImplementation != -1)
+            objectReferenceIdOffset + resultFromSuperImplementation
+          else resultFromSuperImplementation
+        }
 
         override def addWrittenObject(immutableObject: Any): ObjectReferenceId =
           objectReferenceIdOffset + super.addWrittenObject(immutableObject)
@@ -167,20 +177,21 @@ object ImmutableObjectStorage {
             val Right(trancheIdForExternalObjectReference) =
               tranches
                 .retrieveTrancheId(objectReferenceId) // TODO - what happens if the call results in a left-value? I think it will propagate up nicely, but this needs to be checked.
-            if (!refererenceResolversByTrancheId.contains(
+            if (!exSessionReferenceResolversByTrancheId.contains(
                   trancheIdForExternalObjectReference)) {
               val _ =
                 thisSessionInterpreter(
                   Retrieve(trancheIdForExternalObjectReference))
             }
 
-            refererenceResolversByTrancheId(trancheIdForExternalObjectReference)
+            exSessionReferenceResolversByTrancheId(
+              trancheIdForExternalObjectReference)
               .getReadObject(clazz, objectReferenceId)
           }
       }
 
       // TODO - cutover to using weak references, perhaps via 'WeakCache'?
-      val refererenceResolversByTrancheId
+      val exSessionReferenceResolversByTrancheId
         : MutableSortedMap[TrancheId, ReferenceResolver] =
         MutableSortedMap.empty
 
@@ -190,7 +201,7 @@ object ImmutableObjectStorage {
 
           result.setReferenceResolver(referenceResolver)
 
-          result.setAutoReset(true) // Kryo should reset its *own* state (but not the reference resolvers') after a tranche has been stored and retrieved.
+          result.setAutoReset(true) // Kryo should reset its *own* state (but not the states of the reference resolvers) after a tranche has been stored or retrieved.
 
           result
         }
@@ -213,9 +224,6 @@ object ImmutableObjectStorage {
                     kryoPool.toBytesWithClass(immutableObject)
                   }
 
-                assert(
-                  trancheSpecificReferenceResolver.writtenObjectReferenceIds.nonEmpty)
-
                 tranches
                   .createTrancheInStorage(
                     serializedRepresentation,
@@ -223,7 +231,7 @@ object ImmutableObjectStorage {
                     trancheSpecificReferenceResolver.writtenObjectReferenceIds)
               }
             } yield {
-              refererenceResolversByTrancheId += trancheId -> trancheSpecificReferenceResolver
+              exSessionReferenceResolversByTrancheId += trancheId -> trancheSpecificReferenceResolver
               trancheId
             }
 
@@ -241,7 +249,7 @@ object ImmutableObjectStorage {
                     kryoPool.fromBytes(tranche.serializedRepresentation)
                   }
 
-                refererenceResolversByTrancheId += trancheId -> trancheSpecificReferenceResolver
+                exSessionReferenceResolversByTrancheId += trancheId -> trancheSpecificReferenceResolver
                 classFromType(retrieve.capturedTypeTag.tpe)
                   .cast(deserialized)
                   .asInstanceOf[X]
