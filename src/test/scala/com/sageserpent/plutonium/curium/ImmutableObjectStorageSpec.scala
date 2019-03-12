@@ -15,13 +15,20 @@ import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
   sealed trait Part {
-    def subPart(randomBehaviour: Random): Part = this match {
-      case Leaf(_) =>
-        this
+    def subpart(randomBehaviour: Random): Part = this match {
+      case leaf: Leaf => leaf
       case Fork(left, _, right) =>
         randomBehaviour.chooseAnyNumberFromOneTo(3) match {
-          case 1 => left.subPart(randomBehaviour)
-          case 2 => right.subPart(randomBehaviour)
+          case 1 =>
+            left match {
+              case fork: Fork => fork.distinctSubpart(randomBehaviour)
+              case leaf: Leaf => leaf
+            }
+          case 2 =>
+            right match {
+              case fork: Fork => fork.distinctSubpart(randomBehaviour)
+              case leaf: Leaf => leaf
+            }
           case 3 => this
         }
     }
@@ -40,7 +47,13 @@ object ImmutableObjectStorageSpec {
 
   case class Leaf(id: Int) extends Part
 
-  case class Fork(left: Part, id: Int, right: Part) extends Part
+  case class Fork(left: Part, id: Int, right: Part) extends Part {
+    def distinctSubpart(randomBehaviour: Random): Part =
+      randomBehaviour.chooseAnyNumberFromOneTo(2) match {
+        case 1 => left.subpart(randomBehaviour)
+        case 2 => right.subpart(randomBehaviour)
+      }
+  }
 
   case object alien
 
@@ -113,6 +126,21 @@ object ImmutableObjectStorageSpec {
       }.toEither
   }
 
+  def chainOfDistinctNestedSubparts(root: Fork,
+                                    numberOfReachableParts: Int,
+                                    randomBehaviour: Random): Vector[Part] =
+    if (0 == numberOfReachableParts) Vector.empty[Part]
+    else {
+      val subpart = root.distinctSubpart(randomBehaviour)
+      subpart match {
+        case fork: Fork =>
+          chainOfDistinctNestedSubparts(fork,
+                                        numberOfReachableParts - 1,
+                                        randomBehaviour) :+ subpart
+        case leaf: Leaf => Vector(leaf)
+      }
+    }
+
   def storeViaMultipleSessions(things: Vector[Part],
                                tranches: Tranches,
                                randomBehaviour: Random): Vector[TrancheId] = {
@@ -160,9 +188,9 @@ class ImmutableObjectStorageSpec
 
     // NOTE: there may indeed be duplicate parts - but we still expect
     // unique tranche ids when the same part is stored several times.
-    val originalParts = Vector.fill(numberOfReachableParts) {
-      root.subPart(randomBehaviour)
-    } :+ root
+    val originalParts = chainOfDistinctNestedSubparts(root,
+                                                      numberOfReachableParts,
+                                                      randomBehaviour) :+ root
 
     val trancheIds =
       storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
@@ -179,9 +207,9 @@ class ImmutableObjectStorageSpec
     MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(numberOfReachableParts) {
-      root.subPart(randomBehaviour)
-    } :+ root
+    val originalParts = chainOfDistinctNestedSubparts(root,
+                                                      numberOfReachableParts,
+                                                      randomBehaviour) :+ root
 
     val tranches = new FakeTranches
 
@@ -227,9 +255,9 @@ class ImmutableObjectStorageSpec
     MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(numberOfReachableParts) {
-      root.subPart(randomBehaviour)
-    } :+ root
+    val originalParts = chainOfDistinctNestedSubparts(root,
+                                                      numberOfReachableParts,
+                                                      randomBehaviour) :+ root
 
     val tranches = new FakeTranches
 
@@ -260,9 +288,9 @@ class ImmutableObjectStorageSpec
 
     val tranches = new FakeTranches
 
-    val originalParts = Vector.fill(numberOfReachableParts) {
-      root.subPart(randomBehaviour)
-    } :+ root
+    val originalParts = chainOfDistinctNestedSubparts(root,
+                                                      numberOfReachableParts,
+                                                      randomBehaviour) :+ root
 
     val trancheIds =
       storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
@@ -299,9 +327,9 @@ class ImmutableObjectStorageSpec
     MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(numberOfReachableParts) {
-      root.subPart(randomBehaviour)
-    } :+ root
+    val originalParts = chainOfDistinctNestedSubparts(root,
+                                                      numberOfReachableParts,
+                                                      randomBehaviour) :+ root
 
     val tranches = new FakeTranches
 
@@ -333,9 +361,9 @@ class ImmutableObjectStorageSpec
     MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(numberOfReachableParts) {
-      root.subPart(randomBehaviour)
-    } :+ root
+    val originalParts = chainOfDistinctNestedSubparts(root,
+                                                      numberOfReachableParts,
+                                                      randomBehaviour) :+ root
 
     val tranches = new FakeTranches
 
@@ -374,9 +402,9 @@ class ImmutableObjectStorageSpec
 
     val numberOfReachableParts = 1 + oneLessThanNumberOfReachableParts // Have to have at least one reachable part in addition to the root to force sharing of substructure.
 
-    val originalParts = Vector.fill(numberOfReachableParts) {
-      root.subPart(randomBehaviour)
-    } :+ root
+    val originalParts = chainOfDistinctNestedSubparts(root,
+                                                      numberOfReachableParts,
+                                                      randomBehaviour) :+ root
 
     val isolatedSpokeTranche = {
       val isolatedSpokeTranches = new FakeTranches
@@ -410,9 +438,9 @@ class ImmutableObjectStorageSpec
     MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = Vector.fill(numberOfReachableParts) {
-      root.subPart(randomBehaviour)
-    } :+ root
+    val originalParts = chainOfDistinctNestedSubparts(root,
+                                                      numberOfReachableParts,
+                                                      randomBehaviour) :+ root
 
     val tranches = new FakeTranches
 
