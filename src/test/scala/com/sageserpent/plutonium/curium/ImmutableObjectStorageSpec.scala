@@ -17,19 +17,10 @@ object ImmutableObjectStorageSpec {
   sealed trait Part {
     def subpart(randomBehaviour: Random): Part = this match {
       case leaf: Leaf => leaf
-      case Fork(left, _, right) =>
-        randomBehaviour.chooseAnyNumberFromOneTo(3) match {
-          case 1 =>
-            left match {
-              case fork: Fork => fork.distinctSubpart(randomBehaviour)
-              case leaf: Leaf => leaf
-            }
-          case 2 =>
-            right match {
-              case fork: Fork => fork.distinctSubpart(randomBehaviour)
-              case leaf: Leaf => leaf
-            }
-          case 3 => this
+      case fork: Fork =>
+        randomBehaviour.chooseAnyNumberFromOneTo(2) match {
+          case 1 => fork.distinctSubpart(randomBehaviour)
+          case 2 => fork
         }
     }
 
@@ -86,8 +77,6 @@ object ImmutableObjectStorageSpec {
     parts.last.asInstanceOf[Fork]
   }
 
-  val numberOfReachablePartsGenerator: Gen[Int] = Gen.posNum[Int] map (_ - 1)
-
   import ImmutableObjectStorage._
 
   class FakeTranches extends Tranches {
@@ -126,20 +115,18 @@ object ImmutableObjectStorageSpec {
       }.toEither
   }
 
-  def chainOfDistinctNestedSubparts(root: Fork,
-                                    numberOfReachableParts: Int,
-                                    randomBehaviour: Random): Vector[Part] =
-    if (0 == numberOfReachableParts) Vector.empty[Part]
-    else {
-      val subpart = root.distinctSubpart(randomBehaviour)
-      subpart match {
-        case fork: Fork =>
-          chainOfDistinctNestedSubparts(fork,
-                                        numberOfReachableParts - 1,
-                                        randomBehaviour) :+ subpart
-        case leaf: Leaf => Vector(leaf)
-      }
+  def chainOfNestedSubparts(root: Fork,
+                            randomBehaviour: Random,
+                            allowDuplicates: Boolean): Vector[Part] = {
+    val subpart =
+      if (allowDuplicates) root.subpart(randomBehaviour)
+      else root.distinctSubpart(randomBehaviour)
+    subpart match {
+      case fork: Fork =>
+        chainOfNestedSubparts(fork, randomBehaviour, allowDuplicates) :+ subpart
+      case leaf: Leaf => Vector(leaf)
     }
+  }
 
   def storeViaMultipleSessions(things: Vector[Part],
                                tranches: Tranches,
@@ -180,17 +167,14 @@ class ImmutableObjectStorageSpec
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
     rootGenerator,
     seedGenerator,
-    numberOfReachablePartsGenerator,
-    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
 
-    // NOTE: there may indeed be duplicate parts - but we still expect
-    // unique tranche ids when the same part is stored several times.
-    val originalParts = chainOfDistinctNestedSubparts(root,
-                                                      numberOfReachableParts,
-                                                      randomBehaviour) :+ root
+    val originalParts = chainOfNestedSubparts(root,
+                                              randomBehaviour,
+                                              allowDuplicates = true) :+ root
 
     val trancheIds =
       storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
@@ -203,13 +187,12 @@ class ImmutableObjectStorageSpec
   "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in forAll(
     rootGenerator,
     seedGenerator,
-    numberOfReachablePartsGenerator,
-    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = chainOfDistinctNestedSubparts(root,
-                                                      numberOfReachableParts,
-                                                      randomBehaviour) :+ root
+    val originalParts = chainOfNestedSubparts(root,
+                                              randomBehaviour,
+                                              allowDuplicates = true) :+ root
 
     val tranches = new FakeTranches
 
@@ -251,13 +234,12 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
     rootGenerator,
     seedGenerator,
-    numberOfReachablePartsGenerator,
-    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = chainOfDistinctNestedSubparts(root,
-                                                      numberOfReachableParts,
-                                                      randomBehaviour) :+ root
+    val originalParts = chainOfNestedSubparts(root,
+                                              randomBehaviour,
+                                              allowDuplicates = true) :+ root
 
     val tranches = new FakeTranches
 
@@ -282,15 +264,14 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
     rootGenerator,
     seedGenerator,
-    numberOfReachablePartsGenerator,
-    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
 
-    val originalParts = chainOfDistinctNestedSubparts(root,
-                                                      numberOfReachableParts,
-                                                      randomBehaviour) :+ root
+    val originalParts = chainOfNestedSubparts(root,
+                                              randomBehaviour,
+                                              allowDuplicates = false) :+ root
 
     val trancheIds =
       storeViaMultipleSessions(originalParts, tranches, randomBehaviour)
@@ -323,13 +304,12 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
     rootGenerator,
     seedGenerator,
-    numberOfReachablePartsGenerator,
-    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = chainOfDistinctNestedSubparts(root,
-                                                      numberOfReachableParts,
-                                                      randomBehaviour) :+ root
+    val originalParts = chainOfNestedSubparts(root,
+                                              randomBehaviour,
+                                              allowDuplicates = false) :+ root
 
     val tranches = new FakeTranches
 
@@ -357,13 +337,12 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
     rootGenerator,
     seedGenerator,
-    numberOfReachablePartsGenerator,
-    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = chainOfDistinctNestedSubparts(root,
-                                                      numberOfReachableParts,
-                                                      randomBehaviour) :+ root
+    val originalParts = chainOfNestedSubparts(root,
+                                              randomBehaviour,
+                                              allowDuplicates = false) :+ root
 
     val tranches = new FakeTranches
 
@@ -396,15 +375,12 @@ class ImmutableObjectStorageSpec
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in forAll(
     rootGenerator,
     seedGenerator,
-    numberOfReachablePartsGenerator,
-    MinSuccessful(50)) { (root, seed, oneLessThanNumberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
-    val numberOfReachableParts = 1 + oneLessThanNumberOfReachableParts // Have to have at least one reachable part in addition to the root to force sharing of substructure.
-
-    val originalParts = chainOfDistinctNestedSubparts(root,
-                                                      numberOfReachableParts,
-                                                      randomBehaviour) :+ root
+    val originalParts = chainOfNestedSubparts(root,
+                                              randomBehaviour,
+                                              allowDuplicates = true) :+ root
 
     val isolatedSpokeTranche = {
       val isolatedSpokeTranches = new FakeTranches
@@ -434,13 +410,12 @@ class ImmutableObjectStorageSpec
   it should "be idempotent when retrieving using the same tranche id" in forAll(
     rootGenerator,
     seedGenerator,
-    numberOfReachablePartsGenerator,
-    MinSuccessful(50)) { (root, seed, numberOfReachableParts) =>
+    MinSuccessful(50)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
-    val originalParts = chainOfDistinctNestedSubparts(root,
-                                                      numberOfReachableParts,
-                                                      randomBehaviour) :+ root
+    val originalParts = chainOfNestedSubparts(root,
+                                              randomBehaviour,
+                                              allowDuplicates = true) :+ root
 
     val tranches = new FakeTranches
 
