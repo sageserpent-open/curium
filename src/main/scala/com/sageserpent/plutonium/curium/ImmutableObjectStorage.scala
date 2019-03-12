@@ -48,7 +48,10 @@ object ImmutableObjectStorage {
         tranche: TrancheOfData,
         objectReferenceIds: Seq[ObjectReferenceId]): EitherThrowableOr[Unit]
 
-    def retrieveTranche(id: TrancheId): EitherThrowableOr[TrancheOfData]
+    def objectReferenceIdOffsetForNewTranche
+      : EitherThrowableOr[ObjectReferenceId]
+
+    def retrieveTranche(trancheId: TrancheId): EitherThrowableOr[TrancheOfData]
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
   }
