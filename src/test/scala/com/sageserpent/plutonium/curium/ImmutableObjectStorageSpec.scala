@@ -25,15 +25,23 @@ object ImmutableObjectStorageSpec {
     }
 
     def shareSubstructureWithOneOf(parts: Set[Part]): Part =
-      parts.find(_ == this).getOrElse {
-        this match {
-          case Leaf(_) => this
-          case Fork(left, id, right) =>
-            Fork(left.shareSubstructureWithOneOf(parts),
-                 id,
-                 right.shareSubstructureWithOneOf(parts))
+      parts
+        .find(
+          candidateToShareSubstructureWith =>
+            // Prevent trivial matching with a reference-identical part, as this might shadow deeper
+            // matches of pieces of substructure. Even if no matches can be made other than via reference
+            // equality, we don't miss any sharing because reference equality implies structure sharing
+            // is already taking place.
+            !(candidateToShareSubstructureWith eq this) && candidateToShareSubstructureWith == this)
+        .getOrElse {
+          this match {
+            case Leaf(_) => this
+            case Fork(left, id, right) =>
+              Fork(left.shareSubstructureWithOneOf(parts),
+                   id,
+                   right.shareSubstructureWithOneOf(parts))
+          }
         }
-      }
   }
 
   case class Leaf(id: Int) extends Part
