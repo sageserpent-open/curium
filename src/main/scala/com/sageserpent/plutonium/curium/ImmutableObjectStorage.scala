@@ -4,7 +4,7 @@ import java.util.UUID
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
-import com.esotericsoftware.kryo.util.MapReferenceResolver
+import com.esotericsoftware.kryo.util.ListReferenceResolver
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
@@ -142,9 +142,9 @@ object ImmutableObjectStorage {
 
       class TrancheSpecificReferenceResolver(
           objectReferenceIdOffset: ObjectReferenceId)
-          extends MapReferenceResolver {
+          extends ListReferenceResolver {
         def writtenObjectReferenceIds: immutable.IndexedSeq[ObjectReferenceId] =
-          (0 until writtenObjects.size) map (objectReferenceIdOffset + _)
+          (0 until seenObjects.size) map (objectReferenceIdOffset + _)
 
         override def getWrittenId(immutableObject: Any): ObjectReferenceId = {
           val resultFromSuperImplementation =
