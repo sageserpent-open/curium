@@ -26,13 +26,7 @@ object ImmutableObjectStorageSpec {
 
     def shareSubstructureWithOneOf(parts: Set[Part]): Part =
       parts
-        .find(
-          candidateToShareSubstructureWith =>
-            // Prevent trivial matching with a reference-identical part, as this might shadow deeper
-            // matches of pieces of substructure. Even if no matches can be made other than via reference
-            // equality, we don't miss any sharing because reference equality implies structure sharing
-            // is already taking place.
-            !(candidateToShareSubstructureWith eq this) && candidateToShareSubstructureWith == this)
+        .find(_ == this)
         .getOrElse {
           this match {
             case Leaf(_) => this
@@ -175,7 +169,8 @@ class ImmutableObjectStorageSpec
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
     rootGenerator,
     seedGenerator,
-    MinSuccessful(50)) { (root, seed) =>
+    MinSuccessful(300),
+    MaxSize(200)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
@@ -195,7 +190,8 @@ class ImmutableObjectStorageSpec
   "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in forAll(
     rootGenerator,
     seedGenerator,
-    MinSuccessful(50)) { (root, seed) =>
+    MinSuccessful(300),
+    MaxSize(200)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = chainOfNestedSubparts(root,
@@ -242,7 +238,8 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
     rootGenerator,
     seedGenerator,
-    MinSuccessful(50)) { (root, seed) =>
+    MinSuccessful(300),
+    MaxSize(200)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = chainOfNestedSubparts(root,
@@ -272,7 +269,8 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
     rootGenerator,
     seedGenerator,
-    MinSuccessful(50)) { (root, seed) =>
+    MinSuccessful(300),
+    MaxSize(200)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
@@ -312,7 +310,8 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
     rootGenerator,
     seedGenerator,
-    MinSuccessful(50)) { (root, seed) =>
+    MinSuccessful(300),
+    MaxSize(200)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = chainOfNestedSubparts(root,
@@ -340,12 +339,13 @@ class ImmutableObjectStorageSpec
 
     ImmutableObjectStorage.runForEffectsOnly(samplingSessionWithMissingTranche)(
       tranches) shouldBe a[Left[_, _]]
-  }
+    }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
     rootGenerator,
     seedGenerator,
-    MinSuccessful(50)) { (root, seed) =>
+    MinSuccessful(300),
+    MaxSize(200)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = chainOfNestedSubparts(root,
@@ -383,7 +383,8 @@ class ImmutableObjectStorageSpec
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in forAll(
     rootGenerator,
     seedGenerator,
-    MinSuccessful(50)) { (root, seed) =>
+    MinSuccessful(300),
+    MaxSize(200)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = chainOfNestedSubparts(root,
@@ -418,7 +419,8 @@ class ImmutableObjectStorageSpec
   it should "be idempotent when retrieving using the same tranche id" in forAll(
     rootGenerator,
     seedGenerator,
-    MinSuccessful(50)) { (root, seed) =>
+    MinSuccessful(300),
+    MaxSize(200)) { (root, seed) =>
     val randomBehaviour = new Random(seed)
 
     val originalParts = chainOfNestedSubparts(root,
