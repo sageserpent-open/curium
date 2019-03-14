@@ -29,20 +29,18 @@ object ImmutableObjectStorageSpec {
   def partGrowthStepsLeadingToRootForkGenerator(
       allowDuplicates: Boolean): Gen[Seq[PartGrowthStep]] =
     for {
-      maximumNumberOfLeaves <- Gen.oneOf(1, 2, 3)
+      maximumNumberOfLeaves <- Gen.chooseNum(1, 5)
       seed                  <- seedGenerator
     } yield {
-      val maximumNumberOfLeavesProtectedFromBugInScalacheckShrinkage = 1 max maximumNumberOfLeaves
-      val randomBehaviour                                            = new Random(seed)
+      val randomBehaviour = new Random(seed)
 
       def growthSteps(partIdSetsCoveredBySubparts: Vector[Set[Int]],
                       numberOfLeaves: Int): Stream[PartGrowthStep] = {
-        require(
-          numberOfLeaves <= maximumNumberOfLeavesProtectedFromBugInScalacheckShrinkage)
+        require(numberOfLeaves <= maximumNumberOfLeaves)
         val numberOfSubparts          = partIdSetsCoveredBySubparts.size
         val partId                    = numberOfSubparts // Makes it easier to read the test cases when debugging; the ids label the growth steps in ascending order.
-        val collectingStrandsTogether = numberOfLeaves == maximumNumberOfLeavesProtectedFromBugInScalacheckShrinkage
-        val chooseALeaf = numberOfLeaves < maximumNumberOfLeavesProtectedFromBugInScalacheckShrinkage &&
+        val collectingStrandsTogether = numberOfLeaves == maximumNumberOfLeaves
+        val chooseALeaf = numberOfLeaves < maximumNumberOfLeaves &&
           (0 == numberOfSubparts || randomBehaviour.nextBoolean())
 
         if (chooseALeaf) {
@@ -154,11 +152,6 @@ object ImmutableObjectStorageSpec {
           case (objectReferenceId, keyTrancheId) if trancheId == keyTrancheId =>
             objectReferenceId
         }
-
-      require(
-        objectReferenceIdsToRemove.isEmpty || objectReferenceIdsToRemove.max < this.objectReferenceIdsToAssociatedTrancheIdMap.keys.max)
-
-      tranchesById -= trancheId
 
       objectReferenceIdsToAssociatedTrancheIdMap --= objectReferenceIdsToRemove
     }
