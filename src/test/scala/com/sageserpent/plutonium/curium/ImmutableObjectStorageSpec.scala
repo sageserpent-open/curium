@@ -29,7 +29,7 @@ object ImmutableObjectStorageSpec {
   def partGrowthStepsLeadingToRootForkGenerator(
       allowDuplicates: Boolean): Gen[Seq[PartGrowthStep]] =
     for {
-      maximumNumberOfLeaves <- Gen.chooseNum(1, 5)
+      maximumNumberOfLeaves <- Gen.chooseNum(1, 10)
       seed                  <- seedGenerator
     } yield {
       val randomBehaviour = new Random(seed)
