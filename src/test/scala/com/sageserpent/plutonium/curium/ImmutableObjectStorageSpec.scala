@@ -94,6 +94,21 @@ object ImmutableObjectStorageSpec {
     val objectReferenceIdsToAssociatedTrancheIdMap
       : MutableSortedMap[ObjectReferenceId, TrancheId] = MutableSortedMap.empty
 
+    def purgeTranche(trancheId: TrancheId): Unit = {
+      val objectReferenceIdsToRemove =
+        objectReferenceIdsToAssociatedTrancheIdMap.collect {
+          case (objectReferenceId, keyTrancheId) if trancheId == keyTrancheId =>
+            objectReferenceId
+        }
+
+      require(
+        objectReferenceIdsToRemove.max < this.objectReferenceIdsToAssociatedTrancheIdMap.keys.max)
+
+      tranchesById -= trancheId
+
+      objectReferenceIdsToAssociatedTrancheIdMap --= objectReferenceIdsToRemove
+    }
+
     override protected def storeTrancheAndAssociatedObjectReferenceIds(
         trancheId: TrancheId,
         tranche: TrancheOfData,
@@ -337,7 +352,7 @@ class ImmutableObjectStorageSpec
     val idOfMissingTranche =
       randomBehaviour.chooseOneOf(trancheIds)
 
-    tranches.tranchesById -= idOfMissingTranche
+    tranches.purgeTranche(idOfMissingTranche)
 
     val rootTrancheId = trancheIds.last
 
@@ -424,7 +439,7 @@ class ImmutableObjectStorageSpec
     rootTranche.serializedRepresentation.length should be < isolatedSpokeTranche.serializedRepresentation.length
   }
 
-  it should "be idempotent when retrieving using the same tranche id" in forAll(
+  it should "be idempotent in terms of object identity when retrieving using the same tranche id" in forAll(
     rootGenerator,
     seedGenerator,
     MinSuccessful(300),
@@ -448,7 +463,7 @@ class ImmutableObjectStorageSpec
       retrievedPartTakeTwo <- ImmutableObjectStorage.retrieve[Part](
         sampleTrancheId)
     } yield {
-      retrievedPartTakeTwo should be(retrievedPartTakeTwo)
+      retrievedPartTakeTwo should be theSameInstanceAs retrievedPartTakeTwo
     }
 
     ImmutableObjectStorage.runForEffectsOnly(samplingSession)(tranches) shouldBe a[
