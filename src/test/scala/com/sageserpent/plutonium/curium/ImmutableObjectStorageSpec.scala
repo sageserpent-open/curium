@@ -52,6 +52,14 @@ object ImmutableObjectStorageSpec {
 
   val seedGenerator: Gen[Int] = Arbitrary.arbInt.arbitrary
 
+  // NOTE: why not simply use Shapeless Scalacheck instead of coding logic here?
+  // 1. The shrinkage mechanism that results is very inefficient, leading to tests
+  // that take a very long time to miminise a failing tests case.
+  // 2. We want to investigate how the immutable object storage implementation copes
+  // with structure sharing - so while from the point of view of referential transparency
+  // it is OK to work with the tree structures generate by Shapeless Scalacheck, we
+  // want to have some DAG structures that share references to the same substructure
+  // here and there.
   val rootGenerator: Gen[Fork] = for {
     size <- Gen
       .posNum[Int]
@@ -339,7 +347,7 @@ class ImmutableObjectStorageSpec
 
     ImmutableObjectStorage.runForEffectsOnly(samplingSessionWithMissingTranche)(
       tranches) shouldBe a[Left[_, _]]
-    }
+  }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
     rootGenerator,
