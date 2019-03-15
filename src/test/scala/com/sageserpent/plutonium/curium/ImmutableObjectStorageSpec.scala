@@ -29,17 +29,23 @@ object ImmutableObjectStorageSpec {
   def partGrowthStepsLeadingToRootForkGenerator(
       allowDuplicates: Boolean): Gen[Seq[PartGrowthStep]] =
     for {
-      maximumNumberOfLeaves <- Gen.chooseNum(1, 5)
+      maximumNumberOfLeaves <- Gen.posNum[Int]
       seed                  <- seedGenerator
     } yield {
+      require(0 < maximumNumberOfLeaves)
+
       val randomBehaviour = new Random(seed)
 
       def growthSteps(partIdSetsCoveredBySubparts: Vector[Set[Int]],
                       numberOfLeaves: Int): Stream[PartGrowthStep] = {
-        require(numberOfLeaves <= maximumNumberOfLeaves)
         val numberOfSubparts          = partIdSetsCoveredBySubparts.size
         val partId                    = numberOfSubparts // Makes it easier to read the test cases when debugging; the ids label the growth steps in ascending order.
         val collectingStrandsTogether = numberOfLeaves == maximumNumberOfLeaves
+
+        require(
+          numberOfLeaves < maximumNumberOfLeaves ||
+            0 < numberOfSubparts && numberOfLeaves == maximumNumberOfLeaves)
+
         val chooseALeaf = numberOfLeaves < maximumNumberOfLeaves &&
           (0 == numberOfSubparts || randomBehaviour.nextBoolean())
 
@@ -70,7 +76,8 @@ object ImmutableObjectStorageSpec {
                 partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
             }
             if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
-              randomBehaviour.chooseOneOf(indicesOfPartsNotCoveredByLeftSubpart)
+              indicesOfPartsNotCoveredByLeftSubpart.maxBy(index =>
+                partIdSetsCoveredBySubparts(index).size)
             else
               randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
                 numberOfSubparts)
@@ -101,7 +108,7 @@ object ImmutableObjectStorageSpec {
         }
       }
 
-      val result = growthSteps(Vector.empty, 0).force
+      val result = growthSteps(Vector.empty, numberOfLeaves = 0).force
 
       assert(result.nonEmpty)
 
@@ -204,7 +211,7 @@ class ImmutableObjectStorageSpec
     Shrink(_ => Stream.empty)
 
   "test cases" should "look ok" in forAll(
-    partGrowthStepsLeadingToRootForkGenerator(allowDuplicates = false)) {
+    partGrowthStepsLeadingToRootForkGenerator(allowDuplicates = true)) {
     partGrowthSteps =>
       val referenceParts = (Vector.empty[Part] /: partGrowthSteps) {
         case (existingSubparts, partGrowthStep) =>
@@ -311,7 +318,7 @@ class ImmutableObjectStorageSpec
       val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
 
       val samplingSession: Session[Unit] = for {
-        bogus <- referencePartsByTrancheId(sampleTrancheId) match {
+        _ <- referencePartsByTrancheId(sampleTrancheId) match {
           case _: Fork => ImmutableObjectStorage.retrieve[Leaf](sampleTrancheId)
           case _: Leaf => ImmutableObjectStorage.retrieve[Fork](sampleTrancheId)
         }
@@ -471,7 +478,7 @@ class ImmutableObjectStorageSpec
         retrievedPartTakeTwo <- ImmutableObjectStorage.retrieve[Part](
           sampleTrancheId)
       } yield {
-        retrievedPartTakeTwo should be theSameInstanceAs retrievedPartTakeTwo
+        retrievedPartTakeTwo should be theSameInstanceAs retrievedPartTakeOne
       }
 
       ImmutableObjectStorage.runForEffectsOnly(samplingSession)(tranches) shouldBe a[
