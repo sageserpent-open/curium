@@ -103,9 +103,9 @@ object ImmutableObjectStorage {
 
         override def getWrittenId(immutableObject: Any): ObjectReferenceId = {
           val resultFromExSessionReferenceResolver =
-            exSessionDataByTrancheId.view
+            completedOperationDataByTrancheId.view
               .map {
-                case (_, ExSessionData(referenceResolver, _)) =>
+                case (_, CompletedOperationData(referenceResolver, _)) =>
                   val objectReferenceId =
                     referenceResolver.getWrittenId(immutableObject)
                   if (-1 != objectReferenceId) Some(objectReferenceId) else None
@@ -177,23 +177,25 @@ object ImmutableObjectStorage {
             val Right(trancheIdForExternalObjectReference) =
               tranches
                 .retrieveTrancheId(objectReferenceId) // TODO - what happens if the call results in a left-value? I think it will propagate up nicely, but this needs to be checked.
-            if (!exSessionDataByTrancheId.contains(
+            if (!completedOperationDataByTrancheId.contains(
                   trancheIdForExternalObjectReference)) {
               val _ =
                 thisSessionInterpreter(
                   Retrieve(trancheIdForExternalObjectReference))
             }
 
-            exSessionDataByTrancheId(trancheIdForExternalObjectReference).referenceResolver
+            completedOperationDataByTrancheId(
+              trancheIdForExternalObjectReference).referenceResolver
               .getReadObject(clazz, objectReferenceId)
           }
       }
 
-      case class ExSessionData(referenceResolver: ReferenceResolver,
-                               topLevelObject: Any)
+      case class CompletedOperationData(referenceResolver: ReferenceResolver,
+                                        topLevelObject: Any)
 
       // TODO - cutover to using weak references, perhaps via 'WeakCache'?
-      val exSessionDataByTrancheId: MutableSortedMap[TrancheId, ExSessionData] =
+      val completedOperationDataByTrancheId
+        : MutableSortedMap[TrancheId, CompletedOperationData] =
         MutableSortedMap.empty
 
       val kryoInstantiator: ScalaKryoInstantiator = new ScalaKryoInstantiator {
@@ -232,7 +234,7 @@ object ImmutableObjectStorage {
                     trancheSpecificReferenceResolver.writtenObjectReferenceIds)
               }
             } yield {
-              exSessionDataByTrancheId += trancheId -> ExSessionData(
+              completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
                 trancheSpecificReferenceResolver,
                 immutableObject)
               trancheId
@@ -242,8 +244,8 @@ object ImmutableObjectStorage {
             for {
               tranche <- tranches.retrieveTranche(trancheId)
               result <- Try {
-                (exSessionDataByTrancheId.get(trancheId) match {
-                  case Some(ExSessionData(_, topLevelObject)) =>
+                (completedOperationDataByTrancheId.get(trancheId) match {
+                  case Some(CompletedOperationData(_, topLevelObject)) =>
                     topLevelObject
 
                   case None =>
@@ -259,7 +261,7 @@ object ImmutableObjectStorage {
                         kryoPool.fromBytes(tranche.serializedRepresentation)
                       }
 
-                    exSessionDataByTrancheId += trancheId -> ExSessionData(
+                    completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
                       trancheSpecificReferenceResolver,
                       deserialized)
                     classFromType(retrieve.capturedTypeTag.tpe)
