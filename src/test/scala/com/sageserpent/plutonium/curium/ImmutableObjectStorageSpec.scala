@@ -154,6 +154,8 @@ object ImmutableObjectStorageSpec {
         }
 
       objectReferenceIdsToAssociatedTrancheIdMap --= objectReferenceIdsToRemove
+
+      tranchesById -= trancheId
     }
 
     override protected def storeTrancheAndAssociatedObjectReferenceIds(
@@ -374,8 +376,8 @@ class ImmutableObjectStorageSpec
 
       ImmutableObjectStorage.runForEffectsOnly(
         samplingSessionWithMissingTranche)(tranches) shouldBe a[Left[_, _]]
+      }
     }
-  }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
     partGrowthStepsLeadingToRootForkGenerator(allowDuplicates = false),
