@@ -63,10 +63,14 @@ object ImmutableObjectStorageSpec {
               randomBehaviour
                 .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
           val indexOfRightSubpart = if (collectingStrandsTogether) {
-            val indicesCoveredByLeftSubpart   = partIdSetsCoveredBySubparts.last
-            val indicesMissingFromLeftSubpart = 0 until numberOfSubparts filterNot (indicesCoveredByLeftSubpart.contains)
-            if (indicesMissingFromLeftSubpart.nonEmpty)
-              randomBehaviour.chooseOneOf(indicesMissingFromLeftSubpart)
+            val partIdsCoveredByLeftSubpart = partIdSetsCoveredBySubparts.last
+            val indicesOfPartsNotCoveredByLeftSubpart = 0 until numberOfSubparts filterNot {
+              index =>
+                val partIdsCoveredByIndex = partIdSetsCoveredBySubparts(index)
+                partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
+            }
+            if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
+              randomBehaviour.chooseOneOf(indicesOfPartsNotCoveredByLeftSubpart)
             else
               randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
                 numberOfSubparts)
