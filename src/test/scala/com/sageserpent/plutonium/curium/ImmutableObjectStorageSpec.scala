@@ -154,6 +154,8 @@ object ImmutableObjectStorageSpec {
         }
 
       objectReferenceIdsToAssociatedTrancheIdMap --= objectReferenceIdsToRemove
+
+      tranchesById -= trancheId
     }
 
     override protected def storeTrancheAndAssociatedObjectReferenceIds(
@@ -196,27 +198,6 @@ class ImmutableObjectStorageSpec
 
   implicit def shrinkAny[Seq[PartGrowthStep]]: Shrink[Seq[PartGrowthStep]] =
     Shrink(_ => Stream.empty)
-
-  "test cases" should "look ok" in forAll(
-    partGrowthStepsLeadingToRootForkGenerator(allowDuplicates = false)) {
-    partGrowthSteps =>
-      val referenceParts = (Vector.empty[Part] /: partGrowthSteps) {
-        case (existingSubparts, partGrowthStep) =>
-          existingSubparts :+ partGrowthStep(existingSubparts)
-      }
-      println("Test case....")
-      referenceParts.foreach { part =>
-        println("----------------------------")
-        println(part)
-        println(System.identityHashCode(part))
-        part match {
-          case Leaf(_) =>
-          case Fork(left, _, right) =>
-            println(
-              s"\t${System.identityHashCode(left) -> System.identityHashCode(right)}")
-        }
-      }
-  }
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
     partGrowthStepsLeadingToRootForkGenerator(allowDuplicates = true),
