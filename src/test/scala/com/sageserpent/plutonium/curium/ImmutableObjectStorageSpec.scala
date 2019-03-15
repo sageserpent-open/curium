@@ -325,12 +325,10 @@ class ImmutableObjectStorageSpec
 
       tranches.tranchesById(idOfCorruptedTranche) = {
         val trancheToCorrupt = tranches.tranchesById(idOfCorruptedTranche)
-        val (firstHalf, secondHalf) =
-          trancheToCorrupt.serializedRepresentation.splitAt(
-            randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
-              1 + trancheToCorrupt.serializedRepresentation.length))
         trancheToCorrupt.copy(
-          firstHalf ++ "*** CORRUPTION! ***".map(_.toByte) ++ secondHalf)
+          serializedRepresentation = "*** CORRUPTION! ***"
+            .map(_.toByte)
+            .toArray ++ trancheToCorrupt.serializedRepresentation)
       }
 
       val rootTrancheId = trancheIds.last
@@ -341,8 +339,8 @@ class ImmutableObjectStorageSpec
 
       ImmutableObjectStorage.runForEffectsOnly(
         samplingSessionWithCorruptedTranche)(tranches) shouldBe a[Left[_, _]]
-      }
     }
+  }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
     partGrowthStepsLeadingToRootForkGenerator(allowDuplicates = false),
