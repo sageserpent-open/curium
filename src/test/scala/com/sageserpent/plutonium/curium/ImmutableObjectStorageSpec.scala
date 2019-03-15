@@ -63,10 +63,14 @@ object ImmutableObjectStorageSpec {
               randomBehaviour
                 .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
           val indexOfRightSubpart = if (collectingStrandsTogether) {
-            val indicesCoveredByLeftSubpart   = partIdSetsCoveredBySubparts.last
-            val indicesMissingFromLeftSubpart = 0 until numberOfSubparts filterNot (indicesCoveredByLeftSubpart.contains)
-            if (indicesMissingFromLeftSubpart.nonEmpty)
-              randomBehaviour.chooseOneOf(indicesMissingFromLeftSubpart)
+            val partIdsCoveredByLeftSubpart = partIdSetsCoveredBySubparts.last
+            val indicesOfPartsNotCoveredByLeftSubpart = 0 until numberOfSubparts filterNot {
+              index =>
+                val partIdsCoveredByIndex = partIdSetsCoveredBySubparts(index)
+                partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
+            }
+            if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
+              randomBehaviour.chooseOneOf(indicesOfPartsNotCoveredByLeftSubpart)
             else
               randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
                 numberOfSubparts)
@@ -376,8 +380,8 @@ class ImmutableObjectStorageSpec
 
       ImmutableObjectStorage.runForEffectsOnly(
         samplingSessionWithMissingTranche)(tranches) shouldBe a[Left[_, _]]
-      }
     }
+  }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
     partGrowthStepsLeadingToRootForkGenerator(allowDuplicates = false),
