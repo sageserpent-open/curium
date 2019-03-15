@@ -103,9 +103,9 @@ object ImmutableObjectStorage {
 
         override def getWrittenId(immutableObject: Any): ObjectReferenceId = {
           val resultFromExSessionReferenceResolver =
-            exSessionReferenceResolversByTrancheId.view
+            exSessionDataByTrancheId.view
               .map {
-                case (_, referenceResolver) =>
+                case (_, ExSessionData(referenceResolver, _)) =>
                   val objectReferenceId =
                     referenceResolver.getWrittenId(immutableObject)
                   if (-1 != objectReferenceId) Some(objectReferenceId) else None
@@ -177,22 +177,23 @@ object ImmutableObjectStorage {
             val Right(trancheIdForExternalObjectReference) =
               tranches
                 .retrieveTrancheId(objectReferenceId) // TODO - what happens if the call results in a left-value? I think it will propagate up nicely, but this needs to be checked.
-            if (!exSessionReferenceResolversByTrancheId.contains(
+            if (!exSessionDataByTrancheId.contains(
                   trancheIdForExternalObjectReference)) {
               val _ =
                 thisSessionInterpreter(
                   Retrieve(trancheIdForExternalObjectReference))
             }
 
-            exSessionReferenceResolversByTrancheId(
-              trancheIdForExternalObjectReference)
+            exSessionDataByTrancheId(trancheIdForExternalObjectReference).referenceResolver
               .getReadObject(clazz, objectReferenceId)
           }
       }
 
+      case class ExSessionData(referenceResolver: ReferenceResolver,
+                               topLevelObject: Any)
+
       // TODO - cutover to using weak references, perhaps via 'WeakCache'?
-      val exSessionReferenceResolversByTrancheId
-        : MutableSortedMap[TrancheId, ReferenceResolver] =
+      val exSessionDataByTrancheId: MutableSortedMap[TrancheId, ExSessionData] =
         MutableSortedMap.empty
 
       val kryoInstantiator: ScalaKryoInstantiator = new ScalaKryoInstantiator {
@@ -231,7 +232,9 @@ object ImmutableObjectStorage {
                     trancheSpecificReferenceResolver.writtenObjectReferenceIds)
               }
             } yield {
-              exSessionReferenceResolversByTrancheId += trancheId -> trancheSpecificReferenceResolver
+              exSessionDataByTrancheId += trancheId -> ExSessionData(
+                trancheSpecificReferenceResolver,
+                immutableObject)
               trancheId
             }
 
@@ -239,20 +242,29 @@ object ImmutableObjectStorage {
             for {
               tranche <- tranches.retrieveTranche(trancheId)
               result <- Try {
-                val objectReferenceIdOffset = tranche.objectReferenceIdOffset
-                val trancheSpecificReferenceResolver =
-                  new TrancheSpecificReferenceResolver(objectReferenceIdOffset)
+                (exSessionDataByTrancheId.get(trancheId) match {
+                  case Some(ExSessionData(_, topLevelObject)) =>
+                    topLevelObject
 
-                val deserialized =
-                  sessionReferenceResolver.withValue(
-                    Some(trancheSpecificReferenceResolver)) {
-                    kryoPool.fromBytes(tranche.serializedRepresentation)
-                  }
+                  case None =>
+                    val objectReferenceIdOffset =
+                      tranche.objectReferenceIdOffset
+                    val trancheSpecificReferenceResolver =
+                      new TrancheSpecificReferenceResolver(
+                        objectReferenceIdOffset)
 
-                exSessionReferenceResolversByTrancheId += trancheId -> trancheSpecificReferenceResolver
-                classFromType(retrieve.capturedTypeTag.tpe)
-                  .cast(deserialized)
-                  .asInstanceOf[X]
+                    val deserialized =
+                      sessionReferenceResolver.withValue(
+                        Some(trancheSpecificReferenceResolver)) {
+                        kryoPool.fromBytes(tranche.serializedRepresentation)
+                      }
+
+                    exSessionDataByTrancheId += trancheId -> ExSessionData(
+                      trancheSpecificReferenceResolver,
+                      deserialized)
+                    classFromType(retrieve.capturedTypeTag.tpe)
+                      .cast(deserialized)
+                }).asInstanceOf[X]
               }.toEither
             } yield result
 
