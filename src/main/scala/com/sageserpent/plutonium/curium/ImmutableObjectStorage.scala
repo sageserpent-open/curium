@@ -141,27 +141,43 @@ object ImmutableObjectStorage {
 
       }
 
+      case class ReferenceBasedComparison(underlying: AnyRef) {
+        override def equals(other: Any): Boolean = underlying match {
+          case ReferenceBasedComparison(otherUnderlying) =>
+            underlying eq otherUnderlying
+          case _ => false
+        }
+
+        override def hashCode(): ObjectReferenceId =
+          System.identityHashCode(underlying)
+      }
+
       class TrancheSpecificReferenceResolver(
           objectReferenceIdOffset: ObjectReferenceId)
           extends ReferenceResolver {
-        val objectToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
+        val objectToReferenceIdMap
+          : BiMap[ReferenceBasedComparison, ObjectReferenceId] =
           HashBiMap.create()
 
-        val referenceIdToObjectMap: BiMap[ObjectReferenceId, AnyRef] =
+        val referenceIdToObjectMap
+          : BiMap[ObjectReferenceId, ReferenceBasedComparison] =
           objectToReferenceIdMap.inverse()
 
         def writtenObjectReferenceIds: immutable.IndexedSeq[ObjectReferenceId] =
           (0 until objectToReferenceIdMap.size) map (objectReferenceIdOffset + _)
 
         override def getWrittenId(immutableObject: AnyRef): ObjectReferenceId =
-          objectToReferenceIdMap.getOrDefault(immutableObject, -1)
+          objectToReferenceIdMap.getOrDefault(
+            ReferenceBasedComparison(immutableObject),
+            -1)
 
         override def addWrittenObject(
             immutableObject: AnyRef): ObjectReferenceId = {
           val nextObjectReferenceIdToAllocate = objectToReferenceIdMap.size + objectReferenceIdOffset
           val _ @None = Option(
-            objectToReferenceIdMap.putIfAbsent(immutableObject,
-                                               nextObjectReferenceIdToAllocate))
+            objectToReferenceIdMap.putIfAbsent(
+              ReferenceBasedComparison(immutableObject),
+              nextObjectReferenceIdToAllocate))
           nextObjectReferenceIdToAllocate
         }
 
@@ -172,15 +188,16 @@ object ImmutableObjectStorage {
                                    immutableObject: AnyRef): Unit = {
           require(objectReferenceIdOffset <= objectReferenceId)
           val _ @None = Option(
-            referenceIdToObjectMap.putIfAbsent(objectReferenceId,
-                                               immutableObject))
+            referenceIdToObjectMap.putIfAbsent(
+              objectReferenceId,
+              ReferenceBasedComparison(immutableObject)))
         }
 
         override def getReadObject(
             clazz: Class[_],
             objectReferenceId: ObjectReferenceId): AnyRef =
           if (objectReferenceId >= objectReferenceIdOffset)
-            referenceIdToObjectMap.get(objectReferenceId)
+            referenceIdToObjectMap.get(objectReferenceId).underlying
           else {
             val Right(trancheIdForExternalObjectReference) =
               tranches
