@@ -142,7 +142,7 @@ object ImmutableObjectStorage {
       }
 
       case class ReferenceBasedComparison(underlying: AnyRef) {
-        override def equals(other: Any): Boolean = underlying match {
+        override def equals(other: Any): Boolean = other match {
           case ReferenceBasedComparison(otherUnderlying) =>
             underlying eq otherUnderlying
           case _ => false
@@ -181,16 +181,20 @@ object ImmutableObjectStorage {
           nextObjectReferenceIdToAllocate
         }
 
-        override def nextReadId(clazz: Class[_]): ObjectReferenceId =
-          referenceIdToObjectMap.size + objectReferenceIdOffset
+        override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
+          val nextObjectReferenceIdToAllocate = referenceIdToObjectMap.size + objectReferenceIdOffset
+          val _ @None = Option(
+            referenceIdToObjectMap.putIfAbsent(nextObjectReferenceIdToAllocate,
+                                               null))
+          nextObjectReferenceIdToAllocate
+        }
 
         override def setReadObject(objectReferenceId: ObjectReferenceId,
                                    immutableObject: AnyRef): Unit = {
           require(objectReferenceIdOffset <= objectReferenceId)
-          val _ @None = Option(
-            referenceIdToObjectMap.putIfAbsent(
-              objectReferenceId,
-              ReferenceBasedComparison(immutableObject)))
+          referenceIdToObjectMap.forcePut(
+            objectReferenceId,
+            ReferenceBasedComparison(immutableObject))
         }
 
         override def getReadObject(
