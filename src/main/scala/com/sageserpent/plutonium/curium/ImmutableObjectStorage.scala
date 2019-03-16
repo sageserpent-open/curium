@@ -6,6 +6,7 @@ import cats.free.FreeT
 import cats.implicits._
 import com.esotericsoftware.kryo.util.ListReferenceResolver
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
+import com.google.common.collect.{BiMap, HashBiMap}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
 
@@ -142,41 +143,48 @@ object ImmutableObjectStorage {
 
       class TrancheSpecificReferenceResolver(
           objectReferenceIdOffset: ObjectReferenceId)
-          extends ListReferenceResolver {
+          extends ReferenceResolver {
+        val objectToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
+          HashBiMap.create()
+
+        val referenceIdToObjectMap: BiMap[ObjectReferenceId, AnyRef] =
+          objectToReferenceIdMap.inverse()
+
         def writtenObjectReferenceIds: immutable.IndexedSeq[ObjectReferenceId] =
-          (0 until seenObjects.size) map (objectReferenceIdOffset + _)
+          (0 until objectToReferenceIdMap.size) map (objectReferenceIdOffset + _)
 
-        override def getWrittenId(immutableObject: Any): ObjectReferenceId = {
-          val resultFromSuperImplementation =
-            super.getWrittenId(immutableObject)
-          if (resultFromSuperImplementation != -1)
-            objectReferenceIdOffset + resultFromSuperImplementation
-          else resultFromSuperImplementation
+        override def getWrittenId(immutableObject: AnyRef): ObjectReferenceId =
+          objectToReferenceIdMap.getOrDefault(immutableObject, -1)
+
+        override def addWrittenObject(
+            immutableObject: AnyRef): ObjectReferenceId = {
+          val nextObjectReferenceIdToAllocate = objectToReferenceIdMap.size + objectReferenceIdOffset
+          val _ @None = Option(
+            objectToReferenceIdMap.putIfAbsent(immutableObject,
+                                               nextObjectReferenceIdToAllocate))
+          nextObjectReferenceIdToAllocate
         }
 
-        override def addWrittenObject(immutableObject: Any): ObjectReferenceId =
-          objectReferenceIdOffset + super.addWrittenObject(immutableObject)
-
-        override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
-          objectReferenceIdOffset + super.nextReadId(clazz)
-        }
+        override def nextReadId(clazz: Class[_]): ObjectReferenceId =
+          referenceIdToObjectMap.size + objectReferenceIdOffset
 
         override def setReadObject(objectReferenceId: ObjectReferenceId,
-                                   immutableObject: Any): Unit = {
-          super.setReadObject(objectReferenceId - objectReferenceIdOffset,
-                              immutableObject)
+                                   immutableObject: AnyRef): Unit = {
+          require(objectReferenceIdOffset <= objectReferenceId)
+          val _ @None = Option(
+            referenceIdToObjectMap.putIfAbsent(objectReferenceId,
+                                               immutableObject))
         }
 
         override def getReadObject(
             clazz: Class[_],
             objectReferenceId: ObjectReferenceId): AnyRef =
           if (objectReferenceId >= objectReferenceIdOffset)
-            super
-              .getReadObject(clazz, objectReferenceId - objectReferenceIdOffset)
+            referenceIdToObjectMap.get(objectReferenceId)
           else {
             val Right(trancheIdForExternalObjectReference) =
               tranches
-                .retrieveTrancheId(objectReferenceId) // TODO - what happens if the call results in a left-value? I think it will propagate up nicely, but this needs to be checked.
+                .retrieveTrancheId(objectReferenceId)
             if (!completedOperationDataByTrancheId.contains(
                   trancheIdForExternalObjectReference)) {
               val _ =
@@ -188,6 +196,12 @@ object ImmutableObjectStorage {
               trancheIdForExternalObjectReference).referenceResolver
               .getReadObject(clazz, objectReferenceId)
           }
+
+        override def setKryo(kryo: Kryo): Unit = {}
+
+        override def reset(): Unit = {}
+
+        override def useReferences(clazz: Class[_]): Boolean = true
       }
 
       case class CompletedOperationData(referenceResolver: ReferenceResolver,
