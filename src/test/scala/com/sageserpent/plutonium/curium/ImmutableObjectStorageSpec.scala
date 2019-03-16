@@ -29,24 +29,24 @@ object ImmutableObjectStorageSpec {
   def partGrowthStepsLeadingToRootForkGenerator(
       allowDuplicates: Boolean): Gen[Seq[PartGrowthStep]] =
     for {
-      maximumNumberOfLeaves <- Gen.posNum[Int]
-      seed                  <- seedGenerator
+      numberOfLeavesRequired <- Gen.posNum[Int]
+      seed                   <- seedGenerator
     } yield {
-      require(0 < maximumNumberOfLeaves)
+      require(0 < numberOfLeavesRequired)
 
       val randomBehaviour = new Random(seed)
 
       def growthSteps(partIdSetsCoveredBySubparts: Vector[Set[Int]],
                       numberOfLeaves: Int): Stream[PartGrowthStep] = {
-        val numberOfSubparts          = partIdSetsCoveredBySubparts.size
-        val partId                    = numberOfSubparts // Makes it easier to read the test cases when debugging; the ids label the growth steps in ascending order.
-        val collectingStrandsTogether = numberOfLeaves == maximumNumberOfLeaves
+        val numberOfSubparts                            = partIdSetsCoveredBySubparts.size
+        val partId                                      = numberOfSubparts // Makes it easier to read the test cases when debugging; the ids label the growth steps in ascending order.
+        val collectingStrandsTogetherAsHaveEnoughLeaves = numberOfLeaves == numberOfLeavesRequired
 
         require(
-          numberOfLeaves < maximumNumberOfLeaves ||
-            0 < numberOfSubparts && numberOfLeaves == maximumNumberOfLeaves)
+          numberOfLeaves < numberOfLeavesRequired ||
+            0 < numberOfSubparts && numberOfLeaves == numberOfLeavesRequired)
 
-        val chooseALeaf = numberOfLeaves < maximumNumberOfLeaves &&
+        val chooseALeaf = numberOfLeaves < numberOfLeavesRequired &&
           (0 == numberOfSubparts || randomBehaviour.nextBoolean())
 
         if (chooseALeaf) {
@@ -64,26 +64,28 @@ object ImmutableObjectStorageSpec {
             numberOfLeaves)
         else {
           val indexOfLeftSubpart =
-            if (collectingStrandsTogether) numberOfSubparts - 1
+            if (collectingStrandsTogetherAsHaveEnoughLeaves)
+              numberOfSubparts - 1
             else
               randomBehaviour
                 .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
-          val indexOfRightSubpart = if (collectingStrandsTogether) {
-            val partIdsCoveredByLeftSubpart = partIdSetsCoveredBySubparts.last
-            val indicesOfPartsNotCoveredByLeftSubpart = 0 until numberOfSubparts filterNot {
-              index =>
-                val partIdsCoveredByIndex = partIdSetsCoveredBySubparts(index)
-                partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
-            }
-            if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
-              indicesOfPartsNotCoveredByLeftSubpart.maxBy(index =>
-                partIdSetsCoveredBySubparts(index).size)
-            else
-              randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
-                numberOfSubparts)
-          } else
-            randomBehaviour
-              .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
+          val indexOfRightSubpart =
+            if (collectingStrandsTogetherAsHaveEnoughLeaves) {
+              val partIdsCoveredByLeftSubpart = partIdSetsCoveredBySubparts.last
+              val indicesOfPartsNotCoveredByLeftSubpart = 0 until numberOfSubparts filterNot {
+                index =>
+                  val partIdsCoveredByIndex = partIdSetsCoveredBySubparts(index)
+                  partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
+              }
+              if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
+                indicesOfPartsNotCoveredByLeftSubpart.maxBy(index =>
+                  partIdSetsCoveredBySubparts(index).size)
+              else
+                randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
+                  numberOfSubparts)
+            } else
+              randomBehaviour
+                .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
           val partIdsCoveredByThisFork: Set[Int] = partIdSetsCoveredBySubparts(
             indexOfLeftSubpart) ++ Set(partId) ++ partIdSetsCoveredBySubparts(
             indexOfRightSubpart)
@@ -98,9 +100,12 @@ object ImmutableObjectStorageSpec {
                  partId,
                  subparts(indexOfRightSubpart))
           }
-          fork _ #:: (if (allSubpartsIncludedInThisFork &&
-                          (collectingStrandsTogether ||
-                          randomBehaviour.nextBoolean())) Stream.empty
+
+          val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
+            collectingStrandsTogetherAsHaveEnoughLeaves
+
+          fork _ #:: (if (thisCouldBeTheLastStep &&
+                          randomBehaviour.nextBoolean()) Stream.empty
                       else
                         growthSteps(
                           partIdSetsCoveredBySubparts :+ partIdsCoveredByThisFork,
