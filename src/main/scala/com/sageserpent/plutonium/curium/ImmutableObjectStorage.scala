@@ -4,7 +4,11 @@ import java.util.UUID
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
-import com.esotericsoftware.kryo.util.ListReferenceResolver
+import scalacache._
+import scalacache.modes.sync._
+import scalacache.caffeine._
+import scalacache.memoization._
+import scala.concurrent.duration._
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
 import com.google.common.collect.{BiMap, HashBiMap}
 import com.sageserpent.plutonium.classFromType
@@ -145,6 +149,33 @@ object ImmutableObjectStorage {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
 
+      // TODO - cutover to using weak references, perhaps via 'WeakCache'?
+      val completedOperationDataByTrancheId
+        : MutableSortedMap[TrancheId, CompletedOperationData] =
+        MutableSortedMap.empty
+
+      private val referenceResolverCacheTimeToLive = Some(10 seconds)
+
+      private implicit val referenceResolverCacheConfiguration: CacheConfig =
+        CacheConfig.defaultCacheConfig.copy(
+          cacheKeyBuilder = new CacheKeyBuilder {
+            override def toCacheKey(parts: Seq[Any]): String =
+              System.identityHashCode(parts.head).toString
+            override def stringToCacheKey(key: String): String = key
+          })
+
+      private val objectReferenceIdCache: Cache[ObjectReferenceId] =
+        CaffeineCache[ObjectReferenceId](
+          CacheConfig.defaultCacheConfig.copy(
+            memoization = MemoizationConfig(
+              (fullClassName: String,
+               constructorParameters: IndexedSeq[IndexedSeq[Any]],
+               methodName: String,
+               parameters: IndexedSeq[IndexedSeq[Any]]) =>
+                s"${System.identityHashCode(parameters.head)}")))
+
+      private val objectCache: Cache[AnyRef] = CaffeineCache[AnyRef]
+
       case class ReferenceBasedComparison(underlying: AnyRef) {
         override def equals(other: Any): Boolean = other match {
           case ReferenceBasedComparison(otherUnderlying) =>
@@ -170,23 +201,24 @@ object ImmutableObjectStorage {
         def writtenObjectReferenceIds: immutable.IndexedSeq[ObjectReferenceId] =
           (0 until objectToReferenceIdMap.size) map (objectReferenceIdOffset + _)
 
-        override def getWrittenId(
-            immutableObject: AnyRef): ObjectReferenceId = {
-          val resultFromExSessionReferenceResolver =
-            completedOperationDataByTrancheId.view
-              .map {
-                case (_, CompletedOperationData(referenceResolver, _)) =>
-                  val objectReferenceId =
-                    referenceResolver.getWrittenIdConsultingOnlyThisTranche(
-                      immutableObject)
-                  if (-1 != objectReferenceId) Some(objectReferenceId) else None
-              }
-              .collectFirst {
-                case Some(objectReferenceId) => objectReferenceId
-              }
-          resultFromExSessionReferenceResolver.getOrElse(
-            getWrittenIdConsultingOnlyThisTranche(immutableObject))
-        }
+        override def getWrittenId(immutableObject: AnyRef): ObjectReferenceId =
+          memoizeSync(referenceResolverCacheTimeToLive) {
+            val resultFromExSessionReferenceResolver =
+              completedOperationDataByTrancheId.view
+                .map {
+                  case (_, CompletedOperationData(referenceResolver, _)) =>
+                    val objectReferenceId =
+                      referenceResolver.getWrittenIdConsultingOnlyThisTranche(
+                        immutableObject)
+                    if (-1 != objectReferenceId) Some(objectReferenceId)
+                    else None
+                }
+                .collectFirst {
+                  case Some(objectReferenceId) => objectReferenceId
+                }
+            resultFromExSessionReferenceResolver.getOrElse(
+              getWrittenIdConsultingOnlyThisTranche(immutableObject))
+          }(objectReferenceIdCache, mode, implicitly[Flags])
 
         private def getWrittenIdConsultingOnlyThisTranche(
             immutableObject: AnyRef): ObjectReferenceId =
@@ -221,28 +253,29 @@ object ImmutableObjectStorage {
         }
 
         override def getReadObject(
-            clazz: Class[_],
+            @cacheKeyExclude clazz: Class[_],
             objectReferenceId: ObjectReferenceId): AnyRef =
-          if (objectReferenceId >= objectReferenceIdOffset)
-            getReadObjectConsultingOnlyThisTranche(clazz, objectReferenceId)
-          else {
-            val Right(trancheIdForExternalObjectReference) =
-              tranches
-                .retrieveTrancheId(objectReferenceId)
-            if (!completedOperationDataByTrancheId.contains(
-                  trancheIdForExternalObjectReference)) {
-              val _ =
-                thisSessionInterpreter(
-                  Retrieve(trancheIdForExternalObjectReference))
-            }
+          memoizeSync(referenceResolverCacheTimeToLive) {
+            if (objectReferenceId >= objectReferenceIdOffset)
+              getReadObjectConsultingOnlyThisTranche(objectReferenceId)
+            else {
+              val Right(trancheIdForExternalObjectReference) =
+                tranches
+                  .retrieveTrancheId(objectReferenceId)
+              if (!completedOperationDataByTrancheId.contains(
+                    trancheIdForExternalObjectReference)) {
+                val _ =
+                  thisSessionInterpreter(
+                    Retrieve(trancheIdForExternalObjectReference))
+              }
 
-            completedOperationDataByTrancheId(
-              trancheIdForExternalObjectReference).referenceResolver
-              .getReadObjectConsultingOnlyThisTranche(clazz, objectReferenceId)
-          }
+              completedOperationDataByTrancheId(
+                trancheIdForExternalObjectReference).referenceResolver
+                .getReadObjectConsultingOnlyThisTranche(objectReferenceId)
+            }
+          }(objectCache, mode, implicitly[Flags])
 
         private def getReadObjectConsultingOnlyThisTranche(
-            clazz: Class[_],
             objectReferenceId: ObjectReferenceId): AnyRef =
           referenceIdToObjectMap.get(objectReferenceId).underlying
 
@@ -256,11 +289,6 @@ object ImmutableObjectStorage {
       case class CompletedOperationData(
           referenceResolver: TrancheSpecificReferenceResolver,
           topLevelObject: Any)
-
-      // TODO - cutover to using weak references, perhaps via 'WeakCache'?
-      val completedOperationDataByTrancheId
-        : MutableSortedMap[TrancheId, CompletedOperationData] =
-        MutableSortedMap.empty
 
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
