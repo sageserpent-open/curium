@@ -89,44 +89,60 @@ object ImmutableObjectStorage {
       session: Session[Unit]): Tranches => EitherThrowableOr[Unit] =
     run(session)
 
+  private val sessionReferenceResolver
+    : DynamicVariable[Option[ReferenceResolver]] =
+    new DynamicVariable(None)
+
+  private object referenceResolver extends ReferenceResolver {
+    override def setKryo(kryo: Kryo): Unit = {
+      sessionReferenceResolver.value.get.setKryo(kryo)
+    }
+
+    override def getWrittenId(immutableObject: Any): ObjectReferenceId =
+      sessionReferenceResolver.value.get.getWrittenId(immutableObject)
+    override def addWrittenObject(immutableObject: Any): ObjectReferenceId =
+      sessionReferenceResolver.value.get.addWrittenObject(immutableObject)
+    override def nextReadId(clazz: Class[_]): ObjectReferenceId =
+      sessionReferenceResolver.value.get.nextReadId(clazz)
+    override def setReadObject(objectReferenceId: ObjectReferenceId,
+                               anObject: Any): Unit = {
+      sessionReferenceResolver.value.get
+        .setReadObject(objectReferenceId, anObject)
+    }
+    override def getReadObject(clazz: Class[_],
+                               objectReferenceId: ObjectReferenceId): AnyRef =
+      sessionReferenceResolver.value.get
+        .getReadObject(clazz, objectReferenceId)
+    override def reset(): Unit = {
+      // NOTE: prevent Kryo from resetting the session reference resolver as it will be
+      // cached and used to resolve inter-tranche object references once a storage or
+      // retrieval operation completes.
+    }
+    override def useReferences(clazz: Class[_]): Boolean =
+      sessionReferenceResolver.value.get.useReferences(clazz)
+
+  }
+
+  private val kryoInstantiator: ScalaKryoInstantiator =
+    new ScalaKryoInstantiator {
+      override def newKryo(): KryoBase = {
+        val result = super.newKryo()
+
+        result.setReferenceResolver(referenceResolver)
+
+        result.setAutoReset(true) // Kryo should reset its *own* state (but not the states of the reference resolvers) after a tranche has been stored or retrieved.
+
+        result
+      }
+    }
+
+  private val kryoPool: KryoPool =
+    KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
+
   private def run[Result](session: Session[Result])(
       tranches: Tranches): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
-      val sessionReferenceResolver: DynamicVariable[Option[ReferenceResolver]] =
-        new DynamicVariable(None)
-
-      object referenceResolver extends ReferenceResolver {
-        override def setKryo(kryo: Kryo): Unit = {
-          sessionReferenceResolver.value.get.setKryo(kryo)
-        }
-
-        override def getWrittenId(immutableObject: Any): ObjectReferenceId =
-          sessionReferenceResolver.value.get.getWrittenId(immutableObject)
-        override def addWrittenObject(immutableObject: Any): ObjectReferenceId =
-          sessionReferenceResolver.value.get.addWrittenObject(immutableObject)
-        override def nextReadId(clazz: Class[_]): ObjectReferenceId =
-          sessionReferenceResolver.value.get.nextReadId(clazz)
-        override def setReadObject(objectReferenceId: ObjectReferenceId,
-                                   anObject: Any): Unit = {
-          sessionReferenceResolver.value.get
-            .setReadObject(objectReferenceId, anObject)
-        }
-        override def getReadObject(
-            clazz: Class[_],
-            objectReferenceId: ObjectReferenceId): AnyRef =
-          sessionReferenceResolver.value.get
-            .getReadObject(clazz, objectReferenceId)
-        override def reset(): Unit = {
-          // NOTE: prevent Kryo from resetting the session reference resolver as it will be
-          // cached and used to resolve inter-tranche object references once a storage or
-          // retrieval operation completes.
-        }
-        override def useReferences(clazz: Class[_]): Boolean =
-          sessionReferenceResolver.value.get.useReferences(clazz)
-
-      }
-
       class TrancheSpecificReferenceResolver(
           objectReferenceIdOffset: ObjectReferenceId)
           extends ListReferenceResolver {
@@ -208,21 +224,6 @@ object ImmutableObjectStorage {
       val completedOperationDataByTrancheId
         : MutableSortedMap[TrancheId, CompletedOperationData] =
         MutableSortedMap.empty
-
-      val kryoInstantiator: ScalaKryoInstantiator = new ScalaKryoInstantiator {
-        override def newKryo(): KryoBase = {
-          val result = super.newKryo()
-
-          result.setReferenceResolver(referenceResolver)
-
-          result.setAutoReset(true) // Kryo should reset its *own* state (but not the states of the reference resolvers) after a tranche has been stored or retrieved.
-
-          result
-        }
-      }
-
-      val kryoPool: KryoPool =
-        KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
 
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
