@@ -101,21 +101,8 @@ object ImmutableObjectStorage {
           sessionReferenceResolver.value.get.setKryo(kryo)
         }
 
-        override def getWrittenId(immutableObject: Any): ObjectReferenceId = {
-          val resultFromExSessionReferenceResolver =
-            completedOperationDataByTrancheId.view
-              .map {
-                case (_, CompletedOperationData(referenceResolver, _)) =>
-                  val objectReferenceId =
-                    referenceResolver.getWrittenId(immutableObject)
-                  if (-1 != objectReferenceId) Some(objectReferenceId) else None
-              }
-              .collectFirst {
-                case Some(objectReferenceId) => objectReferenceId
-              }
-          resultFromExSessionReferenceResolver.getOrElse(
-            sessionReferenceResolver.value.get.getWrittenId(immutableObject))
-        }
+        override def getWrittenId(immutableObject: Any): ObjectReferenceId =
+          sessionReferenceResolver.value.get.getWrittenId(immutableObject)
         override def addWrittenObject(immutableObject: Any): ObjectReferenceId =
           sessionReferenceResolver.value.get.addWrittenObject(immutableObject)
         override def nextReadId(clazz: Class[_]): ObjectReferenceId =
@@ -147,6 +134,24 @@ object ImmutableObjectStorage {
           (0 until seenObjects.size) map (objectReferenceIdOffset + _)
 
         override def getWrittenId(immutableObject: Any): ObjectReferenceId = {
+          val resultFromExSessionReferenceResolver =
+            completedOperationDataByTrancheId.view
+              .map {
+                case (_, CompletedOperationData(referenceResolver, _)) =>
+                  val objectReferenceId =
+                    referenceResolver.getWrittenIdConsultingOnlyThisTranche(
+                      immutableObject)
+                  if (-1 != objectReferenceId) Some(objectReferenceId) else None
+              }
+              .collectFirst {
+                case Some(objectReferenceId) => objectReferenceId
+              }
+          resultFromExSessionReferenceResolver.getOrElse(
+            getWrittenIdConsultingOnlyThisTranche(immutableObject))
+        }
+
+        private def getWrittenIdConsultingOnlyThisTranche(
+            immutableObject: Any): ObjectReferenceId = {
           val resultFromSuperImplementation =
             super.getWrittenId(immutableObject)
           if (resultFromSuperImplementation != -1)
@@ -171,8 +176,7 @@ object ImmutableObjectStorage {
             clazz: Class[_],
             objectReferenceId: ObjectReferenceId): AnyRef =
           if (objectReferenceId >= objectReferenceIdOffset)
-            super
-              .getReadObject(clazz, objectReferenceId - objectReferenceIdOffset)
+            getReadObjectConsultingOnlyThisTranche(clazz, objectReferenceId)
           else {
             val Right(trancheIdForExternalObjectReference) =
               tranches
@@ -186,12 +190,19 @@ object ImmutableObjectStorage {
 
             completedOperationDataByTrancheId(
               trancheIdForExternalObjectReference).referenceResolver
-              .getReadObject(clazz, objectReferenceId)
+              .getReadObjectConsultingOnlyThisTranche(clazz, objectReferenceId)
           }
+
+        private def getReadObjectConsultingOnlyThisTranche(
+            clazz: Class[_],
+            objectReferenceId: ObjectReferenceId): AnyRef =
+          super
+            .getReadObject(clazz, objectReferenceId - objectReferenceIdOffset)
       }
 
-      case class CompletedOperationData(referenceResolver: ReferenceResolver,
-                                        topLevelObject: Any)
+      case class CompletedOperationData(
+          referenceResolver: TrancheSpecificReferenceResolver,
+          topLevelObject: Any)
 
       // TODO - cutover to using weak references, perhaps via 'WeakCache'?
       val completedOperationDataByTrancheId
