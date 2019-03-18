@@ -9,7 +9,7 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
   import ImmutableObjectStorage._
   import ImmutableObjectStorageSpec._
 
-  val numberOfLeaves = Gen.range("Number of leaves")(10, 50, 5)
+  val numberOfLeaves = Gen.range("Number of leaves")(10, 200, 5)
 
   performance of "Bookings" in {
     measure method ("storeAndRetrieve") in {
