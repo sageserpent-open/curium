@@ -1,21 +1,39 @@
 package com.sageserpent.plutonium.curium
+import java.lang.reflect.Method
 import java.util.UUID
 
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
-import scalacache._
-import scalacache.modes.sync._
-import scalacache.caffeine._
-import scalacache.memoization._
-import scala.concurrent.duration._
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
 import com.google.common.collect.{BiMap, HashBiMap}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
+import net.bytebuddy.description.`type`.TypeDescription
+import net.bytebuddy.description.method.MethodDescription
+import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
+import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
+import net.bytebuddy.implementation.bind.annotation.{
+  AllArguments,
+  FieldValue,
+  Origin,
+  RuntimeType
+}
+import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
+import net.bytebuddy.matcher.{ElementMatcher, ElementMatchers}
+import net.bytebuddy.{ByteBuddy, NamingStrategy}
+import scalacache._
+import scalacache.caffeine._
+import scalacache.memoization._
+import scalacache.modes.sync._
+import sun.misc.Unsafe
 
 import scala.collection.immutable
-import scala.collection.mutable.{SortedMap => MutableSortedMap}
+import scala.collection.mutable.{
+  Map => MutableMap,
+  SortedMap => MutableSortedMap
+}
+import scala.concurrent.duration._
 import scala.reflect.runtime.universe.TypeTag
 import scala.util.{DynamicVariable, Try}
 
@@ -144,6 +162,87 @@ object ImmutableObjectStorage {
   private val kryoPool: KryoPool =
     KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
 
+  object proxySupport {
+    private val byteBuddy = new ByteBuddy()
+
+    private val proxySuffix = "delayedLoadProxy"
+
+    trait AcquiredState {
+      def underlying: Any
+    }
+
+    private[curium] trait StateAcquisition {
+      def acquire(acquiredState: AcquiredState): Unit
+    }
+
+    object proxyDelayedLoading {
+      @RuntimeType
+      def apply(
+          @Origin method: Method,
+          @AllArguments arguments: Array[AnyRef],
+          @FieldValue("acquiredState") acquiredState: AcquiredState
+      ): Any = {
+        val underlying = acquiredState.underlying
+        method.invoke(underlying, arguments) // TODO - I can do better than this!!!!
+      }
+    }
+
+    private val methodsInAny: Array[MethodDescription.ForLoadedMethod] = classOf[
+      Any].getMethods map (new MethodDescription.ForLoadedMethod(_))
+
+    private val delegateToProxy: ElementMatcher[MethodDescription] =
+      methodDescription => !methodsInAny.contains(methodDescription)
+
+    private def createProxyClass(clazz: Class[_]): Class[_] = {
+      byteBuddy
+        .`with`(new NamingStrategy.AbstractBase {
+          override def name(superClass: TypeDescription): String =
+            s"${superClass.getSimpleName}_$proxySuffix"
+        })
+        .subclass(clazz, ConstructorStrategy.Default.NO_CONSTRUCTORS)
+        .method(delegateToProxy)
+        .intercept(MethodDelegation.to(proxyDelayedLoading))
+        .defineField("acquiredState", classOf[AcquiredState])
+        .implement(classOf[StateAcquisition])
+        .method(ElementMatchers.named("acquire"))
+        .intercept(FieldAccessor.ofField("acquiredState"))
+        .make
+        .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
+        .getLoaded
+    }
+
+    private val cachedProxyClasses: MutableMap[Class[_], Class[_]] =
+      MutableMap.empty
+
+    def createProxy[Result](clazz: Class[_],
+                            acquiredState: AcquiredState): AnyRef = {
+      val proxyClazz = synchronized {
+        cachedProxyClasses.getOrElseUpdate(clazz, {
+          createProxyClass(clazz)
+        })
+      }
+
+      val theUnsafeField = {
+        val result = classOf[Unsafe]
+          .getDeclaredField("theUnsafe")
+        result.setAccessible(true)
+        result
+      }
+
+      val unsafe = theUnsafeField
+        .get(null)
+        .asInstanceOf[Unsafe]
+
+      val proxy = unsafe
+        .allocateInstance(proxyClazz)
+        .asInstanceOf[StateAcquisition]
+
+      proxy.acquire(acquiredState)
+
+      proxy
+    }
+  }
+
   private def run[Result](session: Session[Result])(
       tranches: Tranches): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
@@ -259,19 +358,33 @@ object ImmutableObjectStorage {
             if (objectReferenceId >= objectReferenceIdOffset)
               getReadObjectConsultingOnlyThisTranche(objectReferenceId)
             else {
-              val Right(trancheIdForExternalObjectReference) =
-                tranches
-                  .retrieveTrancheId(objectReferenceId)
-              if (!completedOperationDataByTrancheId.contains(
-                    trancheIdForExternalObjectReference)) {
-                val _ =
-                  thisSessionInterpreter(
-                    Retrieve(trancheIdForExternalObjectReference))
+              val acquiredState = new proxySupport.AcquiredState {
+                private var _underlying: Option[Any] = None
+
+                override def underlying: Any = _underlying match {
+                  case Some(result) => result
+                  case None =>
+                    val Right(trancheIdForExternalObjectReference) =
+                      tranches
+                        .retrieveTrancheId(objectReferenceId)
+                    if (!completedOperationDataByTrancheId.contains(
+                          trancheIdForExternalObjectReference)) {
+                      val _ =
+                        thisSessionInterpreter(
+                          Retrieve(trancheIdForExternalObjectReference))
+                    }
+
+                    val result = completedOperationDataByTrancheId(
+                      trancheIdForExternalObjectReference).referenceResolver
+                      .getReadObjectConsultingOnlyThisTranche(objectReferenceId)
+
+                    _underlying = Some(result)
+
+                    result
+                }
               }
 
-              completedOperationDataByTrancheId(
-                trancheIdForExternalObjectReference).referenceResolver
-                .getReadObjectConsultingOnlyThisTranche(objectReferenceId)
+              proxySupport.createProxy(clazz, acquiredState)
             }
           }(objectCache, mode, implicitly[Flags])
 
