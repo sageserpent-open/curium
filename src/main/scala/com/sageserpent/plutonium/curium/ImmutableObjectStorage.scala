@@ -6,7 +6,7 @@ import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
-import com.google.common.collect.{BiMap, HashBiMap}
+import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
 import net.bytebuddy.description.`type`.TypeDescription
@@ -267,34 +267,19 @@ object ImmutableObjectStorage {
 
       private val objectCache: Cache[AnyRef] = CaffeineCache[AnyRef]
 
-      case class ReferenceBasedComparison(underlying: AnyRef) {
-        override def equals(other: Any): Boolean = other match {
-          case ReferenceBasedComparison(otherUnderlying) =>
-            underlying eq otherUnderlying
-          case _ => false
-        }
+      val proxyToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
+        new BiMapUsingIdentityOnForwardMappingOnly
 
-        override def hashCode(): ObjectReferenceId =
-          System.identityHashCode(underlying)
-      }
-
-      val proxyToReferenceIdMap
-        : BiMap[ReferenceBasedComparison, ObjectReferenceId] =
-        HashBiMap.create()
-
-      val referenceIdToProxyMap
-        : BiMap[ObjectReferenceId, ReferenceBasedComparison] =
+      val referenceIdToProxyMap: BiMap[ObjectReferenceId, AnyRef] =
         proxyToReferenceIdMap.inverse()
 
       class TrancheSpecificReferenceResolver(
           objectReferenceIdOffset: ObjectReferenceId)
           extends ReferenceResolver {
-        val objectToReferenceIdMap
-          : BiMap[ReferenceBasedComparison, ObjectReferenceId] =
-          HashBiMap.create()
+        val objectToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
+          new BiMapUsingIdentityOnForwardMappingOnly
 
-        val referenceIdToObjectMap
-          : BiMap[ObjectReferenceId, ReferenceBasedComparison] =
+        val referenceIdToObjectMap: BiMap[ObjectReferenceId, AnyRef] =
           objectToReferenceIdMap.inverse()
 
         def writtenObjectReferenceIds: immutable.IndexedSeq[ObjectReferenceId] =
@@ -316,24 +301,20 @@ object ImmutableObjectStorage {
                   case Some(objectReferenceId) => objectReferenceId
                 }
             resultFromExSessionReferenceResolver
-              .orElse(Option(proxyToReferenceIdMap.get(
-                ReferenceBasedComparison(immutableObject))))
+              .orElse(Option(proxyToReferenceIdMap.get(immutableObject)))
               .getOrElse(getWrittenIdConsultingOnlyThisTranche(immutableObject))
           }(objectReferenceIdCache, mode, implicitly[Flags])
 
         private def getWrittenIdConsultingOnlyThisTranche(
             immutableObject: AnyRef): ObjectReferenceId =
-          Option(
-            objectToReferenceIdMap.get(
-              ReferenceBasedComparison(immutableObject))).getOrElse(-1)
+          Option(objectToReferenceIdMap.get(immutableObject)).getOrElse(-1)
 
         override def addWrittenObject(
             immutableObject: AnyRef): ObjectReferenceId = {
           val nextObjectReferenceIdToAllocate = objectToReferenceIdMap.size + objectReferenceIdOffset
           val _ @None = Option(
-            objectToReferenceIdMap.putIfAbsent(
-              ReferenceBasedComparison(immutableObject),
-              nextObjectReferenceIdToAllocate))
+            objectToReferenceIdMap.putIfAbsent(immutableObject,
+                                               nextObjectReferenceIdToAllocate))
           nextObjectReferenceIdToAllocate
         }
 
@@ -348,9 +329,7 @@ object ImmutableObjectStorage {
         override def setReadObject(objectReferenceId: ObjectReferenceId,
                                    immutableObject: AnyRef): Unit = {
           require(objectReferenceIdOffset <= objectReferenceId)
-          referenceIdToObjectMap.forcePut(
-            objectReferenceId,
-            ReferenceBasedComparison(immutableObject))
+          referenceIdToObjectMap.forcePut(objectReferenceId, immutableObject)
         }
 
         override def getReadObject(
@@ -371,7 +350,6 @@ object ImmutableObjectStorage {
               val resultFromExistingAssociation =
                 resultFromCompletedReferenceResolver.orElse {
                   Option(referenceIdToProxyMap.get(objectReferenceId))
-                    .map(_.underlying)
                 }
 
               resultFromExistingAssociation.getOrElse {
@@ -401,8 +379,7 @@ object ImmutableObjectStorage {
 
                 val proxy = proxySupport.createProxy(clazz, acquiredState)
 
-                referenceIdToProxyMap.put(objectReferenceId,
-                                          ReferenceBasedComparison(proxy))
+                referenceIdToProxyMap.put(objectReferenceId, proxy)
 
                 proxy
               }
@@ -411,7 +388,7 @@ object ImmutableObjectStorage {
 
         private def getReadObjectConsultingOnlyThisTranche(
             objectReferenceId: ObjectReferenceId): AnyRef =
-          referenceIdToObjectMap.get(objectReferenceId).underlying
+          referenceIdToObjectMap.get(objectReferenceId)
 
         override def setKryo(kryo: Kryo): Unit = {}
 
