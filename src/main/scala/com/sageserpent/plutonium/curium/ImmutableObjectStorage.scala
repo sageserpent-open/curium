@@ -190,9 +190,6 @@ object ImmutableObjectStorage {
     private val methodsInAny: Array[MethodDescription.ForLoadedMethod] = classOf[
       Any].getMethods map (new MethodDescription.ForLoadedMethod(_))
 
-    private val delegateToProxy: ElementMatcher[MethodDescription] =
-      methodDescription => !methodsInAny.contains(methodDescription)
-
     private def createProxyClass(clazz: Class[_]): Class[_] = {
       byteBuddy
         .`with`(new NamingStrategy.AbstractBase {
@@ -200,7 +197,7 @@ object ImmutableObjectStorage {
             s"${superClass.getSimpleName}_$proxySuffix"
         })
         .subclass(clazz, ConstructorStrategy.Default.NO_CONSTRUCTORS)
-        .method(delegateToProxy)
+        .method(ElementMatchers.any())
         .intercept(MethodDelegation.to(proxyDelayedLoading))
         .defineField("acquiredState", classOf[AcquiredState])
         .implement(classOf[StateAcquisition])
