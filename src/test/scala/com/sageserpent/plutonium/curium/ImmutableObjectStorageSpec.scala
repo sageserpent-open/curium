@@ -1,5 +1,6 @@
 package com.sageserpent.plutonium.curium
 
+import cats.free.FreeT
 import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage._
@@ -312,14 +313,11 @@ class ImmutableObjectStorageSpec
       val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
 
       val samplingSession: Session[Unit] = for {
-        timeBomb <- referencePartsByTrancheId(sampleTrancheId) match {
+        _ <- (referencePartsByTrancheId(sampleTrancheId) match {
           case _: Fork => ImmutableObjectStorage.retrieve[Leaf](sampleTrancheId)
           case _: Leaf => ImmutableObjectStorage.retrieve[Fork](sampleTrancheId)
-        }
-      } yield
-        Try {
-          val _ = timeBomb.toString
-        }
+        }) flatMap (part => FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+      } yield ()
 
       ImmutableObjectStorage.runForEffectsOnly(samplingSession)(tranches) shouldBe a[
         Left[_, _]]
@@ -351,11 +349,10 @@ class ImmutableObjectStorageSpec
       val rootTrancheId = trancheIds.last
 
       val samplingSessionWithCorruptedTranche: Session[Unit] = for {
-        timeBomb <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
-      } yield
-        Try {
-          val _ = timeBomb.toString
-        }
+        _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (
+            part =>
+              FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+      } yield ()
 
       ImmutableObjectStorage.runForEffectsOnly(
         samplingSessionWithCorruptedTranche)(tranches) shouldBe a[Left[_, _]]
@@ -382,11 +379,10 @@ class ImmutableObjectStorageSpec
       val rootTrancheId = trancheIds.last
 
       val samplingSessionWithMissingTranche: Session[Unit] = for {
-        timeBomb <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
-      } yield
-        Try {
-          val _ = timeBomb.toString
-        }
+        _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (
+            part =>
+              FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+      } yield ()
 
       ImmutableObjectStorage.runForEffectsOnly(
         samplingSessionWithMissingTranche)(tranches) shouldBe a[Left[_, _]]
@@ -417,11 +413,10 @@ class ImmutableObjectStorageSpec
       val rootTrancheId = nonAlienTrancheIds.last
 
       val samplingSessionWithTrancheForIncompatibleType: Session[Unit] = for {
-        timeBomb <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
-      } yield
-        Try {
-          val _ = timeBomb.toString
-        }
+        _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (
+            part =>
+              FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+      } yield ()
 
       ImmutableObjectStorage.runForEffectsOnly(
         samplingSessionWithTrancheForIncompatibleType)(tranches) shouldBe a[
