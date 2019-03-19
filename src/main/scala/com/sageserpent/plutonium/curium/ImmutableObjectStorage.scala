@@ -20,13 +20,14 @@ import net.bytebuddy.implementation.bind.annotation.{
   RuntimeType
 }
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
-import net.bytebuddy.matcher.{ElementMatcher, ElementMatchers}
+import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
+import org.objenesis.instantiator.ObjectInstantiator
+import org.objenesis.strategy.StdInstantiatorStrategy
 import scalacache._
 import scalacache.caffeine._
 import scalacache.memoization._
 import scalacache.modes.sync._
-import sun.misc.Unsafe
 
 import scala.collection.immutable
 import scala.collection.mutable.{
@@ -208,32 +209,24 @@ object ImmutableObjectStorage {
         .getLoaded
     }
 
-    private val cachedProxyClasses: MutableMap[Class[_], Class[_]] =
+    private val cachedProxyClasses
+      : MutableMap[Class[_], ObjectInstantiator[_]] =
       MutableMap.empty
 
-    // TODO - this what copied and pasted without any thought whatsoever from the 'objenesis' library sources.
-    // Do we have to do this? For that matter, why not just use the original library?
-    val theUnsafeField = {
-      val result = classOf[Unsafe]
-        .getDeclaredField("theUnsafe")
-      result.setAccessible(true)
-      result
-    }
+    private val instantiatorStrategy: StdInstantiatorStrategy =
+      new StdInstantiatorStrategy
 
-    def createProxy[Result](clazz: Class[_],
+    def createProxy[Result](clazz: Class[Result],
                             acquiredState: AcquiredState): AnyRef = {
-      val proxyClazz = synchronized {
-        cachedProxyClasses.getOrElseUpdate(clazz, {
-          createProxyClass(clazz)
-        })
-      }
+      val proxyClassInstantiator =
+        synchronized {
+          cachedProxyClasses.getOrElseUpdate(clazz, {
+            instantiatorStrategy.newInstantiatorOf(createProxyClass(clazz))
+          })
+        }
 
-      val unsafe = theUnsafeField
-        .get(null)
-        .asInstanceOf[Unsafe]
-
-      val proxy = unsafe
-        .allocateInstance(proxyClazz)
+      val proxy = proxyClassInstantiator
+        .newInstance()
         .asInstanceOf[StateAcquisition]
 
       proxy.acquire(acquiredState)
