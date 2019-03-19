@@ -214,19 +214,21 @@ object ImmutableObjectStorage {
     private val cachedProxyClasses: MutableMap[Class[_], Class[_]] =
       MutableMap.empty
 
+    // TODO - this what copied and pasted without any thought whatsoever from the 'objenesis' library sources.
+    // Do we have to do this? For that matter, why not just use the original library?
+    val theUnsafeField = {
+      val result = classOf[Unsafe]
+        .getDeclaredField("theUnsafe")
+      result.setAccessible(true)
+      result
+    }
+
     def createProxy[Result](clazz: Class[_],
                             acquiredState: AcquiredState): AnyRef = {
       val proxyClazz = synchronized {
         cachedProxyClasses.getOrElseUpdate(clazz, {
           createProxyClass(clazz)
         })
-      }
-
-      val theUnsafeField = {
-        val result = classOf[Unsafe]
-          .getDeclaredField("theUnsafe")
-        result.setAccessible(true)
-        result
       }
 
       val unsafe = theUnsafeField
