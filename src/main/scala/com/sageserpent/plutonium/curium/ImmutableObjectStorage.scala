@@ -183,7 +183,7 @@ object ImmutableObjectStorage {
           @FieldValue("acquiredState") acquiredState: AcquiredState
       ): Any = {
         val underlying = acquiredState.underlying
-        method.invoke(underlying, arguments) // TODO - I can do better than this!!!!
+        method.invoke(underlying, arguments: _*) // TODO - I can do better than this!!!! Actually, I mean that ByteBuddy can do this better than I.
       }
     }
 
