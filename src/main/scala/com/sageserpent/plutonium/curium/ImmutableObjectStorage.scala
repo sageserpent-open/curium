@@ -288,6 +288,14 @@ object ImmutableObjectStorage {
           System.identityHashCode(underlying)
       }
 
+      val proxyToReferenceIdMap
+        : BiMap[ReferenceBasedComparison, ObjectReferenceId] =
+        HashBiMap.create()
+
+      val referenceIdToProxyMap
+        : BiMap[ObjectReferenceId, ReferenceBasedComparison] =
+        proxyToReferenceIdMap.inverse()
+
       class TrancheSpecificReferenceResolver(
           objectReferenceIdOffset: ObjectReferenceId)
           extends ReferenceResolver {
@@ -317,8 +325,10 @@ object ImmutableObjectStorage {
                 .collectFirst {
                   case Some(objectReferenceId) => objectReferenceId
                 }
-            resultFromExSessionReferenceResolver.getOrElse(
-              getWrittenIdConsultingOnlyThisTranche(immutableObject))
+            resultFromExSessionReferenceResolver
+              .orElse(Option(proxyToReferenceIdMap.get(
+                ReferenceBasedComparison(immutableObject))))
+              .getOrElse(getWrittenIdConsultingOnlyThisTranche(immutableObject))
           }(objectReferenceIdCache, mode, implicitly[Flags])
 
         private def getWrittenIdConsultingOnlyThisTranche(
@@ -360,33 +370,60 @@ object ImmutableObjectStorage {
             if (objectReferenceId >= objectReferenceIdOffset)
               getReadObjectConsultingOnlyThisTranche(objectReferenceId)
             else {
-              val acquiredState = new proxySupport.AcquiredState {
-                private var _underlying: Option[Any] = None
+              // TODO: always look at the other tranche resolvers first to see if
+              // the inter-tranche reference can be resolved immediately without
+              // using a proxy. If not, look in the session's
+              // proxy resolver, which is the last resort for resolution, and finally
+              // fallback to generating the proxy on the fly and storing it in the
+              // proxy resolver.
 
-                override def underlying: Any = _underlying match {
-                  case Some(result) => result
-                  case None =>
-                    val Right(trancheIdForExternalObjectReference) =
-                      tranches
-                        .retrieveTrancheId(objectReferenceId)
-                    if (!completedOperationDataByTrancheId.contains(
-                          trancheIdForExternalObjectReference)) {
-                      val _ =
-                        thisSessionInterpreter(
-                          Retrieve(trancheIdForExternalObjectReference))
-                    }
+              // TODO: add this in on the write side too!
 
-                    val result = completedOperationDataByTrancheId(
-                      trancheIdForExternalObjectReference).referenceResolver
-                      .getReadObjectConsultingOnlyThisTranche(objectReferenceId)
+              // TODO: clean up the 'containsKey' + 'get' sequences.
 
-                    _underlying = Some(result)
+              val Right(trancheIdForExternalObjectReference) =
+                tranches
+                  .retrieveTrancheId(objectReferenceId)
 
-                    result
+              if (completedOperationDataByTrancheId.contains(
+                    trancheIdForExternalObjectReference)) {
+                completedOperationDataByTrancheId(
+                  trancheIdForExternalObjectReference).referenceResolver
+                  .getReadObjectConsultingOnlyThisTranche(objectReferenceId)
+              } else if (referenceIdToProxyMap.containsKey(objectReferenceId)) {
+                referenceIdToProxyMap.get(objectReferenceId).underlying
+              } else {
+                val acquiredState = new proxySupport.AcquiredState {
+                  private var _underlying: Option[Any] = None
+
+                  override def underlying: Any = _underlying match {
+                    case Some(result) => result
+                    case None =>
+                      if (!completedOperationDataByTrancheId.contains(
+                            trancheIdForExternalObjectReference)) {
+                        val _ =
+                          thisSessionInterpreter(
+                            Retrieve(trancheIdForExternalObjectReference))
+                      }
+
+                      val result = completedOperationDataByTrancheId(
+                        trancheIdForExternalObjectReference).referenceResolver
+                        .getReadObjectConsultingOnlyThisTranche(
+                          objectReferenceId)
+
+                      _underlying = Some(result)
+
+                      result
+                  }
                 }
-              }
 
-              proxySupport.createProxy(clazz, acquiredState)
+                val proxy = proxySupport.createProxy(clazz, acquiredState)
+
+                referenceIdToProxyMap.put(objectReferenceId,
+                                          ReferenceBasedComparison(proxy))
+
+                proxy
+              }
             }
           }(objectCache, mode, implicitly[Flags])
 
