@@ -367,29 +367,21 @@ object ImmutableObjectStorage {
             if (objectReferenceId >= objectReferenceIdOffset)
               getReadObjectConsultingOnlyThisTranche(objectReferenceId)
             else {
-              // TODO: always look at the other tranche resolvers first to see if
-              // the inter-tranche reference can be resolved immediately without
-              // using a proxy. If not, look in the session's
-              // proxy resolver, which is the last resort for resolution, and finally
-              // fallback to generating the proxy on the fly and storing it in the
-              // proxy resolver.
-
-              // TODO: add this in on the write side too!
-
-              // TODO: clean up the 'containsKey' + 'get' sequences.
-
               val Right(trancheIdForExternalObjectReference) =
                 tranches
                   .retrieveTrancheId(objectReferenceId)
 
-              if (completedOperationDataByTrancheId.contains(
-                    trancheIdForExternalObjectReference)) {
-                completedOperationDataByTrancheId(
-                  trancheIdForExternalObjectReference).referenceResolver
-                  .getReadObjectConsultingOnlyThisTranche(objectReferenceId)
-              } else if (referenceIdToProxyMap.containsKey(objectReferenceId)) {
-                referenceIdToProxyMap.get(objectReferenceId).underlying
-              } else {
+              val resultFromCompletedReferenceResolver = completedOperationDataByTrancheId
+                .get(trancheIdForExternalObjectReference) map (_.referenceResolver
+                .getReadObjectConsultingOnlyThisTranche(objectReferenceId))
+
+              val resultFromExistingAssociation =
+                resultFromCompletedReferenceResolver.orElse {
+                  Option(referenceIdToProxyMap.get(objectReferenceId))
+                    .map(_.underlying)
+                }
+
+              resultFromExistingAssociation.getOrElse {
                 val acquiredState = new proxySupport.AcquiredState {
                   private var _underlying: Option[Any] = None
 
