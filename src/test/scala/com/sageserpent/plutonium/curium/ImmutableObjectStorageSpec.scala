@@ -312,11 +312,14 @@ class ImmutableObjectStorageSpec
       val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
 
       val samplingSession: Session[Unit] = for {
-        _ <- referencePartsByTrancheId(sampleTrancheId) match {
+        timeBomb <- referencePartsByTrancheId(sampleTrancheId) match {
           case _: Fork => ImmutableObjectStorage.retrieve[Leaf](sampleTrancheId)
           case _: Leaf => ImmutableObjectStorage.retrieve[Fork](sampleTrancheId)
         }
-      } yield ()
+      } yield
+        Try {
+          val _ = timeBomb.toString
+        }
 
       ImmutableObjectStorage.runForEffectsOnly(samplingSession)(tranches) shouldBe a[
         Left[_, _]]
@@ -348,8 +351,11 @@ class ImmutableObjectStorageSpec
       val rootTrancheId = trancheIds.last
 
       val samplingSessionWithCorruptedTranche: Session[Unit] = for {
-        _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
-      } yield ()
+        timeBomb <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
+      } yield
+        Try {
+          val _ = timeBomb.toString
+        }
 
       ImmutableObjectStorage.runForEffectsOnly(
         samplingSessionWithCorruptedTranche)(tranches) shouldBe a[Left[_, _]]
@@ -376,8 +382,11 @@ class ImmutableObjectStorageSpec
       val rootTrancheId = trancheIds.last
 
       val samplingSessionWithMissingTranche: Session[Unit] = for {
-        _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
-      } yield ()
+        timeBomb <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
+      } yield
+        Try {
+          val _ = timeBomb.toString
+        }
 
       ImmutableObjectStorage.runForEffectsOnly(
         samplingSessionWithMissingTranche)(tranches) shouldBe a[Left[_, _]]
@@ -408,8 +417,11 @@ class ImmutableObjectStorageSpec
       val rootTrancheId = nonAlienTrancheIds.last
 
       val samplingSessionWithTrancheForIncompatibleType: Session[Unit] = for {
-        _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
-      } yield ()
+        timeBomb <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId)
+      } yield
+        Try {
+          val _ = timeBomb.toString
+        }
 
       ImmutableObjectStorage.runForEffectsOnly(
         samplingSessionWithTrancheForIncompatibleType)(tranches) shouldBe a[
