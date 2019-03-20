@@ -9,9 +9,13 @@ import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
 import net.bytebuddy.description.`type`.TypeDescription
-import net.bytebuddy.description.modifier.Visibility
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
+import net.bytebuddy.implementation.bind.annotation.{
+  FieldValue,
+  Pipe,
+  RuntimeType
+}
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
@@ -171,6 +175,20 @@ object ImmutableObjectStorage {
     }
 
     private def createProxyClass[X](clazz: Class[X]): Class[X] = {
+      type PipeForwarding = Function[X, Nothing]
+
+      object proxyDelayedLoading {
+        @RuntimeType
+        def apply(
+            @Pipe pipeTo: PipeForwarding,
+            @FieldValue("acquiredState") acquiredState: AcquiredState[X]
+        ): Any = {
+          val underlying: X = acquiredState.underlying
+
+          pipeTo(underlying)
+        }
+      }
+
       byteBuddy
         .`with`(new NamingStrategy.AbstractBase {
           override def name(superClass: TypeDescription): String =
@@ -178,7 +196,10 @@ object ImmutableObjectStorage {
         })
         .subclass(clazz, ConstructorStrategy.Default.NO_CONSTRUCTORS)
         .method(ElementMatchers.any().and(ElementMatchers.isPublic()))
-        .intercept(MethodDelegation.toMethodReturnOf("underlying"))
+        .intercept(MethodDelegation
+          .withDefaultConfiguration()
+          .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
+          .to(proxyDelayedLoading))
         .defineField("acquiredState",
                      TypeDescription.Generic.Builder
                        .parameterizedType(classOf[AcquiredState[_]], Seq(clazz))
@@ -186,8 +207,6 @@ object ImmutableObjectStorage {
         .implement(classOf[StateAcquisition[X]])
         .method(ElementMatchers.named("acquire"))
         .intercept(FieldAccessor.ofField("acquiredState"))
-        .defineMethod("underlying", clazz, Visibility.PRIVATE)
-        .intercept(MethodDelegation.toField("acquiredState"))
         .make
         .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
         .getLoaded
