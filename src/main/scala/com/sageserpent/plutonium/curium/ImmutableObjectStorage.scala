@@ -22,6 +22,7 @@ import scalacache.caffeine._
 import scalacache.memoization._
 import scalacache.modes.sync._
 
+import scala.collection.JavaConversions._
 import scala.collection.immutable
 import scala.collection.mutable.{
   Map => MutableMap,
@@ -30,8 +31,6 @@ import scala.collection.mutable.{
 import scala.concurrent.duration._
 import scala.reflect.runtime.universe.TypeTag
 import scala.util.{DynamicVariable, Try}
-
-import scala.collection.JavaConversions._
 
 object ImmutableObjectStorage {
   type TrancheId = UUID
@@ -178,7 +177,7 @@ object ImmutableObjectStorage {
             s"${superClass.getSimpleName}_$proxySuffix"
         })
         .subclass(clazz, ConstructorStrategy.Default.NO_CONSTRUCTORS)
-        .method(ElementMatchers.any())
+        .method(ElementMatchers.any().and(ElementMatchers.isPublic()))
         .intercept(MethodDelegation.toMethodReturnOf("underlying"))
         .defineField("acquiredState",
                      TypeDescription.Generic.Builder
