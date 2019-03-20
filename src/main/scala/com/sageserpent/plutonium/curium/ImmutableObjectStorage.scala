@@ -1,5 +1,4 @@
 package com.sageserpent.plutonium.curium
-import java.lang.reflect.Method
 import java.util.UUID
 
 import cats.arrow.FunctionK
@@ -10,15 +9,9 @@ import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
 import net.bytebuddy.description.`type`.TypeDescription
-import net.bytebuddy.description.method.MethodDescription
+import net.bytebuddy.description.modifier.Visibility
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
-import net.bytebuddy.implementation.bind.annotation.{
-  AllArguments,
-  FieldValue,
-  Origin,
-  RuntimeType
-}
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
@@ -37,6 +30,8 @@ import scala.collection.mutable.{
 import scala.concurrent.duration._
 import scala.reflect.runtime.universe.TypeTag
 import scala.util.{DynamicVariable, Try}
+
+import scala.collection.JavaConversions._
 
 object ImmutableObjectStorage {
   type TrancheId = UUID
@@ -168,30 +163,15 @@ object ImmutableObjectStorage {
 
     private val proxySuffix = "delayedLoadProxy"
 
-    trait AcquiredState {
-      def underlying: Any
+    trait AcquiredState[X] {
+      def underlying: X
     }
 
-    private[curium] trait StateAcquisition {
-      def acquire(acquiredState: AcquiredState): Unit
+    private[curium] trait StateAcquisition[X] {
+      def acquire(acquiredState: AcquiredState[X]): Unit
     }
 
-    object proxyDelayedLoading {
-      @RuntimeType
-      def apply(
-          @Origin method: Method,
-          @AllArguments arguments: Array[AnyRef],
-          @FieldValue("acquiredState") acquiredState: AcquiredState
-      ): Any = {
-        val underlying = acquiredState.underlying
-        method.invoke(underlying, arguments: _*) // TODO - I can do better than this!!!! Actually, I mean that ByteBuddy can do this better than I.
-      }
-    }
-
-    private val methodsInAny: Array[MethodDescription.ForLoadedMethod] = classOf[
-      Any].getMethods map (new MethodDescription.ForLoadedMethod(_))
-
-    private def createProxyClass(clazz: Class[_]): Class[_] = {
+    private def createProxyClass[X](clazz: Class[X]): Class[X] = {
       byteBuddy
         .`with`(new NamingStrategy.AbstractBase {
           override def name(superClass: TypeDescription): String =
@@ -199,17 +179,23 @@ object ImmutableObjectStorage {
         })
         .subclass(clazz, ConstructorStrategy.Default.NO_CONSTRUCTORS)
         .method(ElementMatchers.any())
-        .intercept(MethodDelegation.to(proxyDelayedLoading))
-        .defineField("acquiredState", classOf[AcquiredState])
-        .implement(classOf[StateAcquisition])
+        .intercept(MethodDelegation.toMethodReturnOf("underlying"))
+        .defineField("acquiredState",
+                     TypeDescription.Generic.Builder
+                       .parameterizedType(classOf[AcquiredState[_]], Seq(clazz))
+                       .build)
+        .implement(classOf[StateAcquisition[X]])
         .method(ElementMatchers.named("acquire"))
         .intercept(FieldAccessor.ofField("acquiredState"))
+        .defineMethod("underlying", clazz, Visibility.PRIVATE)
+        .intercept(MethodDelegation.toField("acquiredState"))
         .make
         .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
         .getLoaded
+        .asInstanceOf[Class[X]]
     }
 
-    private val cachedProxyClasses
+    private val cachedProxyClassInstantiators
       : MutableMap[Class[_], ObjectInstantiator[_]] =
       MutableMap.empty
 
@@ -217,17 +203,17 @@ object ImmutableObjectStorage {
       new StdInstantiatorStrategy
 
     def createProxy[Result](clazz: Class[Result],
-                            acquiredState: AcquiredState): AnyRef = {
+                            acquiredState: AcquiredState[Result]): AnyRef = {
       val proxyClassInstantiator =
         synchronized {
-          cachedProxyClasses.getOrElseUpdate(clazz, {
+          cachedProxyClassInstantiators.getOrElseUpdate(clazz, {
             instantiatorStrategy.newInstantiatorOf(createProxyClass(clazz))
           })
         }
 
       val proxy = proxyClassInstantiator
         .newInstance()
-        .asInstanceOf[StateAcquisition]
+        .asInstanceOf[StateAcquisition[Result]]
 
       proxy.acquire(acquiredState)
 
@@ -353,29 +339,31 @@ object ImmutableObjectStorage {
                 }
 
               resultFromExistingAssociation.getOrElse {
-                val acquiredState = new proxySupport.AcquiredState {
-                  private var _underlying: Option[Any] = None
+                def acquiredState[X]: proxySupport.AcquiredState[X] =
+                  new proxySupport.AcquiredState[X] {
+                    private var _underlying: Option[X] = None
 
-                  override def underlying: Any = _underlying match {
-                    case Some(result) => result
-                    case None =>
-                      if (!completedOperationDataByTrancheId.contains(
-                            trancheIdForExternalObjectReference)) {
-                        val _ =
-                          thisSessionInterpreter(
-                            Retrieve(trancheIdForExternalObjectReference))
-                      }
+                    override def underlying: X = _underlying match {
+                      case Some(result) => result
+                      case None =>
+                        if (!completedOperationDataByTrancheId.contains(
+                              trancheIdForExternalObjectReference)) {
+                          val _ =
+                            thisSessionInterpreter(
+                              Retrieve(trancheIdForExternalObjectReference))
+                        }
 
-                      val result = completedOperationDataByTrancheId(
-                        trancheIdForExternalObjectReference).referenceResolver
-                        .getReadObjectConsultingOnlyThisTranche(
-                          objectReferenceId)
+                        val result = completedOperationDataByTrancheId(
+                          trancheIdForExternalObjectReference).referenceResolver
+                          .getReadObjectConsultingOnlyThisTranche(
+                            objectReferenceId)
+                          .asInstanceOf[X]
 
-                      _underlying = Some(result)
+                        _underlying = Some(result)
 
-                      result
+                        result
+                    }
                   }
-                }
 
                 val proxy = proxySupport.createProxy(clazz, acquiredState)
 
