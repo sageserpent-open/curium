@@ -68,6 +68,6 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
         yield ()
 
     val Right(()) =
-      ImmutableObjectStorage.run(retrievalSession)(tranches)
+      ImmutableObjectStorage.runForEffectsOnly(retrievalSession)(tranches)
   }
 }

@@ -157,7 +157,7 @@ object ImmutableObjectStorageSpec {
 
       val Right(trancheIdsForChunk) =
         ImmutableObjectStorage
-          .run(retrievalAndStorageSession)(tranches)
+          .runToYieldTrancheIds(retrievalAndStorageSession)(tranches)
 
       trancheIdsSoFar ++= trancheIdsForChunk
     }
@@ -280,7 +280,7 @@ class ImmutableObjectStorageSpec
             permutedRetrievedParts(backwardsPermutation(index)))
 
       val Right(retrievedParts) =
-        ImmutableObjectStorage.run(retrievalSession)(tranches)
+        ImmutableObjectStorage.unsafeRun(retrievalSession)(tranches)
 
       retrievedParts should contain theSameElementsInOrderAs expectedParts
 
@@ -318,8 +318,8 @@ class ImmutableObjectStorageSpec
         }) flatMap (part => FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
       } yield ()
 
-      ImmutableObjectStorage.run(samplingSession)(tranches) shouldBe a[Left[_,
-                                                                            _]]
+      ImmutableObjectStorage.runForEffectsOnly(samplingSession)(tranches) shouldBe a[
+        Left[_, _]]
     }
   }
 
@@ -353,8 +353,8 @@ class ImmutableObjectStorageSpec
               FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
       } yield ()
 
-      ImmutableObjectStorage.run(samplingSessionWithCorruptedTranche)(tranches) shouldBe a[
-        Left[_, _]]
+      ImmutableObjectStorage.runForEffectsOnly(
+        samplingSessionWithCorruptedTranche)(tranches) shouldBe a[Left[_, _]]
     }
   }
 
@@ -383,8 +383,8 @@ class ImmutableObjectStorageSpec
               FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
       } yield ()
 
-      ImmutableObjectStorage.run(samplingSessionWithMissingTranche)(tranches) shouldBe a[
-        Left[_, _]]
+      ImmutableObjectStorage.runForEffectsOnly(
+        samplingSessionWithMissingTranche)(tranches) shouldBe a[Left[_, _]]
     }
   }
 
@@ -397,7 +397,7 @@ class ImmutableObjectStorageSpec
 
       val tranches = new FakeTranches
 
-      val Right(alienTrancheId) = ImmutableObjectStorage.run(
+      val Right(alienTrancheId) = ImmutableObjectStorage.runToYieldTrancheId(
         ImmutableObjectStorage.store(alien))(tranches)
 
       val nonAlienTrancheIds =
@@ -417,8 +417,9 @@ class ImmutableObjectStorageSpec
               FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
       } yield ()
 
-      ImmutableObjectStorage.run(samplingSessionWithTrancheForIncompatibleType)(
-        tranches) shouldBe a[Left[_, _]]
+      ImmutableObjectStorage.runForEffectsOnly(
+        samplingSessionWithTrancheForIncompatibleType)(tranches) shouldBe a[
+        Left[_, _]]
     }
   }
 
@@ -441,8 +442,8 @@ class ImmutableObjectStorageSpec
           ImmutableObjectStorage.store(root)
 
         val Right(isolatedTrancheId) =
-          ImmutableObjectStorage.run(isolatedSpokeStorageSession)(
-            isolatedSpokeTranches)
+          ImmutableObjectStorage.runToYieldTrancheId(
+            isolatedSpokeStorageSession)(isolatedSpokeTranches)
 
         isolatedSpokeTranches.tranchesById(isolatedTrancheId)
       }
@@ -483,8 +484,8 @@ class ImmutableObjectStorageSpec
         retrievedPartTakeTwo should be theSameInstanceAs retrievedPartTakeOne
       }
 
-      ImmutableObjectStorage.run(samplingSession)(tranches) shouldBe a[Right[_,
-                                                                             _]]
+      ImmutableObjectStorage.runForEffectsOnly(samplingSession)(tranches) shouldBe a[
+        Right[_, _]]
     }
   }
 }
