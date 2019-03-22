@@ -99,18 +99,6 @@ object ImmutableObjectStorage {
   def retrieve[X: TypeTag](id: TrancheId): Session[X] =
     FreeT.liftF[Operation, EitherThrowableOr, X](Retrieve(id))
 
-  def runToYieldTrancheIds(session: Session[Vector[TrancheId]])
-    : Tranches => EitherThrowableOr[Vector[TrancheId]] =
-    run(session)
-
-  def runToYieldTrancheId(
-      session: Session[TrancheId]): Tranches => EitherThrowableOr[TrancheId] =
-    run(session)
-
-  def runForEffectsOnly(
-      session: Session[Unit]): Tranches => EitherThrowableOr[Unit] =
-    run(session)
-
   private val sessionReferenceResolver
     : DynamicVariable[Option[ReferenceResolver]] =
     new DynamicVariable(None)
@@ -239,7 +227,7 @@ object ImmutableObjectStorage {
     }
   }
 
-  private def run[Result](session: Session[Result])(
+  def run[Result](session: Session[Result])(
       tranches: Tranches): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
