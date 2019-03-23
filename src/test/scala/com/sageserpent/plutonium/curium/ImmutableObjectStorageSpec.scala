@@ -270,24 +270,23 @@ class ImmutableObjectStorageSpec
       val permutedTrancheIds = Vector(trancheIds.indices map (index =>
         trancheIds(forwardPermutation(index))): _*)
 
-      val retrievalSession: Session[Unit] =
+      val retrievalSession: Session[IndexedSeq[Part]] =
         for {
-          retrievedParts <- permutedTrancheIds.traverse(
+          permutedRetrievedParts <- permutedTrancheIds.traverse(
             ImmutableObjectStorage.retrieve[Part])
 
-        } yield {
-          val unpermutedRetrievedParts = retrievedParts.indices map (index =>
-            retrievedParts(backwardsPermutation(index)))
+        } yield
+          permutedRetrievedParts.indices map (index =>
+            permutedRetrievedParts(backwardsPermutation(index)))
 
-          unpermutedRetrievedParts should contain theSameElementsInOrderAs expectedParts
+      val Right(retrievedParts) =
+        ImmutableObjectStorage.unsafeRun(retrievalSession)(tranches)
 
-          Inspectors.forAll(retrievedParts)(retrievedPart =>
-            Inspectors.forAll(expectedParts)(expectedPart =>
-              retrievedPart should not be theSameInstanceAs(expectedPart)))
-        }
+      retrievedParts should contain theSameElementsInOrderAs expectedParts
 
-      ImmutableObjectStorage.runForEffectsOnly(retrievalSession)(tranches) shouldBe a[
-        Right[_, _]]
+      Inspectors.forAll(retrievedParts)(retrievedPart =>
+        Inspectors.forAll(expectedParts)(expectedPart =>
+          retrievedPart should not be theSameInstanceAs(expectedPart)))
     }
   }
 

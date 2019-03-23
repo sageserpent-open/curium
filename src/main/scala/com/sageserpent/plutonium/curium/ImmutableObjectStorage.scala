@@ -101,15 +101,15 @@ object ImmutableObjectStorage {
 
   def runToYieldTrancheIds(session: Session[Vector[TrancheId]])
     : Tranches => EitherThrowableOr[Vector[TrancheId]] =
-    run(session)
+    unsafeRun(session)
 
   def runToYieldTrancheId(
       session: Session[TrancheId]): Tranches => EitherThrowableOr[TrancheId] =
-    run(session)
+    unsafeRun(session)
 
   def runForEffectsOnly(
       session: Session[Unit]): Tranches => EitherThrowableOr[Unit] =
-    run(session)
+    unsafeRun(session)
 
   private val sessionReferenceResolver
     : DynamicVariable[Option[ReferenceResolver]] =
@@ -239,7 +239,7 @@ object ImmutableObjectStorage {
     }
   }
 
-  private def run[Result](session: Session[Result])(
+  def unsafeRun[Result](session: Session[Result])(
       tranches: Tranches): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
