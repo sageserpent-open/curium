@@ -322,13 +322,8 @@ object ImmutableObjectStorage {
           nextObjectReferenceIdToAllocate
         }
 
-        override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
-          val nextObjectReferenceIdToAllocate = referenceIdToObjectMap.size + objectReferenceIdOffset
-          val _ @None = Option(
-            referenceIdToObjectMap.putIfAbsent(nextObjectReferenceIdToAllocate,
-                                               null))
-          nextObjectReferenceIdToAllocate
-        }
+        override def nextReadId(clazz: Class[_]): ObjectReferenceId =
+          referenceIdToObjectMap.size + objectReferenceIdOffset
 
         override def setReadObject(objectReferenceId: ObjectReferenceId,
                                    immutableObject: AnyRef): Unit = {
