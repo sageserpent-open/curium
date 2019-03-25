@@ -220,6 +220,7 @@ class ImmutableObjectStorageSpec
     with GeneratorDrivenPropertyChecks {
   import ImmutableObjectStorageSpec._
 
+  // TODO - reinstate shrinkage and see that it works.
   implicit def shrinkAny[Seq[PartGrowthStep]]: Shrink[Seq[PartGrowthStep]] =
     Shrink(_ => Stream.empty)
 
