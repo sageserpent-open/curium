@@ -4,10 +4,17 @@ import java.util.UUID
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
-import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
+import com.esotericsoftware.kryo.serializers.ClosureSerializer
+import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
-import com.twitter.chill.{KryoBase, KryoPool, ScalaKryoInstantiator}
+import com.twitter.chill.{
+  CleaningSerializer,
+  KryoBase,
+  KryoInstantiator,
+  KryoPool,
+  ScalaKryoInstantiator
+}
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
@@ -145,7 +152,7 @@ object ImmutableObjectStorage {
 
   }
 
-  private val kryoInstantiator: ScalaKryoInstantiator =
+  private val kryoInstantiator: KryoInstantiator =
     new ScalaKryoInstantiator {
       override def newKryo(): KryoBase = {
         val result = super.newKryo()
@@ -156,7 +163,12 @@ object ImmutableObjectStorage {
 
         result
       }
-    }
+    }.withRegistrar(
+      kryo =>
+        kryo.register(
+          classOf[ClosureSerializer.Closure],
+          new CleaningSerializer(
+            (new ClosureSerializer).asInstanceOf[Serializer[_ <: AnyRef]])))
 
   private val kryoPool: KryoPool =
     KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
@@ -277,6 +289,10 @@ object ImmutableObjectStorage {
       val referenceIdToProxyMap: BiMap[ObjectReferenceId, AnyRef] =
         proxyToReferenceIdMap.inverse()
 
+      // NOTE: *not* an object, we want a fresh instance each time, as the tranche-specific reference resolver uses
+      // bidirectional maps - so each value can only be associated with *one* key.
+      class PlaceholderAssociatedWithFreshObjectReferenceId
+
       class TrancheSpecificReferenceResolver(
           objectReferenceIdOffset: ObjectReferenceId)
           extends ReferenceResolver {
@@ -322,13 +338,19 @@ object ImmutableObjectStorage {
           nextObjectReferenceIdToAllocate
         }
 
-        override def nextReadId(clazz: Class[_]): ObjectReferenceId =
-          referenceIdToObjectMap.size + objectReferenceIdOffset
+        override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
+          val nextObjectReferenceIdToAllocate = referenceIdToObjectMap.size + objectReferenceIdOffset
+          val _ @None = Option(
+            referenceIdToObjectMap.putIfAbsent(
+              nextObjectReferenceIdToAllocate,
+              new PlaceholderAssociatedWithFreshObjectReferenceId))
+          nextObjectReferenceIdToAllocate
+        }
 
         override def setReadObject(objectReferenceId: ObjectReferenceId,
                                    immutableObject: AnyRef): Unit = {
           require(objectReferenceIdOffset <= objectReferenceId)
-          referenceIdToObjectMap.forcePut(objectReferenceId, immutableObject)
+          referenceIdToObjectMap.put(objectReferenceId, immutableObject)
         }
 
         override def getReadObject(
