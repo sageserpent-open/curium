@@ -1,15 +1,14 @@
 package com.sageserpent.plutonium.curium
+import java.lang.reflect.Modifier
 import java.util.UUID
 
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
-import com.esotericsoftware.kryo.serializers.ClosureSerializer
-import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
+import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{
-  CleaningSerializer,
   KryoBase,
   KryoInstantiator,
   KryoPool,
@@ -163,12 +162,7 @@ object ImmutableObjectStorage {
 
         result
       }
-    }.withRegistrar(
-      kryo =>
-        kryo.register(
-          classOf[ClosureSerializer.Closure],
-          new CleaningSerializer(
-            (new ClosureSerializer).asInstanceOf[Serializer[_ <: AnyRef]])))
+    }
 
   private val kryoPool: KryoPool =
     KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
@@ -185,6 +179,13 @@ object ImmutableObjectStorage {
     private[curium] trait StateAcquisition[X] {
       def acquire(acquiredState: AcquiredState[X]): Unit
     }
+
+    val clazzesThatShouldNotBeProxied: Set[Class[_]] =
+      Set(classOf[String], classOf[Class[_]])
+
+    def isNotToBeProxied(clazz: Class[_]): Boolean =
+      Modifier.isFinal(clazz.getModifiers) || clazzesThatShouldNotBeProxied
+        .contains(clazz)
 
     private def createProxyClass[X](clazz: Class[X]): Class[X] = {
       type PipeForwarding = Function[X, Nothing]
@@ -289,9 +290,12 @@ object ImmutableObjectStorage {
       val referenceIdToProxyMap: BiMap[ObjectReferenceId, AnyRef] =
         proxyToReferenceIdMap.inverse()
 
-      // NOTE: *not* an object, we want a fresh instance each time, as the tranche-specific reference resolver uses
-      // bidirectional maps - so each value can only be associated with *one* key.
+      // NOTE: a class and *not* an object; we want a fresh instance each time, as the tranche-specific
+      // reference resolver uses bidirectional maps - so each value can only be associated with *one* key.
       class PlaceholderAssociatedWithFreshObjectReferenceId
+
+      private def useReferences(clazz: Class[_]): Boolean =
+        !clazz.isPrimitive
 
       class TrancheSpecificReferenceResolver(
           objectReferenceIdOffset: ObjectReferenceId)
@@ -381,18 +385,9 @@ object ImmutableObjectStorage {
                     override def underlying: X = _underlying match {
                       case Some(result) => result
                       case None =>
-                        if (!completedOperationDataByTrancheId.contains(
-                              trancheIdForExternalObjectReference)) {
-                          val _ =
-                            thisSessionInterpreter(
-                              Retrieve(trancheIdForExternalObjectReference))
-                        }
-
-                        val result = completedOperationDataByTrancheId(
-                          trancheIdForExternalObjectReference).referenceResolver
-                          .getReadObjectConsultingOnlyThisTranche(
-                            objectReferenceId)
-                          .asInstanceOf[X]
+                        val result: X = retrieveUnderlying(
+                          trancheIdForExternalObjectReference,
+                          objectReferenceId)
 
                         _underlying = Some(result)
 
@@ -400,14 +395,34 @@ object ImmutableObjectStorage {
                     }
                   }
 
-                val proxy = proxySupport.createProxy(clazz, acquiredState)
+                if (proxySupport.isNotToBeProxied(clazz))
+                  retrieveUnderlying(trancheIdForExternalObjectReference,
+                                     objectReferenceId)
+                else {
+                  val proxy = proxySupport.createProxy(clazz, acquiredState)
 
-                referenceIdToProxyMap.put(objectReferenceId, proxy)
+                  referenceIdToProxyMap.put(objectReferenceId, proxy)
 
-                proxy
+                  proxy
+                }
               }
             }
           }(objectCache, mode, implicitly[Flags])
+
+        private def retrieveUnderlying[X](
+            trancheIdForExternalObjectReference: TrancheId,
+            objectReferenceId: ObjectReferenceId): X = {
+          if (!completedOperationDataByTrancheId.contains(
+                trancheIdForExternalObjectReference)) {
+            val _ =
+              thisSessionInterpreter(
+                Retrieve(trancheIdForExternalObjectReference))
+          }
+
+          completedOperationDataByTrancheId(trancheIdForExternalObjectReference).referenceResolver
+            .getReadObjectConsultingOnlyThisTranche(objectReferenceId)
+            .asInstanceOf[X]
+        }
 
         private def getReadObjectConsultingOnlyThisTranche(
             objectReferenceId: ObjectReferenceId): AnyRef =
@@ -417,7 +432,8 @@ object ImmutableObjectStorage {
 
         override def reset(): Unit = {}
 
-        override def useReferences(clazz: Class[_]): Boolean = true
+        override def useReferences(clazz: Class[_]): Boolean =
+          thisSessionInterpreter.useReferences(clazz)
       }
 
       case class CompletedOperationData(
