@@ -188,6 +188,9 @@ object ImmutableObjectStorage {
         .contains(clazz)
 
     private def createProxyClass[X](clazz: Class[X]): Class[X] = {
+      // We should never end up having to make chains of delegating proxies!
+      require(!clazz.getSimpleName.endsWith(proxySuffix))
+
       type PipeForwarding = Function[X, Nothing]
 
       object proxyDelayedLoading {
