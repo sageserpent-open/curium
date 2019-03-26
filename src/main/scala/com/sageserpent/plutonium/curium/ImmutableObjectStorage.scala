@@ -6,7 +6,7 @@ import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
-import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
+import com.esotericsoftware.kryo.{Kryo, KryoSerializable, ReferenceResolver}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{
@@ -21,7 +21,8 @@ import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
 import net.bytebuddy.implementation.bind.annotation.{
   FieldValue,
   Pipe,
-  RuntimeType
+  RuntimeType,
+  This
 }
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
@@ -182,11 +183,11 @@ object ImmutableObjectStorage {
     }
 
     val clazzesThatShouldNotBeProxied: Set[Class[_]] =
-      Set(classOf[String], classOf[Class[_]])
+      Set(classOf[StateAcquisition[_]], classOf[String], classOf[Class[_]])
 
     def isNotToBeProxied(clazz: Class[_]): Boolean =
       Modifier.isFinal(clazz.getModifiers) || clazzesThatShouldNotBeProxied
-        .contains(clazz)
+        .exists(_.isAssignableFrom(clazz))
 
     private def createProxyClass[X](clazz: Class[X]): Class[X] = {
       // We should never end up having to make chains of delegating proxies!
@@ -204,12 +205,22 @@ object ImmutableObjectStorage {
 
           pipeTo(underlying)
         }
+      }
+
+      object proxySerialization {
+        @RuntimeType
+        def write(kryo: Kryo,
+                  output: Output,
+                  @FieldValue("acquiredState") acquiredState: AcquiredState[X])
+          : Unit = kryo.writeClassAndObject(output, acquiredState)
 
         @RuntimeType
-        def write(kryo: Kryo, output: Output): Unit = ???
-
-        @RuntimeType
-        def read(kryo: Kryo, input: Input): Unit = ???
+        def read(kryo: Kryo,
+                 input: Input,
+                 @This thiz: StateAcquisition[Any]): Unit = {
+          thiz.acquire(
+            kryo.readClassAndObject(input).asInstanceOf[AcquiredState[Any]])
+        }
       }
 
       byteBuddy
@@ -230,6 +241,10 @@ object ImmutableObjectStorage {
         .implement(classOf[StateAcquisition[X]])
         .method(ElementMatchers.named("acquire"))
         .intercept(FieldAccessor.ofField("acquiredState"))
+        .implement(classOf[KryoSerializable])
+        .method(
+          ElementMatchers.named("write").or(ElementMatchers.named("read")))
+        .intercept(MethodDelegation.to(proxySerialization))
         .make
         .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
         .getLoaded
@@ -324,6 +339,7 @@ object ImmutableObjectStorage {
       class AcquiredState[X](trancheIdForExternalObjectReference: TrancheId,
                              objectReferenceId: ObjectReferenceId)
           extends proxySupport.AcquiredState[X] {
+        @transient
         private var _underlying: Option[X] = None
 
         override def underlying: X = _underlying match {
