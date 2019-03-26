@@ -6,10 +6,17 @@ import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
-import com.esotericsoftware.kryo.{Kryo, KryoSerializable, ReferenceResolver}
+import com.esotericsoftware.kryo.serializers.ClosureSerializer
+import com.esotericsoftware.kryo.{
+  Kryo,
+  KryoSerializable,
+  ReferenceResolver,
+  Serializer
+}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{
+  CleaningSerializer,
   KryoBase,
   KryoInstantiator,
   KryoPool,
@@ -164,7 +171,12 @@ object ImmutableObjectStorage {
 
         result
       }
-    }
+    }.withRegistrar(
+      kryo =>
+        kryo.register(
+          classOf[ClosureSerializer.Closure],
+          new CleaningSerializer(
+            (new ClosureSerializer).asInstanceOf[Serializer[_ <: AnyRef]])))
 
   private val kryoPool: KryoPool =
     KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
@@ -187,7 +199,8 @@ object ImmutableObjectStorage {
 
     def isNotToBeProxied(clazz: Class[_]): Boolean =
       Modifier.isFinal(clazz.getModifiers) || clazzesThatShouldNotBeProxied
-        .exists(_.isAssignableFrom(clazz))
+        .exists(_.isAssignableFrom(clazz)) || clazz.getSimpleName.startsWith(
+        "Function")
 
     private def createProxyClass[X](clazz: Class[X]): Class[X] = {
       // We should never end up having to make chains of delegating proxies!
@@ -287,7 +300,7 @@ object ImmutableObjectStorage {
         : MutableSortedMap[TrancheId, CompletedOperationData] =
         MutableSortedMap.empty
 
-      private val referenceResolverCacheTimeToLive = Some(10 seconds)
+      private val referenceResolverCacheTimeToLive = Some(10 minutes)
 
       private implicit val referenceResolverCacheConfiguration: CacheConfig =
         CacheConfig.defaultCacheConfig.copy(
@@ -418,10 +431,10 @@ object ImmutableObjectStorage {
         override def getReadObject(
             @cacheKeyExclude clazz: Class[_],
             objectReferenceId: ObjectReferenceId): AnyRef =
-          memoizeSync(referenceResolverCacheTimeToLive) {
-            if (objectReferenceId >= objectReferenceIdOffset)
-              getReadObjectConsultingOnlyThisTranche(objectReferenceId)
-            else {
+          if (objectReferenceId >= objectReferenceIdOffset)
+            getReadObjectConsultingOnlyThisTranche(objectReferenceId)
+          else
+            memoizeSync(referenceResolverCacheTimeToLive) {
               val Right(trancheIdForExternalObjectReference) =
                 tranches
                   .retrieveTrancheId(objectReferenceId)
@@ -452,8 +465,7 @@ object ImmutableObjectStorage {
                   proxy
                 }
               }
-            }
-          }(objectCache, mode, implicitly[Flags])
+            }(objectCache, mode, implicitly[Flags])
 
         def getReadObjectConsultingOnlyThisTranche(
             objectReferenceId: ObjectReferenceId): AnyRef =
