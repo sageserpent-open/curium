@@ -5,6 +5,7 @@ import java.util.UUID
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
+import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
@@ -203,6 +204,12 @@ object ImmutableObjectStorage {
 
           pipeTo(underlying)
         }
+
+        @RuntimeType
+        def write(kryo: Kryo, output: Output): Unit = ???
+
+        @RuntimeType
+        def read(kryo: Kryo, input: Input): Unit = ???
       }
 
       byteBuddy
@@ -300,6 +307,38 @@ object ImmutableObjectStorage {
       private def useReferences(clazz: Class[_]): Boolean =
         !clazz.isPrimitive
 
+      def retrieveUnderlying[X](trancheIdForExternalObjectReference: TrancheId,
+                                objectReferenceId: ObjectReferenceId): X = {
+        if (!completedOperationDataByTrancheId.contains(
+              trancheIdForExternalObjectReference)) {
+          val _ =
+            thisSessionInterpreter(
+              Retrieve(trancheIdForExternalObjectReference))
+        }
+
+        completedOperationDataByTrancheId(trancheIdForExternalObjectReference).referenceResolver
+          .getReadObjectConsultingOnlyThisTranche(objectReferenceId)
+          .asInstanceOf[X]
+      }
+
+      class AcquiredState[X](trancheIdForExternalObjectReference: TrancheId,
+                             objectReferenceId: ObjectReferenceId)
+          extends proxySupport.AcquiredState[X] {
+        private var _underlying: Option[X] = None
+
+        override def underlying: X = _underlying match {
+          case Some(result) => result
+          case None =>
+            val result: X = retrieveUnderlying(
+              trancheIdForExternalObjectReference,
+              objectReferenceId)
+
+            _underlying = Some(result)
+
+            result
+        }
+      }
+
       class TrancheSpecificReferenceResolver(
           objectReferenceIdOffset: ObjectReferenceId)
           extends ReferenceResolver {
@@ -381,28 +420,16 @@ object ImmutableObjectStorage {
                 }
 
               resultFromExistingAssociation.getOrElse {
-                def acquiredState[X]: proxySupport.AcquiredState[X] =
-                  new proxySupport.AcquiredState[X] {
-                    private var _underlying: Option[X] = None
-
-                    override def underlying: X = _underlying match {
-                      case Some(result) => result
-                      case None =>
-                        val result: X = retrieveUnderlying(
-                          trancheIdForExternalObjectReference,
-                          objectReferenceId)
-
-                        _underlying = Some(result)
-
-                        result
-                    }
-                  }
-
                 if (proxySupport.isNotToBeProxied(clazz))
                   retrieveUnderlying(trancheIdForExternalObjectReference,
                                      objectReferenceId)
                 else {
-                  val proxy = proxySupport.createProxy(clazz, acquiredState)
+                  def wildcardCapture[X]: proxySupport.AcquiredState[X] =
+                    new AcquiredState[X](trancheIdForExternalObjectReference,
+                                         objectReferenceId)
+
+                  val proxy: AnyRef =
+                    proxySupport.createProxy(clazz, wildcardCapture)
 
                   referenceIdToProxyMap.put(objectReferenceId, proxy)
 
@@ -412,22 +439,7 @@ object ImmutableObjectStorage {
             }
           }(objectCache, mode, implicitly[Flags])
 
-        private def retrieveUnderlying[X](
-            trancheIdForExternalObjectReference: TrancheId,
-            objectReferenceId: ObjectReferenceId): X = {
-          if (!completedOperationDataByTrancheId.contains(
-                trancheIdForExternalObjectReference)) {
-            val _ =
-              thisSessionInterpreter(
-                Retrieve(trancheIdForExternalObjectReference))
-          }
-
-          completedOperationDataByTrancheId(trancheIdForExternalObjectReference).referenceResolver
-            .getReadObjectConsultingOnlyThisTranche(objectReferenceId)
-            .asInstanceOf[X]
-        }
-
-        private def getReadObjectConsultingOnlyThisTranche(
+        def getReadObjectConsultingOnlyThisTranche(
             objectReferenceId: ObjectReferenceId): AnyRef =
           referenceIdToObjectMap.get(objectReferenceId)
 
