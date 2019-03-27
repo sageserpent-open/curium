@@ -427,9 +427,8 @@ object ImmutableObjectStorage {
           require(objectReferenceIdOffset <= objectReferenceId)
           val debugging =
             referenceIdToObjectMap.forcePut(objectReferenceId, immutableObject)
-          assert(
-            null == debugging || debugging
-              .isInstanceOf[PlaceholderAssociatedWithFreshObjectReferenceId])
+          assert(null == debugging || debugging
+            .isInstanceOf[PlaceholderAssociatedWithFreshObjectReferenceId] || debugging == immutableObject)
         }
 
         override def getReadObject(
