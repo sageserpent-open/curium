@@ -425,7 +425,11 @@ object ImmutableObjectStorage {
         override def setReadObject(objectReferenceId: ObjectReferenceId,
                                    immutableObject: AnyRef): Unit = {
           require(objectReferenceIdOffset <= objectReferenceId)
-          referenceIdToObjectMap.put(objectReferenceId, immutableObject)
+          val debugging =
+            referenceIdToObjectMap.forcePut(objectReferenceId, immutableObject)
+          assert(
+            null == debugging || debugging
+              .isInstanceOf[PlaceholderAssociatedWithFreshObjectReferenceId])
         }
 
         override def getReadObject(
