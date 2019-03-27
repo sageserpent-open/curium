@@ -200,7 +200,7 @@ object ImmutableObjectStorage {
     def isNotToBeProxied(clazz: Class[_]): Boolean =
       Modifier.isFinal(clazz.getModifiers) || clazzesThatShouldNotBeProxied
         .exists(_.isAssignableFrom(clazz)) || clazz.getSimpleName.startsWith(
-        "Function")
+        "Function") || clazz.getSimpleName.startsWith("Tuple")
 
     private def createProxyClass[X](clazz: Class[X]): Class[X] = {
       // We should never end up having to make chains of delegating proxies!
