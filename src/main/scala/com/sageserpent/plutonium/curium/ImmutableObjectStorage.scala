@@ -302,14 +302,6 @@ object ImmutableObjectStorage {
 
       private val referenceResolverCacheTimeToLive = Some(10 minutes)
 
-      private implicit val referenceResolverCacheConfiguration: CacheConfig =
-        CacheConfig.defaultCacheConfig.copy(
-          cacheKeyBuilder = new CacheKeyBuilder {
-            override def toCacheKey(parts: Seq[Any]): String =
-              System.identityHashCode(parts.head).toString
-            override def stringToCacheKey(key: String): String = key
-          })
-
       private val objectReferenceIdCache: Cache[ObjectReferenceId] =
         CaffeineCache[ObjectReferenceId](
           CacheConfig.defaultCacheConfig.copy(
@@ -333,7 +325,7 @@ object ImmutableObjectStorage {
       class PlaceholderAssociatedWithFreshObjectReferenceId
 
       private def useReferences(clazz: Class[_]): Boolean =
-        !clazz.isPrimitive
+        !clazz.isPrimitive && clazz != classOf[String]
 
       def retrieveUnderlying[X](trancheIdForExternalObjectReference: TrancheId,
                                 objectReferenceId: ObjectReferenceId): X = {
@@ -389,6 +381,8 @@ object ImmutableObjectStorage {
                     val objectReferenceId =
                       referenceResolver.getWrittenIdConsultingOnlyThisTranche(
                         immutableObject)
+                    // TODO - cutover the lambda passed to the following invocation of 'collectFirst' to
+                    //  work directly with the resulting object reference id or -1.
                     if (-1 != objectReferenceId) Some(objectReferenceId)
                     else None
                 }
@@ -396,7 +390,7 @@ object ImmutableObjectStorage {
                   case Some(objectReferenceId) => objectReferenceId
                 }
             resultFromExSessionReferenceResolver
-              .orElse(Option(proxyToReferenceIdMap.get(immutableObject)))
+              .orElse(Option(proxyToReferenceIdMap.get(immutableObject))) // TODO - why isn't this consulted first?
               .getOrElse(getWrittenIdConsultingOnlyThisTranche(immutableObject))
           }(objectReferenceIdCache, mode, implicitly[Flags])
 
@@ -426,7 +420,7 @@ object ImmutableObjectStorage {
                                    immutableObject: AnyRef): Unit = {
           require(objectReferenceIdOffset <= objectReferenceId)
           val debugging =
-            referenceIdToObjectMap.forcePut(objectReferenceId, immutableObject)
+            referenceIdToObjectMap.put(objectReferenceId, immutableObject)
           assert(null == debugging || debugging
             .isInstanceOf[PlaceholderAssociatedWithFreshObjectReferenceId] || debugging == immutableObject)
         }
