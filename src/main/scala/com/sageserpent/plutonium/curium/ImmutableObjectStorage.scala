@@ -229,7 +229,8 @@ object ImmutableObjectStorage {
         def write(kryo: Kryo,
                   output: Output,
                   @FieldValue("acquiredState") acquiredState: AcquiredState[X])
-          : Unit = kryo.writeClassAndObject(output, acquiredState)
+          : Unit =
+          kryo.writeClassAndObject(output, acquiredState)
 
         @RuntimeType
         def read(kryo: Kryo,
@@ -314,9 +315,16 @@ object ImmutableObjectStorage {
                constructorParameters: IndexedSeq[IndexedSeq[Any]],
                methodName: String,
                parameters: IndexedSeq[IndexedSeq[Any]]) =>
-                s"${System.identityHashCode(parameters.head)}")))
+                System.identityHashCode(parameters.head).toString)))
 
-      private val objectCache: Cache[AnyRef] = CaffeineCache[AnyRef]
+      private val objectCache: Cache[AnyRef] = CaffeineCache[AnyRef](
+        CacheConfig.defaultCacheConfig.copy(
+          memoization = MemoizationConfig(
+            (fullClassName: String,
+             constructorParameters: IndexedSeq[IndexedSeq[Any]],
+             methodName: String,
+             parameters: IndexedSeq[IndexedSeq[Any]]) =>
+              parameters.head.toString)))
 
       val proxyToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
         new BiMapUsingIdentityOnForwardMappingOnly
