@@ -198,7 +198,11 @@ object ImmutableObjectStorage {
       Set(classOf[StateAcquisition[_]], classOf[String], classOf[Class[_]])
 
     def isNotToBeProxied(clazz: Class[_]): Boolean =
-      Modifier.isFinal(clazz.getModifiers) || clazzesThatShouldNotBeProxied
+      // Start with a workaround for: https://github.com/scala/bug/issues/2034 - if it throws,
+      // it's probably an inner class of some kind, so let's assume we don't want to proxy it.
+      Try { clazz.getSimpleName }.isFailure ||
+        clazz.isSynthetic || clazz.isAnonymousClass || clazz.isLocalClass ||
+        Modifier.isFinal(clazz.getModifiers) || clazzesThatShouldNotBeProxied
         .exists(_.isAssignableFrom(clazz)) || clazz.getSimpleName.startsWith(
         "Function") || clazz.getSimpleName.startsWith("Tuple")
 
