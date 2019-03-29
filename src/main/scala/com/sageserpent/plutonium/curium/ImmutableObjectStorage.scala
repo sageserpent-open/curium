@@ -382,17 +382,10 @@ object ImmutableObjectStorage {
               completedOperationDataByTrancheId.view
                 .map {
                   case (_, CompletedOperationData(referenceResolver, _)) =>
-                    val objectReferenceId =
-                      referenceResolver.getWrittenIdConsultingOnlyThisTranche(
-                        immutableObject)
-                    // TODO - cutover the lambda passed to the following invocation of 'collectFirst' to
-                    //  work directly with the resulting object reference id or -1.
-                    if (-1 != objectReferenceId) Some(objectReferenceId)
-                    else None
+                    referenceResolver.getWrittenIdConsultingOnlyThisTranche(
+                      immutableObject)
                 }
-                .collectFirst {
-                  case Some(objectReferenceId) => objectReferenceId
-                }
+                .find(-1 != _)
             resultFromExSessionReferenceResolver
               .orElse(Option(proxyToReferenceIdMap.get(immutableObject))) // TODO - why isn't this consulted first?
               .getOrElse(getWrittenIdConsultingOnlyThisTranche(immutableObject))
