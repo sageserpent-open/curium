@@ -41,7 +41,6 @@ import scalacache.caffeine._
 import scalacache.memoization._
 import scalacache.modes.sync._
 
-import scala.collection.JavaConversions._
 import scala.collection.immutable
 import scala.collection.mutable.{
   Map => MutableMap,
@@ -199,13 +198,18 @@ object ImmutableObjectStorage {
       Set(classOf[StateAcquisition], classOf[String], classOf[Class[_]])
 
     def isNotToBeProxied(clazz: Class[_]): Boolean =
-      // Start with a workaround for: https://github.com/scala/bug/issues/2034 - if it throws,
-      // it's probably an inner class of some kind, so let's assume we don't want to proxy it.
-      Try { clazz.getSimpleName }.isFailure ||
+      try {
         clazz.isSynthetic || clazz.isAnonymousClass || clazz.isLocalClass ||
         Modifier.isFinal(clazz.getModifiers) || clazzesThatShouldNotBeProxied
-        .exists(_.isAssignableFrom(clazz)) || clazz.getSimpleName.startsWith(
-        "Function") || clazz.getSimpleName.startsWith("Tuple")
+          .exists(_.isAssignableFrom(clazz)) || clazz.getSimpleName.startsWith(
+          "Function") || clazz.getSimpleName.startsWith("Tuple")
+      } catch {
+        case _: InternalError =>
+          // Workaround: https://github.com/scala/bug/issues/2034 - if it throws,
+          // it's probably an inner class of some kind, so let's assume we don't
+          // want to proxy it.
+          true
+      }
 
     private def createProxyClass[X <: AnyRef](clazz: Class[X]): Class[X] = {
       // We should never end up having to make chains of delegating proxies!
