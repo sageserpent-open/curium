@@ -187,16 +187,16 @@ object ImmutableObjectStorage {
 
     private val proxySuffix = "delayedLoadProxy"
 
-    trait AcquiredState[X] {
-      def underlying: X
+    trait AcquiredState {
+      def underlying: AnyRef
     }
 
-    private[curium] trait StateAcquisition[X] {
-      def acquire(acquiredState: AcquiredState[X]): Unit
+    private[curium] trait StateAcquisition {
+      def acquire(acquiredState: AcquiredState): Unit
     }
 
     val clazzesThatShouldNotBeProxied: Set[Class[_]] =
-      Set(classOf[StateAcquisition[_]], classOf[String], classOf[Class[_]])
+      Set(classOf[StateAcquisition], classOf[String], classOf[Class[_]])
 
     def isNotToBeProxied(clazz: Class[_]): Boolean =
       // Start with a workaround for: https://github.com/scala/bug/issues/2034 - if it throws,
@@ -207,19 +207,19 @@ object ImmutableObjectStorage {
         .exists(_.isAssignableFrom(clazz)) || clazz.getSimpleName.startsWith(
         "Function") || clazz.getSimpleName.startsWith("Tuple")
 
-    private def createProxyClass[X](clazz: Class[X]): Class[X] = {
+    private def createProxyClass[X <: AnyRef](clazz: Class[X]): Class[X] = {
       // We should never end up having to make chains of delegating proxies!
       require(!clazz.getSimpleName.endsWith(proxySuffix))
 
-      type PipeForwarding = Function[X, Nothing]
+      type PipeForwarding = Function[AnyRef, Nothing]
 
       object proxyDelayedLoading {
         @RuntimeType
         def apply(
             @Pipe pipeTo: PipeForwarding,
-            @FieldValue("acquiredState") acquiredState: AcquiredState[X]
+            @FieldValue("acquiredState") acquiredState: AcquiredState
         ): Any = {
-          val underlying: X = acquiredState.underlying
+          val underlying: AnyRef = acquiredState.underlying
 
           pipeTo(underlying)
         }
@@ -227,18 +227,18 @@ object ImmutableObjectStorage {
 
       object proxySerialization {
         @RuntimeType
-        def write(kryo: Kryo,
-                  output: Output,
-                  @FieldValue("acquiredState") acquiredState: AcquiredState[X])
-          : Unit =
+        def write(
+            kryo: Kryo,
+            output: Output,
+            @FieldValue("acquiredState") acquiredState: AcquiredState): Unit =
           kryo.writeClassAndObject(output, acquiredState)
 
         @RuntimeType
         def read(kryo: Kryo,
                  input: Input,
-                 @This thiz: StateAcquisition[Any]): Unit = {
+                 @This thiz: StateAcquisition): Unit = {
           thiz.acquire(
-            kryo.readClassAndObject(input).asInstanceOf[AcquiredState[Any]])
+            kryo.readClassAndObject(input).asInstanceOf[AcquiredState])
         }
       }
 
@@ -253,11 +253,8 @@ object ImmutableObjectStorage {
           .withDefaultConfiguration()
           .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
           .to(proxyDelayedLoading))
-        .defineField("acquiredState",
-                     TypeDescription.Generic.Builder
-                       .parameterizedType(classOf[AcquiredState[_]], Seq(clazz))
-                       .build)
-        .implement(classOf[StateAcquisition[X]])
+        .defineField("acquiredState", classOf[AcquiredState])
+        .implement(classOf[StateAcquisition])
         .method(ElementMatchers.named("acquire"))
         .intercept(FieldAccessor.ofField("acquiredState"))
         .implement(classOf[KryoSerializable])
@@ -271,14 +268,14 @@ object ImmutableObjectStorage {
     }
 
     private val cachedProxyClassInstantiators
-      : MutableMap[Class[_], ObjectInstantiator[_]] =
+      : MutableMap[Class[_ <: AnyRef], ObjectInstantiator[_ <: AnyRef]] =
       MutableMap.empty
 
     private val instantiatorStrategy: StdInstantiatorStrategy =
       new StdInstantiatorStrategy
 
-    def createProxy[Result](clazz: Class[Result],
-                            acquiredState: AcquiredState[Result]): Result = {
+    def createProxy(clazz: Class[_ <: AnyRef],
+                    acquiredState: AcquiredState): AnyRef = {
       val proxyClassInstantiator =
         synchronized {
           cachedProxyClassInstantiators.getOrElseUpdate(clazz, {
@@ -289,9 +286,9 @@ object ImmutableObjectStorage {
       val proxy = proxyClassInstantiator
         .newInstance()
 
-      proxy.asInstanceOf[StateAcquisition[Result]].acquire(acquiredState)
+      proxy.asInstanceOf[StateAcquisition].acquire(acquiredState)
 
-      proxy.asInstanceOf[Result]
+      proxy
     }
   }
 
@@ -341,9 +338,9 @@ object ImmutableObjectStorage {
       private def useReferences(clazz: Class[_]): Boolean =
         !clazz.isPrimitive && clazz != classOf[String]
 
-      def retrieveUnderlying[X](trancheIdForExternalObjectReference: TrancheId,
-                                objectReferenceId: ObjectReferenceId,
-                                clazz: Class[X]): X = {
+      def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
+                             objectReferenceId: ObjectReferenceId,
+                             clazz: Class[_ <: AnyRef]): AnyRef = {
         if (!completedOperationDataByTrancheId.contains(
               trancheIdForExternalObjectReference)) {
           val _ =
@@ -353,23 +350,21 @@ object ImmutableObjectStorage {
 
         completedOperationDataByTrancheId(trancheIdForExternalObjectReference).referenceResolver
           .getReadObjectConsultingOnlyThisTranche(objectReferenceId)
-          .asInstanceOf[X]
       }
 
-      class AcquiredState[X](trancheIdForExternalObjectReference: TrancheId,
-                             objectReferenceId: ObjectReferenceId,
-                             clazz: Class[X])
-          extends proxySupport.AcquiredState[X] {
+      class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
+                          objectReferenceId: ObjectReferenceId,
+                          clazz: Class[_ <: AnyRef])
+          extends proxySupport.AcquiredState {
         @transient
-        private var _underlying: Option[X] = None
+        private var _underlying: Option[AnyRef] = None
 
-        override def underlying: X = _underlying match {
+        override def underlying: AnyRef = _underlying match {
           case Some(result) => result
           case None =>
-            val result: X = retrieveUnderlying(
-              trancheIdForExternalObjectReference,
-              objectReferenceId,
-              clazz)
+            val result = retrieveUnderlying(trancheIdForExternalObjectReference,
+                                            objectReferenceId,
+                                            clazz)
 
             _underlying = Some(result)
 
@@ -456,25 +451,25 @@ object ImmutableObjectStorage {
                 }
 
               resultFromExistingAssociation.getOrElse {
-                def wildcardCapture[X <: AnyRef](clazz: Class[X]): X =
-                  if (proxySupport.isNotToBeProxied(clazz))
-                    retrieveUnderlying(trancheIdForExternalObjectReference,
-                                       objectReferenceId,
-                                       clazz)
-                  else {
-                    val proxy: X =
-                      proxySupport.createProxy(
-                        clazz,
-                        new AcquiredState(trancheIdForExternalObjectReference,
-                                          objectReferenceId,
-                                          clazz))
+                val clazzWithAppropriateUpperBoundType =
+                  clazz.asInstanceOf[Class[_ <: AnyRef]]
+                if (proxySupport.isNotToBeProxied(
+                      clazzWithAppropriateUpperBoundType))
+                  retrieveUnderlying(trancheIdForExternalObjectReference,
+                                     objectReferenceId,
+                                     clazzWithAppropriateUpperBoundType)
+                else {
+                  val proxy =
+                    proxySupport.createProxy(
+                      clazzWithAppropriateUpperBoundType,
+                      new AcquiredState(trancheIdForExternalObjectReference,
+                                        objectReferenceId,
+                                        clazzWithAppropriateUpperBoundType))
 
-                    referenceIdToProxyMap.put(objectReferenceId, proxy)
+                  referenceIdToProxyMap.put(objectReferenceId, proxy)
 
-                    proxy
-                  }
-
-                wildcardCapture(clazz.asInstanceOf[Class[_ <: AnyRef]])
+                  proxy
+                }
               }
             }(objectCache, mode, implicitly[Flags])
 
