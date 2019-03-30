@@ -343,13 +343,14 @@ object ImmutableObjectStorage {
         !clazz.isPrimitive && clazz != classOf[String]
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
-                             objectReferenceId: ObjectReferenceId,
-                             clazz: Class[_ <: AnyRef]): AnyRef = {
+                             objectReferenceId: ObjectReferenceId): AnyRef = {
         if (!completedOperationDataByTrancheId.contains(
               trancheIdForExternalObjectReference)) {
+          val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
           val _ =
             thisSessionInterpreter(
-              Retrieve(trancheIdForExternalObjectReference, clazz))
+              Retrieve(trancheIdForExternalObjectReference,
+                       placeholderClazzForTopLevelTrancheObject))
         }
 
         completedOperationDataByTrancheId(trancheIdForExternalObjectReference).referenceResolver
@@ -357,8 +358,7 @@ object ImmutableObjectStorage {
       }
 
       class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
-                          objectReferenceId: ObjectReferenceId,
-                          clazz: Class[_ <: AnyRef])
+                          objectReferenceId: ObjectReferenceId)
           extends proxySupport.AcquiredState {
         @transient
         private var _underlying: Option[AnyRef] = None
@@ -367,8 +367,7 @@ object ImmutableObjectStorage {
           case Some(result) => result
           case None =>
             val result = retrieveUnderlying(trancheIdForExternalObjectReference,
-                                            objectReferenceId,
-                                            clazz)
+                                            objectReferenceId)
 
             _underlying = Some(result)
 
@@ -455,20 +454,15 @@ object ImmutableObjectStorage {
                 }
 
               resultFromExistingAssociation.getOrElse {
-                val clazzWithAppropriateUpperBoundType =
-                  clazz.asInstanceOf[Class[_ <: AnyRef]]
-                if (proxySupport.isNotToBeProxied(
-                      clazzWithAppropriateUpperBoundType))
+                if (proxySupport.isNotToBeProxied(clazz))
                   retrieveUnderlying(trancheIdForExternalObjectReference,
-                                     objectReferenceId,
-                                     clazzWithAppropriateUpperBoundType)
+                                     objectReferenceId)
                 else {
                   val proxy =
                     proxySupport.createProxy(
-                      clazzWithAppropriateUpperBoundType,
+                      clazz.asInstanceOf[Class[_ <: AnyRef]],
                       new AcquiredState(trancheIdForExternalObjectReference,
-                                        objectReferenceId,
-                                        clazzWithAppropriateUpperBoundType))
+                                        objectReferenceId))
 
                   referenceIdToProxyMap.put(objectReferenceId, proxy)
 
