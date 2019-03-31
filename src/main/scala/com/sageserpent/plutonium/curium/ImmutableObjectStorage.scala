@@ -413,6 +413,7 @@ object ImmutableObjectStorage {
         override def addWrittenObject(
             immutableObject: AnyRef): ObjectReferenceId = {
           val nextObjectReferenceIdToAllocate = objectToReferenceIdMap.size + objectReferenceIdOffset
+          assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
           val _ @None = Option(
             objectToReferenceIdMap.putIfAbsent(immutableObject,
                                                nextObjectReferenceIdToAllocate))
@@ -426,6 +427,7 @@ object ImmutableObjectStorage {
 
         override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
           val nextObjectReferenceIdToAllocate = referenceIdToObjectMap.size + objectReferenceIdOffset
+          assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
           val _ @None = Option(
             referenceIdToObjectMap.putIfAbsent(
               nextObjectReferenceIdToAllocate,
