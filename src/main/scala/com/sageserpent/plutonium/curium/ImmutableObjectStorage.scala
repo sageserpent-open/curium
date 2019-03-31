@@ -36,10 +36,10 @@ import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
 import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
-import scalacache._
 import scalacache.caffeine._
-import scalacache.memoization._
 import scalacache.modes.sync._
+import scalacache.sync.{caching, remove}
+import scalacache.{Cache, CacheConfig, Flags}
 
 import scala.collection.immutable
 import scala.collection.mutable.{
@@ -157,6 +157,25 @@ object ImmutableObjectStorage {
     override def useReferences(clazz: Class[_]): Boolean =
       sessionReferenceResolver.value.get.useReferences(clazz)
 
+  }
+
+  trait ReferenceResolverContracts extends ReferenceResolver {
+    abstract override def getReadObject(
+        clazz: Class[_],
+        objectReferenceId: ObjectReferenceId): AnyRef = {
+      val result = super.getReadObject(clazz, objectReferenceId)
+
+      val nonProxyClazz =
+        if (classOf[proxySupport.StateAcquisition].isAssignableFrom(clazz))
+          clazz.getSuperclass
+        else clazz
+
+      assert(
+        nonProxyClazz.isInstance(result) || classOf[ClosureSerializer.Closure]
+          .isAssignableFrom(nonProxyClazz))
+
+      result
+    }
   }
 
   private val kryoInstantiator: KryoInstantiator =
@@ -308,26 +327,10 @@ object ImmutableObjectStorage {
 
       private val referenceResolverCacheTimeToLive = Some(10 minutes)
 
-      // TODO: if the keys are identity hash codes, what's going to stop the original object
-      // from being garbage collected and another one taking the same identity hash code? Oh dear....
       private val objectReferenceIdCache: Cache[ObjectReferenceId] =
-        CaffeineCache[ObjectReferenceId](
-          CacheConfig.defaultCacheConfig.copy(
-            memoization = MemoizationConfig(
-              (fullClassName: String,
-               constructorParameters: IndexedSeq[IndexedSeq[Any]],
-               methodName: String,
-               parameters: IndexedSeq[IndexedSeq[Any]]) =>
-                System.identityHashCode(parameters.head).toString)))
+        CaffeineCache[ObjectReferenceId]
 
-      private val objectCache: Cache[AnyRef] = CaffeineCache[AnyRef](
-        CacheConfig.defaultCacheConfig.copy(
-          memoization = MemoizationConfig(
-            (fullClassName: String,
-             constructorParameters: IndexedSeq[IndexedSeq[Any]],
-             methodName: String,
-             parameters: IndexedSeq[IndexedSeq[Any]]) =>
-              parameters.head.toString)))
+      private val objectCache: Cache[AnyRef] = CaffeineCache[AnyRef]
 
       val proxyToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
         new BiMapUsingIdentityOnForwardMappingOnly
@@ -388,7 +391,8 @@ object ImmutableObjectStorage {
           (0 until objectToReferenceIdMap.size) map (objectReferenceIdOffset + _)
 
         override def getWrittenId(immutableObject: AnyRef): ObjectReferenceId =
-          memoizeSync(referenceResolverCacheTimeToLive) {
+          caching(System.identityHashCode(immutableObject))(
+            referenceResolverCacheTimeToLive) {
             val resultFromExSessionReferenceResolver =
               completedOperationDataByTrancheId.view
                 .map {
@@ -412,6 +416,11 @@ object ImmutableObjectStorage {
           val _ @None = Option(
             objectToReferenceIdMap.putIfAbsent(immutableObject,
                                                nextObjectReferenceIdToAllocate))
+
+          remove(System.identityHashCode(immutableObject))(
+            objectReferenceIdCache,
+            mode)
+
           nextObjectReferenceIdToAllocate
         }
 
@@ -431,15 +440,16 @@ object ImmutableObjectStorage {
             referenceIdToObjectMap.put(objectReferenceId, immutableObject)
           assert(null == debugging || debugging
             .isInstanceOf[PlaceholderAssociatedWithFreshObjectReferenceId] || debugging == immutableObject)
+          remove(objectReferenceId)(objectCache, mode)
         }
 
         override def getReadObject(
-            @cacheKeyExclude clazz: Class[_],
+            clazz: Class[_],
             objectReferenceId: ObjectReferenceId): AnyRef =
-          if (objectReferenceId >= objectReferenceIdOffset)
-            getReadObjectConsultingOnlyThisTranche(objectReferenceId)
-          else
-            memoizeSync(referenceResolverCacheTimeToLive) {
+          caching(objectReferenceId)(referenceResolverCacheTimeToLive) {
+            if (objectReferenceId >= objectReferenceIdOffset)
+              getReadObjectConsultingOnlyThisTranche(objectReferenceId)
+            else {
               val Right(trancheIdForExternalObjectReference) =
                 tranches
                   .retrieveTrancheId(objectReferenceId)
@@ -469,7 +479,8 @@ object ImmutableObjectStorage {
                   proxy
                 }
               }
-            }(objectCache, mode, implicitly[Flags])
+            }
+          }(objectCache, mode, implicitly[Flags])
 
         def getReadObjectConsultingOnlyThisTranche(
             objectReferenceId: ObjectReferenceId): AnyRef =
@@ -494,6 +505,7 @@ object ImmutableObjectStorage {
               objectReferenceIdOffsetForNewTranche <- tranches.objectReferenceIdOffsetForNewTranche
               trancheSpecificReferenceResolver = new TrancheSpecificReferenceResolver(
                 objectReferenceIdOffsetForNewTranche)
+              with ReferenceResolverContracts
               trancheId <- {
                 val serializedRepresentation: Array[Byte] =
                   sessionReferenceResolver.withValue(
@@ -527,7 +539,7 @@ object ImmutableObjectStorage {
                       tranche.objectReferenceIdOffset
                     val trancheSpecificReferenceResolver =
                       new TrancheSpecificReferenceResolver(
-                        objectReferenceIdOffset)
+                        objectReferenceIdOffset) with ReferenceResolverContracts
 
                     val deserialized =
                       sessionReferenceResolver.withValue(
