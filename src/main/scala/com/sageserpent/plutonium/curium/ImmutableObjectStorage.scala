@@ -350,7 +350,7 @@ object ImmutableObjectStorage {
         if (!completedOperationDataByTrancheId.contains(
               trancheIdForExternalObjectReference)) {
           val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
-          val Left(_) =
+          val Right(_) =
             thisSessionInterpreter(
               Retrieve(trancheIdForExternalObjectReference,
                        placeholderClazzForTopLevelTrancheObject))
