@@ -173,7 +173,8 @@ object ImmutableObjectStorageSpec {
     def purgeTranche(trancheId: TrancheId): Unit = {
       val objectReferenceIdsToRemove =
         objectReferenceIdsToAssociatedTrancheIdMap.collect {
-          case (objectReferenceId, keyTrancheId) if trancheId == keyTrancheId =>
+          case (objectReferenceId, associatedTrancheId)
+              if trancheId == associatedTrancheId =>
             objectReferenceId
         }
 
