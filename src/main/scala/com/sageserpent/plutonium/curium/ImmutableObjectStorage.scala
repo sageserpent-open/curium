@@ -340,10 +340,20 @@ object ImmutableObjectStorage {
 
       // NOTE: a class and *not* an object; we want a fresh instance each time, as the tranche-specific
       // reference resolver uses bidirectional maps - so each value can only be associated with *one* key.
-      class PlaceholderAssociatedWithFreshObjectReferenceId
+      private case class PlaceholderAssociation() extends AnyRef
+
+      private case class AssociatedValueForAlias(immutableObject: AnyRef)
+          extends AnyRef
 
       private def useReferences(clazz: Class[_]): Boolean =
         !clazz.isPrimitive && clazz != classOf[String]
+
+      def retrieveObjectThatIsNotAProxy(
+          objectReferenceId: ObjectReferenceId): Option[AnyRef] =
+        Option(referenceIdToObjectMap.get(objectReferenceId)).map {
+          case AssociatedValueForAlias(immutableObject) => immutableObject
+          case immutableObject @ _                      => immutableObject
+        }
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
                              objectReferenceId: ObjectReferenceId): AnyRef = {
@@ -356,7 +366,7 @@ object ImmutableObjectStorage {
                        placeholderClazzForTopLevelTrancheObject))
         }
 
-        Option(referenceIdToObjectMap.get(objectReferenceId)).get
+        retrieveObjectThatIsNotAProxy(objectReferenceId).get
       }
 
       class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
@@ -428,9 +438,8 @@ object ImmutableObjectStorage {
           assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
 
           val _ @None = Option(
-            referenceIdToObjectMap.put(
-              nextObjectReferenceIdToAllocate,
-              new PlaceholderAssociatedWithFreshObjectReferenceId))
+            referenceIdToObjectMap.put(nextObjectReferenceIdToAllocate,
+                                       PlaceholderAssociation()))
 
           numberOfAssociationsForTheRelevantTrancheOnly += 1
 
@@ -444,8 +453,16 @@ object ImmutableObjectStorage {
           require(objectReferenceIdOffset <= objectReferenceId)
           require(!proxySupport.isProxy(immutableObject))
 
-          val Some(_: PlaceholderAssociatedWithFreshObjectReferenceId) = Option(
-            referenceIdToObjectMap.put(objectReferenceId, immutableObject))
+          Option(
+            referenceIdToObjectMap.inverse.forcePut(immutableObject,
+                                                    objectReferenceId)) match {
+            case Some(aliasObjectReferenceId) =>
+              val _ @None = Option(
+                referenceIdToObjectMap.put(
+                  aliasObjectReferenceId,
+                  AssociatedValueForAlias(immutableObject)))
+            case None =>
+          }
         }
 
         override def getReadObject(
@@ -462,9 +479,9 @@ object ImmutableObjectStorage {
           // if one has not already been introduced to the reference resolver), or look up an existing object
           // belonging to another tranche, loading that tranche if necessary.
           if (objectReferenceId >= objectReferenceIdOffset)
-            Option(referenceIdToObjectMap.get(objectReferenceId)).get
+            retrieveObjectThatIsNotAProxy(objectReferenceId).get
           else
-            Option(referenceIdToObjectMap.get(objectReferenceId))
+            retrieveObjectThatIsNotAProxy(objectReferenceId)
               .orElse(Option {
                 referenceIdToProxyMap.get(objectReferenceId)
               })
