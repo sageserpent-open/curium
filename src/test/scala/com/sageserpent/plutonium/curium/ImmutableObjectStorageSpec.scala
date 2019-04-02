@@ -17,9 +17,12 @@ import scala.util.{Random, Try}
 object ImmutableObjectStorageSpec {
   sealed trait Part
 
-  case class Leaf(id: Int) extends Part
+  val labelStrings = Set("Huey", "Duey", "Louie")
 
-  case class Fork(left: Part, id: Int, right: Part) extends Part
+  case class Leaf(id: Int, labelString: String) extends Part
+
+  case class Fork(left: Part, id: Int, right: Part, labelString: String)
+      extends Part
 
   case object alien
 
@@ -62,7 +65,7 @@ object ImmutableObjectStorageSpec {
         def leaf(subparts: Vector[Part]): Part = {
           require(numberOfSubparts == subparts.size)
 
-          Leaf(numberOfSubparts)
+          Leaf(numberOfSubparts, randomBehaviour.chooseOneOf(labelStrings))
         }
         leaf _ #:: growthSteps(partIdSetsCoveredBySubparts :+ Set(partId),
                                1 + numberOfLeaves)
@@ -108,7 +111,9 @@ object ImmutableObjectStorageSpec {
 
           Fork(subparts(indexOfLeftSubpart),
                partId,
-               subparts(indexOfRightSubpart))
+               subparts(indexOfRightSubpart),
+               randomBehaviour.chooseOneOf(labelStrings),
+          )
         }
 
         val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
