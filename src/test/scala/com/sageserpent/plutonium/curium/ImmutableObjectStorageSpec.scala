@@ -15,11 +15,24 @@ import scala.collection.mutable.{
 import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
-  sealed trait Part
+  val aThing = "Foo"
 
-  case class Leaf(id: Int) extends Part
+  sealed trait Part {
+    def useProblematicClosure: String
+  }
 
-  case class Fork(left: Part, id: Int, right: Part) extends Part
+  val labelStrings = Set("Huey", "Duey", "Louie")
+
+  case class Leaf(id: Int, labelString: String) extends Part {
+    val problematicClosure                     = (_: Any) => aThing + aThing
+    override def useProblematicClosure: String = problematicClosure()
+  }
+
+  case class Fork(left: Part, id: Int, right: Part, labelString: String)
+      extends Part {
+    val problematicClosure                     = (_: Any) => s"$aThing"
+    override def useProblematicClosure: String = problematicClosure()
+  }
 
   case object alien
 
@@ -58,11 +71,13 @@ object ImmutableObjectStorageSpec {
       val chooseALeaf = numberOfLeaves < numberOfLeavesRequired &&
         (0 == numberOfSubparts || randomBehaviour.nextBoolean())
 
+      val label = randomBehaviour.chooseOneOf(labelStrings)
+
       if (chooseALeaf) {
         def leaf(subparts: Vector[Part]): Part = {
           require(numberOfSubparts == subparts.size)
 
-          Leaf(numberOfSubparts)
+          Leaf(numberOfSubparts, label)
         }
         leaf _ #:: growthSteps(partIdSetsCoveredBySubparts :+ Set(partId),
                                1 + numberOfLeaves)
@@ -108,7 +123,8 @@ object ImmutableObjectStorageSpec {
 
           Fork(subparts(indexOfLeftSubpart),
                partId,
-               subparts(indexOfRightSubpart))
+               subparts(indexOfRightSubpart),
+               label)
         }
 
         val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
@@ -173,7 +189,8 @@ object ImmutableObjectStorageSpec {
     def purgeTranche(trancheId: TrancheId): Unit = {
       val objectReferenceIdsToRemove =
         objectReferenceIdsToAssociatedTrancheIdMap.collect {
-          case (objectReferenceId, keyTrancheId) if trancheId == keyTrancheId =>
+          case (objectReferenceId, associatedTrancheId)
+              if trancheId == associatedTrancheId =>
             objectReferenceId
         }
 
@@ -186,20 +203,27 @@ object ImmutableObjectStorageSpec {
         trancheId: TrancheId,
         tranche: TrancheOfData,
         objectReferenceIds: Seq[ObjectReferenceId]): EitherThrowableOr[Unit] = {
-      Try {
-        tranchesById(trancheId) = tranche
-        for (objectReferenceId <- objectReferenceIds) {
-          objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) =
-            trancheId
-        }
-      }.toEither
+      for {
+        objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
+        _ <- Try {
+          tranchesById(trancheId) = tranche
+          for (objectReferenceId <- objectReferenceIds) {
+            require(objectReferenceIdOffsetForNewTranche <= objectReferenceId)
+            objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) =
+              trancheId
+          }
+        }.toEither
+      } yield ()
     }
+
     override def retrieveTranche(
         trancheId: TrancheId): scala.Either[scala.Throwable, TrancheOfData] =
       Try { tranchesById(trancheId) }.toEither
+
     override def retrieveTrancheId(objectReferenceId: ObjectReferenceId)
       : scala.Either[scala.Throwable, TrancheId] =
       Try { objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) }.toEither
+
     override def objectReferenceIdOffsetForNewTranche
       : EitherThrowableOr[ObjectReferenceId] =
       Try {
@@ -220,6 +244,7 @@ class ImmutableObjectStorageSpec
     with GeneratorDrivenPropertyChecks {
   import ImmutableObjectStorageSpec._
 
+  // TODO - reinstate shrinkage and see that it works.
   implicit def shrinkAny[Seq[PartGrowthStep]]: Shrink[Seq[PartGrowthStep]] =
     Shrink(_ => Stream.empty)
 
@@ -270,24 +295,26 @@ class ImmutableObjectStorageSpec
       val permutedTrancheIds = Vector(trancheIds.indices map (index =>
         trancheIds(forwardPermutation(index))): _*)
 
-      val retrievalSession: Session[Unit] =
+      val retrievalSession: Session[IndexedSeq[Part]] =
         for {
-          retrievedParts <- permutedTrancheIds.traverse(
+          permutedRetrievedParts <- permutedTrancheIds.traverse(
             ImmutableObjectStorage.retrieve[Part])
 
-        } yield {
-          val unpermutedRetrievedParts = retrievedParts.indices map (index =>
-            retrievedParts(backwardsPermutation(index)))
+        } yield
+          permutedRetrievedParts.indices map (index =>
+            permutedRetrievedParts(backwardsPermutation(index)))
 
-          unpermutedRetrievedParts should contain theSameElementsInOrderAs expectedParts
+      val Right(retrievedParts) =
+        ImmutableObjectStorage.unsafeRun(retrievalSession)(tranches)
 
-          Inspectors.forAll(retrievedParts)(retrievedPart =>
-            Inspectors.forAll(expectedParts)(expectedPart =>
-              retrievedPart should not be theSameInstanceAs(expectedPart)))
-        }
+      retrievedParts should contain theSameElementsInOrderAs expectedParts
 
-      ImmutableObjectStorage.runForEffectsOnly(retrievalSession)(tranches) shouldBe a[
-        Right[_, _]]
+      retrievedParts.map(_.useProblematicClosure) should equal(
+        expectedParts.map(_.useProblematicClosure))
+
+      Inspectors.forAll(retrievedParts)(retrievedPart =>
+        Inspectors.forAll(expectedParts)(expectedPart =>
+          retrievedPart should not be theSameInstanceAs(expectedPart)))
     }
   }
 
