@@ -15,35 +15,30 @@ import scala.collection.mutable.{
 import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
-  sealed trait Part
+  val aThing = "Foo"
+
+  sealed trait Part {
+    def useProblematicClosure: String
+  }
 
   val labelStrings = Set("Huey", "Duey", "Louie")
 
-  case class Leaf(id: Int,
-                  labelString: String,
-                  problematicClosure: ProblematicClosure)
-      extends Part
+  case class Leaf(id: Int, labelString: String) extends Part {
+    val problematicClosure                     = (_: Any) => aThing + aThing
+    override def useProblematicClosure: String = problematicClosure()
+  }
 
-  case class Fork(left: Part,
-                  id: Int,
-                  right: Part,
-                  labelString: String,
-                  problematicClosure: ProblematicClosure)
-      extends Part
+  case class Fork(left: Part, id: Int, right: Part, labelString: String)
+      extends Part {
+    val problematicClosure                     = (_: Any) => s"$aThing"
+    override def useProblematicClosure: String = problematicClosure()
+  }
 
   case object alien
 
   val seedGenerator: Gen[Int] = Arbitrary.arbInt.arbitrary
 
   type PartGrowthStep = Vector[Part] => Part
-
-  type ProblematicClosure = Int => Seq[String]
-
-  val problematicClosure: ProblematicClosure = {
-    val result = Seq("Things", "fall", "apart.").mkString(" ")
-
-    Seq.fill(_)(result)
-  }
 
   def partGrowthStepsLeadingToRootForkGenerator(
       allowDuplicates: Boolean): Gen[Seq[PartGrowthStep]] =
@@ -82,7 +77,7 @@ object ImmutableObjectStorageSpec {
         def leaf(subparts: Vector[Part]): Part = {
           require(numberOfSubparts == subparts.size)
 
-          Leaf(numberOfSubparts, label, problematicClosure)
+          Leaf(numberOfSubparts, label)
         }
         leaf _ #:: growthSteps(partIdSetsCoveredBySubparts :+ Set(partId),
                                1 + numberOfLeaves)
@@ -129,8 +124,7 @@ object ImmutableObjectStorageSpec {
           Fork(subparts(indexOfLeftSubpart),
                partId,
                subparts(indexOfRightSubpart),
-               label,
-               problematicClosure)
+               label)
         }
 
         val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
@@ -306,6 +300,9 @@ class ImmutableObjectStorageSpec
         ImmutableObjectStorage.unsafeRun(retrievalSession)(tranches)
 
       retrievedParts should contain theSameElementsInOrderAs expectedParts
+
+      retrievedParts.map(_.useProblematicClosure) should equal(
+        expectedParts.map(_.useProblematicClosure))
 
       Inspectors.forAll(retrievedParts)(retrievedPart =>
         Inspectors.forAll(expectedParts)(expectedPart =>
