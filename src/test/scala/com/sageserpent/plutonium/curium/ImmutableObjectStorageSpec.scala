@@ -19,9 +19,16 @@ object ImmutableObjectStorageSpec {
 
   val labelStrings = Set("Huey", "Duey", "Louie")
 
-  case class Leaf(id: Int, labelString: String) extends Part
+  case class Leaf(id: Int,
+                  labelString: String,
+                  problematicClosure: ProblematicClosure)
+      extends Part
 
-  case class Fork(left: Part, id: Int, right: Part, labelString: String)
+  case class Fork(left: Part,
+                  id: Int,
+                  right: Part,
+                  labelString: String,
+                  problematicClosure: ProblematicClosure)
       extends Part
 
   case object alien
@@ -29,6 +36,14 @@ object ImmutableObjectStorageSpec {
   val seedGenerator: Gen[Int] = Arbitrary.arbInt.arbitrary
 
   type PartGrowthStep = Vector[Part] => Part
+
+  type ProblematicClosure = Int => Seq[String]
+
+  val problematicClosure: ProblematicClosure = {
+    val result = Seq("Things", "fall", "apart.").mkString(" ")
+
+    Seq.fill(_)(result)
+  }
 
   def partGrowthStepsLeadingToRootForkGenerator(
       allowDuplicates: Boolean): Gen[Seq[PartGrowthStep]] =
@@ -67,7 +82,7 @@ object ImmutableObjectStorageSpec {
         def leaf(subparts: Vector[Part]): Part = {
           require(numberOfSubparts == subparts.size)
 
-          Leaf(numberOfSubparts, label)
+          Leaf(numberOfSubparts, label, problematicClosure)
         }
         leaf _ #:: growthSteps(partIdSetsCoveredBySubparts :+ Set(partId),
                                1 + numberOfLeaves)
@@ -115,7 +130,7 @@ object ImmutableObjectStorageSpec {
                partId,
                subparts(indexOfRightSubpart),
                label,
-          )
+               problematicClosure)
         }
 
         val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
