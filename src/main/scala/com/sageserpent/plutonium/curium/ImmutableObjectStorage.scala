@@ -7,6 +7,7 @@ import cats.free.FreeT
 import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer
+import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.{
   Kryo,
   KryoSerializable,
@@ -209,12 +210,22 @@ object ImmutableObjectStorage {
     }
 
     val clazzesThatShouldNotBeProxied: Set[Class[_]] =
-      Set(classOf[StateAcquisition], classOf[String], classOf[Class[_]])
+      Set(
+        /*The next one is to workaround Kryo leaking its internal
+        fudge as to how it registers closure serializers into the
+        tranche specific reference resolver class, which in turn
+        creates proxies. We don't want to proxy a closure anyway.*/
+        classOf[Closure],
+        classOf[StateAcquisition],
+        classOf[String],
+        classOf[Class[_]]
+      )
 
     def isNotToBeProxied(clazz: Class[_]): Boolean =
       try {
         clazz.isSynthetic || clazz.isAnonymousClass || clazz.isLocalClass ||
-        Modifier.isFinal(clazz.getModifiers) || clazzesThatShouldNotBeProxied
+        Modifier.isFinal(clazz.getModifiers) ||
+        clazzesThatShouldNotBeProxied
           .exists(_.isAssignableFrom(clazz)) || clazz.getSimpleName.startsWith(
           "Function") || clazz.getSimpleName.startsWith("Tuple")
       } catch {
