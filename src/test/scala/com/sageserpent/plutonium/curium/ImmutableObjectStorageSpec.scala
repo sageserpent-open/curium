@@ -61,11 +61,13 @@ object ImmutableObjectStorageSpec {
       val chooseALeaf = numberOfLeaves < numberOfLeavesRequired &&
         (0 == numberOfSubparts || randomBehaviour.nextBoolean())
 
+      val label = randomBehaviour.chooseOneOf(labelStrings)
+
       if (chooseALeaf) {
         def leaf(subparts: Vector[Part]): Part = {
           require(numberOfSubparts == subparts.size)
 
-          Leaf(numberOfSubparts, randomBehaviour.chooseOneOf(labelStrings))
+          Leaf(numberOfSubparts, label)
         }
         leaf _ #:: growthSteps(partIdSetsCoveredBySubparts :+ Set(partId),
                                1 + numberOfLeaves)
@@ -112,7 +114,7 @@ object ImmutableObjectStorageSpec {
           Fork(subparts(indexOfLeftSubpart),
                partId,
                subparts(indexOfRightSubpart),
-               randomBehaviour.chooseOneOf(labelStrings),
+               label,
           )
         }
 
