@@ -240,6 +240,7 @@ class ImmutableObjectStorageSpec
     with GeneratorDrivenPropertyChecks {
   import ImmutableObjectStorageSpec._
 
+  // TODO - reinstate shrinkage and see that it works.
   implicit val shrinker: Shrink[PartGrowthSteps] = Shrink(shrink)
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
