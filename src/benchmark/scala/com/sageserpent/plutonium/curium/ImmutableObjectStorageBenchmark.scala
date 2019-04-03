@@ -14,11 +14,11 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
   val numberOfLeavesGenerator: Gen[ObjectReferenceId] =
     Gen.range("Number of leaves")(10, 200, 5)
 
-  val partGrowthStepsGenerator: Gen[Stream[PartGrowthStep]] =
+  val partGrowthStepsGenerator: Gen[PartGrowthSteps] =
     numberOfLeavesGenerator.flatMap { numberOfLeaves =>
       val seed = numberOfLeaves
 
-      val partGrowthSteps: scala.Stream[PartGrowthStep] =
+      val partGrowthSteps: PartGrowthSteps =
         partGrowthStepsLeadingToRootFork(
           allowDuplicates = true,
           numberOfLeavesRequired = numberOfLeaves,
@@ -26,16 +26,13 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
 
       val axisName = "Number of steps"
 
-      new Gen[Stream[PartGrowthStep]] {
-        override def warmupset
-          : Iterator[scala.Stream[ImmutableObjectStorageSpec.PartGrowthStep]] =
+      new Gen[PartGrowthSteps] {
+        override def warmupset: Iterator[PartGrowthSteps] =
           Iterator(partGrowthSteps)
         override def dataset: Iterator[Parameters] =
-          Iterator(
-            Parameters(
-              Parameter[PartGrowthStep](axisName) -> partGrowthSteps.size))
-        override def generate(
-            params: Parameters): scala.Stream[PartGrowthStep] =
+          Iterator(Parameters(
+            Parameter[PartGrowthStep](axisName) -> partGrowthSteps.steps.size))
+        override def generate(params: Parameters): PartGrowthSteps =
           partGrowthSteps // HACK: ignore the supplied parameters, as we are generating only one possible value.
       }
     }
@@ -47,8 +44,8 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
     }
   }
 
-  def activity(partGrowthSteps: Stream[PartGrowthStep]): Unit = {
-    val seed = partGrowthSteps.size
+  def activity(partGrowthSteps: PartGrowthSteps): Unit = {
+    val seed = partGrowthSteps.parts.size
 
     val randomBehaviour = new Random(seed)
 
@@ -57,7 +54,7 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
     storeAndRetrieve(partGrowthSteps, randomBehaviour, tranches)
   }
 
-  def storeAndRetrieve(partGrowthSteps: Stream[PartGrowthStep],
+  def storeAndRetrieve(partGrowthSteps: PartGrowthSteps,
                        randomBehaviour: Random,
                        tranches: FakeTranches) = {
     val trancheIds: Vector[TrancheId] =
