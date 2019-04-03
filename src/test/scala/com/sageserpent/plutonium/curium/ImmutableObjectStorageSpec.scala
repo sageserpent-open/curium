@@ -17,7 +17,7 @@ import scala.util.{Random, Try}
 object ImmutableObjectStorageSpec {
   sealed trait Part
 
-  val labelStrings = Set("Huey", "Duey", "Louie")
+  val labelStrings: Set[String] = Set("Huey", "Duey", "Louie")
 
   case class Leaf(id: Int, labelString: String) extends Part
 
@@ -137,6 +137,13 @@ object ImmutableObjectStorageSpec {
     result
   }
 
+  def shrink(
+      partGrowthSteps: Seq[PartGrowthStep]): Stream[Seq[PartGrowthStep]] = {
+    require(partGrowthSteps.nonEmpty)
+
+    partGrowthSteps.inits.toStream.drop(1).init
+  }
+
   def storeViaMultipleSessions(
       partGrowthStepsLeadingToRootFork: Seq[PartGrowthStep],
       tranches: Tranches,
@@ -227,8 +234,7 @@ class ImmutableObjectStorageSpec
     with GeneratorDrivenPropertyChecks {
   import ImmutableObjectStorageSpec._
 
-  implicit def shrinkAny[Seq[PartGrowthStep]]: Shrink[Seq[PartGrowthStep]] =
-    Shrink(_ => Stream.empty)
+  implicit val shrinker: Shrink[Seq[PartGrowthStep]] = Shrink(shrink)
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
     partGrowthStepsLeadingToRootForkGenerator(allowDuplicates = true),
