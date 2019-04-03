@@ -15,14 +15,24 @@ import scala.collection.mutable.{
 import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
-  sealed trait Part
+  val aThing = "Foo"
+
+  sealed trait Part {
+    def useProblematicClosure: String
+  }
 
   val labelStrings: Set[String] = Set("Huey", "Duey", "Louie")
 
-  case class Leaf(id: Int, labelString: String) extends Part
+  case class Leaf(id: Int, labelString: String) extends Part {
+    val problematicClosure                     = (_: Any) => aThing + aThing
+    override def useProblematicClosure: String = problematicClosure()
+  }
 
   case class Fork(left: Part, id: Int, right: Part, labelString: String)
-      extends Part
+      extends Part {
+    val problematicClosure                     = (_: Any) => s"$aThing"
+    override def useProblematicClosure: String = problematicClosure()
+  }
 
   case object alien
 
@@ -125,8 +135,7 @@ object ImmutableObjectStorageSpec {
           Fork(subparts(indexOfLeftSubpart),
                partId,
                subparts(indexOfRightSubpart),
-               label,
-          )
+               label)
         }
 
         val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
@@ -264,46 +273,49 @@ class ImmutableObjectStorageSpec
     partGrowthStepsLeadingToRootForkGenerator(allowDuplicates = true),
     seedGenerator,
     MinSuccessful(100)) { (partGrowthSteps, seed) =>
-    val randomBehaviour = new Random(seed)
+      val randomBehaviour = new Random(seed)
 
     val expectedParts = partGrowthSteps.parts()
 
-    val tranches = new FakeTranches
+      val tranches = new FakeTranches
 
-    val trancheIds =
-      storeViaMultipleSessions(partGrowthSteps, tranches, randomBehaviour)
+      val trancheIds =
+        storeViaMultipleSessions(partGrowthSteps, tranches, randomBehaviour)
 
-    val forwardPermutation: Map[Int, Int] = randomBehaviour
-      .shuffle(Vector.tabulate(trancheIds.size)(identity))
-      .zipWithIndex
-      .toMap
+      val forwardPermutation: Map[Int, Int] = randomBehaviour
+        .shuffle(Vector.tabulate(trancheIds.size)(identity))
+        .zipWithIndex
+        .toMap
 
-    val backwardsPermutation = forwardPermutation.map(_.swap)
+      val backwardsPermutation = forwardPermutation.map(_.swap)
 
-    // NOTE: as long as we have a complete chain of tranches, it shouldn't matter
-    // in what order tranche ids are submitted for retrieval.
-    val permutedTrancheIds = Vector(trancheIds.indices map (index =>
-      trancheIds(forwardPermutation(index))): _*)
+      // NOTE: as long as we have a complete chain of tranches, it shouldn't matter
+      // in what order tranche ids are submitted for retrieval.
+      val permutedTrancheIds = Vector(trancheIds.indices map (index =>
+        trancheIds(forwardPermutation(index))): _*)
 
-    val retrievalSession: Session[IndexedSeq[Part]] =
-      for {
-        permutedRetrievedParts <- permutedTrancheIds.traverse(
-          ImmutableObjectStorage.retrieve[Part])
+      val retrievalSession: Session[IndexedSeq[Part]] =
+        for {
+          permutedRetrievedParts <- permutedTrancheIds.traverse(
+            ImmutableObjectStorage.retrieve[Part])
 
-      } yield
-        permutedRetrievedParts.indices map (index =>
-          permutedRetrievedParts(backwardsPermutation(index)))
+        } yield
+          permutedRetrievedParts.indices map (index =>
+            permutedRetrievedParts(backwardsPermutation(index)))
 
-    val Right(retrievedParts) =
-      ImmutableObjectStorage.unsafeRun(retrievalSession)(tranches)
+      val Right(retrievedParts) =
+        ImmutableObjectStorage.unsafeRun(retrievalSession)(tranches)
 
-    retrievedParts should contain theSameElementsInOrderAs expectedParts
+      retrievedParts should contain theSameElementsInOrderAs expectedParts
 
-    Inspectors.forAll(retrievedParts)(retrievedPart =>
-      Inspectors.forAll(expectedParts)(expectedPart =>
-        retrievedPart should not be theSameInstanceAs(expectedPart)))
+      retrievedParts.map(_.useProblematicClosure) should equal(
+        expectedParts.map(_.useProblematicClosure))
 
-  }
+      Inspectors.forAll(retrievedParts)(retrievedPart =>
+        Inspectors.forAll(expectedParts)(expectedPart =>
+          retrievedPart should not be theSameInstanceAs(expectedPart)))
+
+    }
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
     partGrowthStepsLeadingToRootForkGenerator(allowDuplicates = true),
