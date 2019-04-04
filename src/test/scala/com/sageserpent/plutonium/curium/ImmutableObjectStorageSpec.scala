@@ -24,13 +24,13 @@ object ImmutableObjectStorageSpec {
   val labelStrings: Set[String] = Set("Huey", "Duey", "Louie")
 
   case class Leaf(id: Int, labelString: String) extends Part {
-    val problematicClosure                     = (_: Any) => aThing + aThing
+    val problematicClosure: Any => String      = (_: Any) => aThing + aThing
     override def useProblematicClosure: String = problematicClosure()
   }
 
   case class Fork(left: Part, id: Int, right: Part, labelString: String)
       extends Part {
-    val problematicClosure                     = (_: Any) => s"$aThing"
+    val problematicClosure: Any => String      = (_: Any) => s"$aThing"
     override def useProblematicClosure: String = problematicClosure()
   }
 
@@ -44,19 +44,19 @@ object ImmutableObjectStorageSpec {
     require(chunks.nonEmpty)
     require(chunks.forall(_.nonEmpty))
 
-    override def toString(): String =
-      parts().toString // TODO - show chunking.
+    override def toString(): String = {
+
+      def partsInChunks(chunkSizes: Seq[Int],
+                        parts: Vector[Part]): Seq[Vector[Part]] = {
+        val (leadingChunk, remainder) = parts.splitAt(chunkSizes.head)
+
+        leadingChunk +: partsInChunks(chunkSizes.tail, remainder)
+      }
+
+      partsInChunks(chunks.map(_.size), parts()).map(_.toString).mkString(", ")
+    }
 
     def parts(): Vector[Part] =
-      /*(Seq.empty[Vector[Part]] /: chunks) {
-      case (partsInChunks, chunk) =>
-        val chunkOfParts = (partsInChunks.flatten.toVector /: chunk) {
-          case (parts, partGrowthStep) =>
-            parts :+ partGrowthStep(parts)
-        }
-
-      partsInChunks :+ chunkOfParts
-    }*/
       (Vector.empty[Part] /: chunks.flatten) {
         case (parts, partGrowthStep) =>
           parts :+ partGrowthStep(parts)

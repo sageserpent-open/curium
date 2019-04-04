@@ -5,8 +5,6 @@ import org.scalameter.api.{Bench, Gen, exec}
 import org.scalameter.picklers.noPickler._
 import org.scalameter.{Parameter, Parameters}
 
-import scala.util.Random
-
 object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
   import ImmutableObjectStorage._
   import ImmutableObjectStorageSpec._
