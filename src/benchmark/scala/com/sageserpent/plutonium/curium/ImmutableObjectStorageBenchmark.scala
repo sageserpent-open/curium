@@ -14,15 +14,15 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
   val numberOfLeavesGenerator: Gen[ObjectReferenceId] =
     Gen.range("Number of leaves")(10, 200, 5)
 
-  val partGrowthStepsGenerator: Gen[PartGrowthStepsInChunks] =
+  val partGrowthStepsInChunksGenerator: Gen[PartGrowthStepsInChunks] =
     numberOfLeavesGenerator.flatMap { numberOfLeaves =>
       val seed = numberOfLeaves
 
       val partGrowthSteps: PartGrowthStepsInChunks =
-        partGrowthStepsLeadingToRootFork(
-          allowDuplicates = true,
-          numberOfLeavesRequired = numberOfLeaves,
-          seed = seed)
+        partGrowthStepsInChuksLeadingToRootFork(allowDuplicates = true,
+                                                numberOfLeavesRequired =
+                                                  numberOfLeaves,
+                                                seed = seed)
 
       val axisName = "Number of steps"
 
@@ -39,26 +39,27 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
 
   performance of "Bookings" in {
     measure method "storeAndRetrieve" in {
-      using(partGrowthStepsGenerator) config (exec.benchRuns -> 5, exec.jvmflags -> List(
+      using(partGrowthStepsInChunksGenerator) config (exec.benchRuns -> 5, exec.jvmflags -> List(
         "-Xmx3G")) in activity
     }
   }
 
-  def activity(partGrowthSteps: PartGrowthStepsInChunks): Unit = {
-    val seed = partGrowthSteps.parts.size
+  def activity(partGrowthStepsInChunks: PartGrowthStepsInChunks): Unit = {
+    val seed = partGrowthStepsInChunks.parts.size
 
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
 
-    storeAndRetrieve(partGrowthSteps, randomBehaviour, tranches)
+    storeAndRetrieve(partGrowthStepsInChunks, randomBehaviour, tranches)
   }
 
-  def storeAndRetrieve(partGrowthSteps: PartGrowthStepsInChunks,
+  def storeAndRetrieve(partGrowthStepsInChunks: PartGrowthStepsInChunks,
                        randomBehaviour: Random,
                        tranches: FakeTranches) = {
     val trancheIds: Vector[TrancheId] =
-      partGrowthSteps.storeViaMultipleSessions(tranches, randomBehaviour)
+      partGrowthStepsInChunks.storeViaMultipleSessions(tranches,
+                                                       randomBehaviour)
 
     val retrievalSession: Session[Unit] =
       for (_ <- trancheIds.traverse(ImmutableObjectStorage.retrieve[Part]))
