@@ -47,13 +47,16 @@ object ImmutableObjectStorageSpec {
     override def toString(): String = {
 
       def partsInChunks(chunkSizes: Seq[Int],
-                        parts: Vector[Part]): Seq[Vector[Part]] = {
-        val (leadingChunk, remainder) = parts.splitAt(chunkSizes.head)
+                        parts: Vector[Part]): Seq[Vector[Part]] =
+        if (chunkSizes.nonEmpty) {
+          val (leadingChunk, remainder) = parts.splitAt(chunkSizes.head)
 
-        leadingChunk +: partsInChunks(chunkSizes.tail, remainder)
-      }
+          leadingChunk +: partsInChunks(chunkSizes.tail, remainder)
+        } else Seq.empty
 
-      partsInChunks(chunks.map(_.size), parts()).map(_.toString).mkString(", ")
+      partsInChunks(chunks.map(_.size), parts())
+        .map((chunk: Vector[Part]) => s"[ ${chunk.mkString(", ")} ]")
+        .mkString(", ")
     }
 
     def parts(): Vector[Part] =
