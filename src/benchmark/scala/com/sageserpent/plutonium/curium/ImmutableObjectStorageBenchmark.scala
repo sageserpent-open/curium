@@ -19,10 +19,10 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
       val seed = numberOfLeaves
 
       val partGrowthSteps: PartGrowthStepsInChunks =
-        partGrowthStepsInChuksLeadingToRootFork(allowDuplicates = true,
-                                                numberOfLeavesRequired =
-                                                  numberOfLeaves,
-                                                seed = seed)
+        partGrowthStepsInChunksLeadingToRootFork(allowDuplicates = true,
+                                                 numberOfLeavesRequired =
+                                                   numberOfLeaves,
+                                                 seed = seed)
 
       val axisName = "Number of steps"
 
@@ -45,21 +45,17 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
   }
 
   def activity(partGrowthStepsInChunks: PartGrowthStepsInChunks): Unit = {
-    val seed = partGrowthStepsInChunks.parts.size
-
-    val randomBehaviour = new Random(seed)
+    val seed = partGrowthStepsInChunks.hashCode()
 
     val tranches = new FakeTranches
 
-    storeAndRetrieve(partGrowthStepsInChunks, randomBehaviour, tranches)
+    storeAndRetrieve(partGrowthStepsInChunks, tranches)
   }
 
   def storeAndRetrieve(partGrowthStepsInChunks: PartGrowthStepsInChunks,
-                       randomBehaviour: Random,
-                       tranches: FakeTranches) = {
+                       tranches: FakeTranches): Unit = {
     val trancheIds: Vector[TrancheId] =
-      partGrowthStepsInChunks.storeViaMultipleSessions(tranches,
-                                                       randomBehaviour)
+      partGrowthStepsInChunks.storeViaMultipleSessions(tranches)
 
     val retrievalSession: Session[Unit] =
       for (_ <- trancheIds.traverse(ImmutableObjectStorage.retrieve[Part]))
