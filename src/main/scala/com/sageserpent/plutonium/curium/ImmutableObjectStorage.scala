@@ -73,6 +73,7 @@ object ImmutableObjectStorage {
 
       val tranche =
         TrancheOfData(serializedRepresentation, objectReferenceIdOffset)
+
       for {
         _ <- storeTrancheAndAssociatedObjectReferenceIds(id,
                                                          tranche,
@@ -92,6 +93,26 @@ object ImmutableObjectStorage {
 
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
+  }
+
+  trait TranchesContracts extends Tranches {
+    abstract override protected def storeTrancheAndAssociatedObjectReferenceIds(
+        trancheId: TrancheId,
+        tranche: TrancheOfData,
+        objectReferenceIds: Seq[ObjectReferenceId]): EitherThrowableOr[Unit] =
+      for {
+        objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
+        _ <- Try {
+          for (objectReferenceId <- objectReferenceIds) {
+            require(objectReferenceIdOffsetForNewTranche <= objectReferenceId)
+          }
+
+        }.toEither
+        _ <- super.storeTrancheAndAssociatedObjectReferenceIds(
+          trancheId,
+          tranche,
+          objectReferenceIds)
+      } yield ()
   }
 
   trait Operation[Result]
