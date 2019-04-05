@@ -40,32 +40,29 @@ object ImmutableObjectStorageSpec {
 
   type PartGrowthStep = Vector[Part] => Part
 
-  case class PartGrowthStepsInChunks(chunks: Seq[Vector[PartGrowthStep]]) {
-    require(chunks.nonEmpty)
-    require(chunks.forall(_.nonEmpty))
+  case class PartGrowth(steps: Seq[PartGrowthStep], chunkingSeed: Int) {
+    require(steps.nonEmpty)
 
     override def toString(): String = {
+      val chunks = new Random(chunkingSeed).splitIntoNonEmptyPieces(parts())
 
-      def partsInChunks(chunkSizes: Seq[Int],
-                        parts: Vector[Part]): Seq[Vector[Part]] =
-        if (chunkSizes.nonEmpty) {
-          val (leadingChunk, remainder) = parts.splitAt(chunkSizes.head)
-
-          leadingChunk +: partsInChunks(chunkSizes.tail, remainder)
-        } else Seq.empty
-
-      partsInChunks(chunks.map(_.size), parts())
+      chunks
         .map((chunk: Vector[Part]) => s"[ ${chunk.mkString(", ")} ]")
         .mkString(", ")
     }
 
     def parts(): Vector[Part] =
-      (Vector.empty[Part] /: chunks.flatten) {
+      (Vector.empty[Part] /: steps) {
         case (parts, partGrowthStep) =>
           parts :+ partGrowthStep(parts)
       }
 
     def storeViaMultipleSessions(tranches: Tranches): Vector[TrancheId] = {
+      val chunks: Stream[Vector[PartGrowthStep]] =
+        new Random(chunkingSeed)
+          .splitIntoNonEmptyPieces(steps)
+          .map(_.toVector)
+          .force
 
       var trancheIdsSoFar: Vector[TrancheId] = Vector.empty
 
@@ -92,20 +89,17 @@ object ImmutableObjectStorageSpec {
     }
   }
 
-  def partGrowthStepsInChunksLeadingToRootForkGenerator(
-      allowDuplicates: Boolean): Gen[PartGrowthStepsInChunks] =
+  def partGrowthLeadingToRootForkGenerator(
+      allowDuplicates: Boolean): Gen[PartGrowth] =
     for {
       numberOfLeavesRequired <- Gen.posNum[ObjectReferenceId]
       seed                   <- seedGenerator
     } yield
-      partGrowthStepsInChunksLeadingToRootFork(allowDuplicates,
-                                               numberOfLeavesRequired,
-                                               seed)
+      partGrowthLeadingToRootFork(allowDuplicates, numberOfLeavesRequired, seed)
 
-  def partGrowthStepsInChunksLeadingToRootFork(
-      allowDuplicates: Boolean,
-      numberOfLeavesRequired: Int,
-      seed: Int): PartGrowthStepsInChunks = {
+  def partGrowthLeadingToRootFork(allowDuplicates: Boolean,
+                                  numberOfLeavesRequired: Int,
+                                  seed: Int): PartGrowth = {
     require(0 < numberOfLeavesRequired)
 
     val randomBehaviour = new Random(seed)
@@ -195,21 +189,14 @@ object ImmutableObjectStorageSpec {
     val steps: Stream[PartGrowthStep] =
       growthSteps(Vector.empty, numberOfLeaves = 0).force
 
-    val chunks: Stream[Vector[PartGrowthStep]] =
-      randomBehaviour
-        .splitIntoNonEmptyPieces(steps)
-        .map(_.toVector)
-        .force
-
-    PartGrowthStepsInChunks(chunks)
+    PartGrowth(steps, seed)
   }
 
-  def shrink(partGrowthSteps: PartGrowthStepsInChunks)
-    : Stream[PartGrowthStepsInChunks] = {
-    partGrowthSteps.chunks.inits.toStream
+  def shrink(partGrowth: PartGrowth): Stream[PartGrowth] = {
+    partGrowth.steps.inits.toStream
       .drop(1)
       .init
-      .map(PartGrowthStepsInChunks.apply)
+      .map(steps => PartGrowth(steps, partGrowth.chunkingSeed))
   }
 
   class FakeTranches extends Tranches {
@@ -276,15 +263,15 @@ class ImmutableObjectStorageSpec
   import ImmutableObjectStorageSpec._
 
   // TODO - reinstate shrinkage and see that it works.
-  implicit val shrinker: Shrink[PartGrowthStepsInChunks] = Shrink(shrink)
+  implicit val shrinker: Shrink[PartGrowth] = Shrink(shrink)
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
-    partGrowthStepsInChunksLeadingToRootForkGenerator(allowDuplicates = true),
-    MinSuccessful(100)) { (partGrowthStepsInChunks) =>
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
+    MinSuccessful(100)) { (partGrowth) =>
     val tranches = new FakeTranches
 
     val trancheIds =
-      partGrowthStepsInChunks.storeViaMultipleSessions(tranches)
+      partGrowth.storeViaMultipleSessions(tranches)
 
     trancheIds should contain theSameElementsAs trancheIds.toSet
 
@@ -293,17 +280,17 @@ class ImmutableObjectStorageSpec
   }
 
   "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in forAll(
-    partGrowthStepsInChunksLeadingToRootForkGenerator(allowDuplicates = true),
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
     seedGenerator,
-    MinSuccessful(100)) { (partGrowthStepsInChunks, seed) =>
+    MinSuccessful(100)) { (partGrowth, seed) =>
     val randomBehaviour = new Random(seed)
 
-    val expectedParts = partGrowthStepsInChunks.parts()
+    val expectedParts = partGrowth.parts()
 
     val tranches = new FakeTranches
 
     val trancheIds =
-      partGrowthStepsInChunks.storeViaMultipleSessions(tranches)
+      partGrowth.storeViaMultipleSessions(tranches)
 
     val forwardPermutation: Map[Int, Int] = randomBehaviour
       .shuffle(Vector.tabulate(trancheIds.size)(identity))
@@ -341,17 +328,17 @@ class ImmutableObjectStorageSpec
   }
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
-    partGrowthStepsInChunksLeadingToRootForkGenerator(allowDuplicates = true),
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
     seedGenerator,
-    MinSuccessful(100)) { (partGrowthStepsInChunks, seed) =>
+    MinSuccessful(100)) { (partGrowth, seed) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
 
     val trancheIds =
-      partGrowthStepsInChunks.storeViaMultipleSessions(tranches)
+      partGrowth.storeViaMultipleSessions(tranches)
 
-    val referenceParts = partGrowthStepsInChunks.parts()
+    val referenceParts = partGrowth.parts()
 
     val referencePartsByTrancheId = (trancheIds zip referenceParts).toMap
 
@@ -369,15 +356,15 @@ class ImmutableObjectStorageSpec
   }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
-    partGrowthStepsInChunksLeadingToRootForkGenerator(allowDuplicates = false),
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     seedGenerator,
-    MinSuccessful(100)) { (partGrowthStepsInChunks, seed) =>
+    MinSuccessful(100)) { (partGrowth, seed) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
 
     val trancheIds =
-      partGrowthStepsInChunks.storeViaMultipleSessions(tranches)
+      partGrowth.storeViaMultipleSessions(tranches)
 
     val idOfCorruptedTranche = randomBehaviour.chooseOneOf(trancheIds)
 
@@ -401,15 +388,15 @@ class ImmutableObjectStorageSpec
   }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
-    partGrowthStepsInChunksLeadingToRootForkGenerator(allowDuplicates = false),
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     seedGenerator,
-    MinSuccessful(100)) { (partGrowthStepsInChunks, seed) =>
+    MinSuccessful(100)) { (partGrowth, seed) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
 
     val trancheIds =
-      partGrowthStepsInChunks.storeViaMultipleSessions(tranches)
+      partGrowth.storeViaMultipleSessions(tranches)
 
     val idOfMissingTranche =
       randomBehaviour.chooseOneOf(trancheIds)
@@ -428,9 +415,9 @@ class ImmutableObjectStorageSpec
   }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
-    partGrowthStepsInChunksLeadingToRootForkGenerator(allowDuplicates = false),
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     seedGenerator,
-    MinSuccessful(100)) { (partGrowthStepsInChunks, seed) =>
+    MinSuccessful(100)) { (partGrowth, seed) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
@@ -439,7 +426,7 @@ class ImmutableObjectStorageSpec
       ImmutableObjectStorage.store(alien))(tranches)
 
     val nonAlienTrancheIds =
-      partGrowthStepsInChunks.storeViaMultipleSessions(tranches)
+      partGrowth.storeViaMultipleSessions(tranches)
 
     val idOfIncorrectlyTypedTranche =
       randomBehaviour.chooseOneOf(nonAlienTrancheIds)
@@ -460,12 +447,12 @@ class ImmutableObjectStorageSpec
   }
 
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in forAll(
-    partGrowthStepsInChunksLeadingToRootForkGenerator(allowDuplicates = true),
-    MinSuccessful(100)) { (partGrowthStepsInChunks) =>
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
+    MinSuccessful(100)) { (partGrowth) =>
     val isolatedSpokeTranche = {
       val isolatedSpokeTranches = new FakeTranches
 
-      val root = partGrowthStepsInChunks.parts().last
+      val root = partGrowth.parts().last
 
       val isolatedSpokeStorageSession: Session[TrancheId] =
         ImmutableObjectStorage.store(root)
@@ -480,7 +467,7 @@ class ImmutableObjectStorageSpec
     val tranches = new FakeTranches
 
     val trancheIds =
-      partGrowthStepsInChunks.storeViaMultipleSessions(tranches)
+      partGrowth.storeViaMultipleSessions(tranches)
 
     val rootTrancheId = trancheIds.last
 
@@ -490,15 +477,15 @@ class ImmutableObjectStorageSpec
   }
 
   it should "be idempotent in terms of object identity when retrieving using the same tranche id" in forAll(
-    partGrowthStepsInChunksLeadingToRootForkGenerator(allowDuplicates = true),
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
     seedGenerator,
-    MinSuccessful(100)) { (partGrowthStepsInChunks, seed) =>
+    MinSuccessful(100)) { (partGrowth, seed) =>
     val randomBehaviour = new Random(seed)
 
     val tranches = new FakeTranches
 
     val trancheIds =
-      partGrowthStepsInChunks.storeViaMultipleSessions(tranches)
+      partGrowth.storeViaMultipleSessions(tranches)
 
     val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
 
