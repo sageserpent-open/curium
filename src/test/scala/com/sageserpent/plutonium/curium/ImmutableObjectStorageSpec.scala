@@ -40,14 +40,48 @@ object ImmutableObjectStorageSpec {
 
   type PartGrowthStep = Vector[Part] => Part
 
-  case class PartGrowth(steps: Seq[PartGrowthStep], chunkingSeed: Int) {
+  object PartGrowth {
+    def apply(steps: Seq[PartGrowthStep], chunkingSeed: Int): PartGrowth = {
+      val chunkEndIndices =
+        if (1 < steps.size) {
+          val randomBehaviour = new Random(chunkingSeed)
+
+          val numberOfRandomIndices =
+            randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(steps.size - 2)
+
+          0 +: randomBehaviour
+            .buildRandomSequenceOfDistinctIntegersFromZeroToOneLessThan(
+              steps.size - 2)
+            .map(1 + _)
+            .sorted
+            .take(numberOfRandomIndices) :+ steps.size
+        } else 0 to steps.size
+
+      val chunkSizes = chunkEndIndices.zip(chunkEndIndices.tail).map {
+        case (lower, higher) => higher - lower
+      }
+
+      PartGrowth(steps, chunkSizes)
+    }
+  }
+
+  case class PartGrowth(steps: Seq[PartGrowthStep], chunkSizes: Seq[Int]) {
     require(steps.nonEmpty)
+    require(steps.size == chunkSizes.sum)
+
+    private def thingsInChunks[Thing](chunkSizes: Seq[Int],
+                                      things: Seq[Thing]): Seq[Seq[Thing]] =
+      if (chunkSizes.nonEmpty) {
+        val (leadingChunk, remainder) = things.splitAt(chunkSizes.head)
+
+        leadingChunk +: thingsInChunks(chunkSizes.tail, remainder)
+      } else Seq.empty
 
     override def toString(): String = {
-      val chunks = new Random(chunkingSeed).splitIntoNonEmptyPieces(parts())
+      val partsInChunks = thingsInChunks(chunkSizes, parts())
 
-      chunks
-        .map((chunk: Vector[Part]) => s"[ ${chunk.mkString(", ")} ]")
+      partsInChunks
+        .map(chunk => s"[${chunk.mkString(", ")} ]")
         .mkString(", ")
     }
 
@@ -58,11 +92,9 @@ object ImmutableObjectStorageSpec {
       }
 
     def storeViaMultipleSessions(tranches: Tranches): Vector[TrancheId] = {
-      val chunks: Stream[Vector[PartGrowthStep]] =
-        new Random(chunkingSeed)
-          .splitIntoNonEmptyPieces(steps)
+      val chunks: Seq[Vector[PartGrowthStep]] =
+        thingsInChunks(chunkSizes, steps)
           .map(_.toVector)
-          .force
 
       var trancheIdsSoFar: Vector[TrancheId] = Vector.empty
 
@@ -193,10 +225,38 @@ object ImmutableObjectStorageSpec {
   }
 
   def shrink(partGrowth: PartGrowth): Stream[PartGrowth] = {
-    partGrowth.steps.inits.toStream
-      .drop(1)
-      .init
-      .map(steps => PartGrowth(steps, partGrowth.chunkingSeed))
+    val PartGrowth(steps, chunkSizes) = partGrowth
+
+    if (1 < chunkSizes.size) {
+      val randomBehaviour = new Random(partGrowth.hashCode())
+
+      def mergesOfChunkSizes(chunkSizes: Seq[Int]): Stream[Seq[Int]] = {
+        val mergedChunkSizes =
+          randomBehaviour.splitIntoNonEmptyPieces(chunkSizes).map(_.sum)
+
+        mergedChunkSizes #:: (if (1 < chunkSizes.size)
+                                mergesOfChunkSizes(mergedChunkSizes)
+                              else Stream.empty)
+      } filter (_ != chunkSizes) // It is possible for the pieces to be split into single-length chunks, thus reconstituting the same chunks.
+
+      val shrunkViaMergingChunks =
+        mergesOfChunkSizes(chunkSizes).map(mergedChunkSizes =>
+          partGrowth.copy(chunkSizes = mergedChunkSizes))
+
+      val chunkSizesWithoutTheFinalGrowthStep =
+        if (chunkSizes.last > 1)
+          chunkSizes.init :+ chunkSizes.last - 1
+        else chunkSizes.init
+      val shrunkViaDroppingAGrowthStep = shrink(
+        PartGrowth(steps.init, chunkSizesWithoutTheFinalGrowthStep))
+
+      shrunkViaMergingChunks ++
+        shrunkViaDroppingAGrowthStep
+    } else
+      steps.inits.toStream
+        .drop(1)
+        .init
+        .map(steps => PartGrowth(steps, Seq(steps.size)))
   }
 
   class FakeTranches extends Tranches {
@@ -262,7 +322,6 @@ class ImmutableObjectStorageSpec
     with GeneratorDrivenPropertyChecks {
   import ImmutableObjectStorageSpec._
 
-  // TODO - reinstate shrinkage and see that it works.
   implicit val shrinker: Shrink[PartGrowth] = Shrink(shrink)
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
