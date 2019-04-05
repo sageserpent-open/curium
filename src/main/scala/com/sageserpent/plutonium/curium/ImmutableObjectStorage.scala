@@ -211,11 +211,22 @@ object ImmutableObjectStorage {
 
     val clazzesThatShouldNotBeProxied: Set[Class[_]] =
       Set(
-        /*The next one is to workaround Kryo leaking its internal
-        fudge as to how it registers closure serializers into the
-        tranche specific reference resolver class, which in turn
-        creates proxies. We don't want to proxy a closure anyway.*/
+        /*
+          The next one is to workaround Kryo leaking its internal
+          fudge as to how it registers closure serializers into the
+          tranche specific reference resolver class, which in turn
+          creates proxies. We don't want to proxy a closure anyway.
+         */
         classOf[Closure],
+        /*
+          The next one is to prevent the proxying of proxies. Strictly
+          speaking this shouldn't be needed, because there is logic elsewhere
+          that will ensure that a proxy is never stored into a tranche
+          as a distinct object from what it proxies; however due to the
+          rather dubious way *this* code allows proxy classes to be passed
+          to the reference resolver instances, that code will end up seeing
+          the class objects for proxies, so this exclusion guards against *that*.
+         */
         classOf[StateAcquisition],
         classOf[String],
         classOf[Class[_]]
