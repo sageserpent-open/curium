@@ -89,6 +89,7 @@ object ImmutableObjectStorage {
       : EitherThrowableOr[ObjectReferenceId]
 
     def retrieveTranche(trancheId: TrancheId): EitherThrowableOr[TrancheOfData]
+
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
   }
@@ -108,6 +109,10 @@ object ImmutableObjectStorage {
   def retrieve[X: TypeTag](id: TrancheId): Session[X] =
     FreeT.liftF[Operation, EitherThrowableOr, X](
       Retrieve(id, classFromType(typeOf[X])))
+}
+
+trait ImmutableObjectStorage {
+  import ImmutableObjectStorage._
 
   def runToYieldTrancheIds(session: Session[Vector[TrancheId]])
     : Tranches => EitherThrowableOr[Vector[TrancheId]] =
@@ -196,6 +201,8 @@ object ImmutableObjectStorage {
   private val kryoPool: KryoPool =
     KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
 
+  protected def configurableProxyExclusion(clazz: Class[_]): Boolean = false
+
   object proxySupport {
     private val byteBuddy = new ByteBuddy()
 
@@ -237,7 +244,8 @@ object ImmutableObjectStorage {
         clazz.isSynthetic || clazz.isAnonymousClass || clazz.isLocalClass ||
         Modifier.isFinal(clazz.getModifiers) ||
         clazzesThatShouldNotBeProxied
-          .exists(_.isAssignableFrom(clazz))
+          .exists(_.isAssignableFrom(clazz)) || configurableProxyExclusion(
+          clazz)
       } catch {
         case _: InternalError =>
           // Workaround: https://github.com/scala/bug/issues/2034 - if it throws,
