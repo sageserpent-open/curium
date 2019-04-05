@@ -227,7 +227,7 @@ object ImmutableObjectStorage {
         Modifier.isFinal(clazz.getModifiers) ||
         clazzesThatShouldNotBeProxied
           .exists(_.isAssignableFrom(clazz)) || clazz.getSimpleName.startsWith(
-          "Function") || clazz.getSimpleName.startsWith("Tuple")
+          "Tuple")
       } catch {
         case _: InternalError =>
           // Workaround: https://github.com/scala/bug/issues/2034 - if it throws,
