@@ -17,7 +17,65 @@ import scala.collection.mutable.{
 import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
-  object immutableObjectStorage extends ImmutableObjectStorage
+  class FakeTranches extends Tranches[UUID] {
+    val tranchesById: MutableMap[TrancheId, TrancheOfData] = MutableMap.empty
+    val objectReferenceIdsToAssociatedTrancheIdMap
+      : MutableSortedMap[ObjectReferenceId, TrancheId] = MutableSortedMap.empty
+
+    def purgeTranche(trancheId: TrancheId): Unit = {
+      val objectReferenceIdsToRemove =
+        objectReferenceIdsToAssociatedTrancheIdMap.collect {
+          case (objectReferenceId, associatedTrancheId)
+              if trancheId == associatedTrancheId =>
+            objectReferenceId
+        }
+
+      objectReferenceIdsToAssociatedTrancheIdMap --= objectReferenceIdsToRemove
+
+      tranchesById -= trancheId
+    }
+
+    override protected def storeTrancheAndAssociatedObjectReferenceIds(
+        tranche: TrancheOfData,
+        objectReferenceIds: Seq[ObjectReferenceId])
+      : EitherThrowableOr[TrancheId] =
+      Try {
+        val trancheId = UUID.randomUUID()
+
+        tranchesById(trancheId) = tranche
+
+        for (objectReferenceId <- objectReferenceIds) {
+          objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) =
+            trancheId
+        }
+
+        trancheId
+      }.toEither
+
+    override def retrieveTranche(
+        trancheId: TrancheId): scala.Either[scala.Throwable, TrancheOfData] =
+      Try { tranchesById(trancheId) }.toEither
+
+    override def retrieveTrancheId(objectReferenceId: ObjectReferenceId)
+      : scala.Either[scala.Throwable, TrancheId] =
+      Try { objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) }.toEither
+
+    override def objectReferenceIdOffsetForNewTranche
+      : EitherThrowableOr[ObjectReferenceId] =
+      Try {
+        val maximumObjectReferenceId =
+          objectReferenceIdsToAssociatedTrancheIdMap.keys
+            .reduceOption((leftObjectReferenceId, rightObjectReferenceId) =>
+              leftObjectReferenceId max rightObjectReferenceId)
+        val alignmentMultipleForObjectReferenceIdsInSeparateTranches = 100
+        maximumObjectReferenceId.fold(0)(
+          1 + _ / alignmentMultipleForObjectReferenceIdsInSeparateTranches) * alignmentMultipleForObjectReferenceIdsInSeparateTranches
+      }.toEither
+  }
+
+  type TrancheId = FakeTranches#TrancheId
+
+  object immutableObjectStorage extends ImmutableObjectStorage[TrancheId]
 
   val aThing = "Foo"
 
@@ -95,7 +153,7 @@ object ImmutableObjectStorageSpec {
           parts :+ partGrowthStep(parts)
       }
 
-    def storeViaMultipleSessions(tranches: Tranches): Vector[TrancheId] = {
+    def storeViaMultipleSessions(tranches: FakeTranches): Vector[TrancheId] = {
       val chunks: Seq[Vector[PartGrowthStep]] =
         thingsInChunks(chunkSizes, steps)
           .map(_.toVector)
@@ -105,13 +163,13 @@ object ImmutableObjectStorageSpec {
       for (partGrowthSteps <- chunks) {
         val retrievalAndStorageSession: Session[Vector[TrancheId]] = for {
           retrievedPartsFromPreviousSessions <- trancheIdsSoFar.traverse(
-            ImmutableObjectStorage.retrieve[Part])
+            immutableObjectStorage.retrieve[Part])
           newPartsFromThisSession: Vector[Part] = (retrievedPartsFromPreviousSessions /: partGrowthSteps) {
             case (existingSubparts, partGrowthStep) =>
               existingSubparts :+ partGrowthStep(existingSubparts)
           } drop retrievedPartsFromPreviousSessions.size
           trancheIds <- newPartsFromThisSession.traverse(
-            ImmutableObjectStorage.store)
+            immutableObjectStorage.store)
         } yield trancheIds
 
         val Right(trancheIdsForChunk) =
@@ -265,62 +323,6 @@ object ImmutableObjectStorageSpec {
         .init
         .map(steps => PartGrowth(steps, Seq(steps.size)))
   }
-
-  class FakeTranches extends Tranches {
-    val tranchesById: MutableMap[TrancheId, TrancheOfData] = MutableMap.empty
-    val objectReferenceIdsToAssociatedTrancheIdMap
-      : MutableSortedMap[ObjectReferenceId, TrancheId] = MutableSortedMap.empty
-
-    def purgeTranche(trancheId: TrancheId): Unit = {
-      val objectReferenceIdsToRemove =
-        objectReferenceIdsToAssociatedTrancheIdMap.collect {
-          case (objectReferenceId, associatedTrancheId)
-              if trancheId == associatedTrancheId =>
-            objectReferenceId
-        }
-
-      objectReferenceIdsToAssociatedTrancheIdMap --= objectReferenceIdsToRemove
-
-      tranchesById -= trancheId
-    }
-
-    override protected def storeTrancheAndAssociatedObjectReferenceIds(
-        tranche: TrancheOfData,
-        objectReferenceIds: Seq[ObjectReferenceId])
-      : EitherThrowableOr[TrancheId] =
-      Try {
-        val trancheId = UUID.randomUUID()
-
-        tranchesById(trancheId) = tranche
-
-        for (objectReferenceId <- objectReferenceIds) {
-          objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) =
-            trancheId
-        }
-
-        trancheId
-      }.toEither
-
-    override def retrieveTranche(
-        trancheId: TrancheId): scala.Either[scala.Throwable, TrancheOfData] =
-      Try { tranchesById(trancheId) }.toEither
-
-    override def retrieveTrancheId(objectReferenceId: ObjectReferenceId)
-      : scala.Either[scala.Throwable, TrancheId] =
-      Try { objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) }.toEither
-
-    override def objectReferenceIdOffsetForNewTranche
-      : EitherThrowableOr[ObjectReferenceId] =
-      Try {
-        val maximumObjectReferenceId =
-          objectReferenceIdsToAssociatedTrancheIdMap.keys
-            .reduceOption((leftObjectReferenceId, rightObjectReferenceId) =>
-              leftObjectReferenceId max rightObjectReferenceId)
-        val alignmentMultipleForObjectReferenceIdsInSeparateTranches = 100
-        maximumObjectReferenceId.fold(0)(
-          1 + _ / alignmentMultipleForObjectReferenceIdsInSeparateTranches) * alignmentMultipleForObjectReferenceIdsInSeparateTranches
-      }.toEither
-  }
 }
 
 class ImmutableObjectStorageSpec
@@ -334,7 +336,7 @@ class ImmutableObjectStorageSpec
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
     MinSuccessful(100)) { (partGrowth) =>
-    val tranches = new FakeTranches with TranchesContracts
+    val tranches = new FakeTranches with TranchesContracts[TrancheId]
 
     val trancheIds =
       partGrowth.storeViaMultipleSessions(tranches)
@@ -350,7 +352,7 @@ class ImmutableObjectStorageSpec
     MinSuccessful(100)) { partGrowth =>
     val expectedParts = partGrowth.parts()
 
-    val tranches = new FakeTranches with TranchesContracts
+    val tranches = new FakeTranches with TranchesContracts[TrancheId]
 
     val trancheIds =
       partGrowth.storeViaMultipleSessions(tranches)
@@ -372,7 +374,7 @@ class ImmutableObjectStorageSpec
     val retrievalSession: Session[IndexedSeq[Part]] =
       for {
         permutedRetrievedParts <- permutedTrancheIds.traverse(
-          ImmutableObjectStorage.retrieve[Part])
+          immutableObjectStorage.retrieve[Part])
 
       } yield
         permutedRetrievedParts.indices map (index =>
@@ -395,7 +397,7 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
     MinSuccessful(100)) { partGrowth =>
-    val tranches = new FakeTranches with TranchesContracts
+    val tranches = new FakeTranches with TranchesContracts[TrancheId]
 
     val trancheIds =
       partGrowth.storeViaMultipleSessions(tranches)
@@ -410,8 +412,8 @@ class ImmutableObjectStorageSpec
 
     val samplingSession: Session[Unit] = for {
       _ <- (referencePartsByTrancheId(sampleTrancheId) match {
-        case _: Fork => ImmutableObjectStorage.retrieve[Leaf](sampleTrancheId)
-        case _: Leaf => ImmutableObjectStorage.retrieve[Fork](sampleTrancheId)
+        case _: Fork => immutableObjectStorage.retrieve[Leaf](sampleTrancheId)
+        case _: Leaf => immutableObjectStorage.retrieve[Fork](sampleTrancheId)
       }) flatMap (part => FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
@@ -422,7 +424,7 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     MinSuccessful(100)) { partGrowth =>
-    val tranches = new FakeTranches with TranchesContracts
+    val tranches = new FakeTranches with TranchesContracts[TrancheId]
 
     val trancheIds =
       partGrowth.storeViaMultipleSessions(tranches)
@@ -442,7 +444,7 @@ class ImmutableObjectStorageSpec
     val rootTrancheId = trancheIds.last
 
     val samplingSessionWithCorruptedTranche: Session[Unit] = for {
-      _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
+      _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
         FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
@@ -453,7 +455,7 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     MinSuccessful(100)) { partGrowth =>
-    val tranches = new FakeTranches with TranchesContracts
+    val tranches = new FakeTranches with TranchesContracts[TrancheId]
 
     val trancheIds =
       partGrowth.storeViaMultipleSessions(tranches)
@@ -468,7 +470,7 @@ class ImmutableObjectStorageSpec
     val rootTrancheId = trancheIds.last
 
     val samplingSessionWithMissingTranche: Session[Unit] = for {
-      _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
+      _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
         FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
@@ -479,10 +481,10 @@ class ImmutableObjectStorageSpec
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     MinSuccessful(100)) { partGrowth =>
-    val tranches = new FakeTranches with TranchesContracts
+    val tranches = new FakeTranches with TranchesContracts[TrancheId]
 
     val Right(alienTrancheId) = immutableObjectStorage.runToYieldTrancheId(
-      ImmutableObjectStorage.store(alien))(tranches)
+      immutableObjectStorage.store(alien))(tranches)
 
     val nonAlienTrancheIds =
       partGrowth.storeViaMultipleSessions(tranches)
@@ -498,7 +500,7 @@ class ImmutableObjectStorageSpec
     val rootTrancheId = nonAlienTrancheIds.last
 
     val samplingSessionWithTrancheForIncompatibleType: Session[Unit] = for {
-      _ <- ImmutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
+      _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
         FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
@@ -511,12 +513,13 @@ class ImmutableObjectStorageSpec
     partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
     MinSuccessful(100)) { partGrowth =>
     val isolatedSpokeTranche = {
-      val isolatedSpokeTranches = new FakeTranches with TranchesContracts
+      val isolatedSpokeTranches = new FakeTranches
+      with TranchesContracts[TrancheId]
 
       val root = partGrowth.parts().last
 
       val isolatedSpokeStorageSession: Session[TrancheId] =
-        ImmutableObjectStorage.store(root)
+        immutableObjectStorage.store(root)
 
       val Right(isolatedTrancheId) =
         immutableObjectStorage.runToYieldTrancheId(isolatedSpokeStorageSession)(
@@ -525,7 +528,7 @@ class ImmutableObjectStorageSpec
       isolatedSpokeTranches.tranchesById(isolatedTrancheId)
     }
 
-    val tranches = new FakeTranches with TranchesContracts
+    val tranches = new FakeTranches with TranchesContracts[TrancheId]
 
     val trancheIds =
       partGrowth.storeViaMultipleSessions(tranches)
@@ -540,7 +543,7 @@ class ImmutableObjectStorageSpec
   it should "be idempotent in terms of object identity when retrieving using the same tranche id" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
     MinSuccessful(100)) { partGrowth =>
-    val tranches = new FakeTranches with TranchesContracts
+    val tranches = new FakeTranches with TranchesContracts[TrancheId]
 
     val trancheIds =
       partGrowth.storeViaMultipleSessions(tranches)
@@ -550,9 +553,9 @@ class ImmutableObjectStorageSpec
     val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
 
     val samplingSession: Session[Unit] = for {
-      retrievedPartTakeOne <- ImmutableObjectStorage.retrieve[Part](
+      retrievedPartTakeOne <- immutableObjectStorage.retrieve[Part](
         sampleTrancheId)
-      retrievedPartTakeTwo <- ImmutableObjectStorage.retrieve[Part](
+      retrievedPartTakeTwo <- immutableObjectStorage.retrieve[Part](
         sampleTrancheId)
     } yield {
       retrievedPartTakeTwo should be theSameInstanceAs retrievedPartTakeOne

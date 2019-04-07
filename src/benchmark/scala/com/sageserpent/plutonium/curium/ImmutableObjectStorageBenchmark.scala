@@ -9,8 +9,6 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
   import ImmutableObjectStorage._
   import ImmutableObjectStorageSpec._
 
-  object immutableObjectStorage extends ImmutableObjectStorage
-
   val numberOfLeavesGenerator: Gen[ObjectReferenceId] =
     Gen.range("Number of leaves")(10, 200, 5)
 
@@ -52,7 +50,7 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
       partGrowth.storeViaMultipleSessions(tranches)
 
     val retrievalSession: Session[Unit] =
-      for (_ <- trancheIds.traverse(ImmutableObjectStorage.retrieve[Part]))
+      for (_ <- trancheIds.traverse(immutableObjectStorage.retrieve[Part]))
         yield ()
 
     val Right(()) =

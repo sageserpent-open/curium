@@ -1,6 +1,5 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
-import java.util.UUID
 
 import cats.arrow.FunctionK
 import cats.free.FreeT
@@ -39,16 +38,11 @@ import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
 import scala.collection.immutable
-import scala.collection.mutable.{
-  Map => MutableMap,
-  SortedMap => MutableSortedMap
-}
+import scala.collection.mutable.{Map => MutableMap}
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.{DynamicVariable, Try}
 
 object ImmutableObjectStorage {
-  type TrancheId = UUID
-
   type ObjectReferenceId = Int
 
   case class TrancheOfData(serializedRepresentation: Array[Byte],
@@ -56,7 +50,9 @@ object ImmutableObjectStorage {
 
   type EitherThrowableOr[X] = Either[Throwable, X]
 
-  trait Tranches {
+  trait Tranches[TrancheIdImplementation] {
+    type TrancheId = TrancheIdImplementation
+
     def createTrancheInStorage(serializedRepresentation: Array[Byte],
                                objectReferenceIdOffset: ObjectReferenceId,
                                objectReferenceIds: Seq[ObjectReferenceId])
@@ -87,7 +83,7 @@ object ImmutableObjectStorage {
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
   }
 
-  trait TranchesContracts extends Tranches {
+  trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
     abstract override protected def storeTrancheAndAssociatedObjectReferenceIds(
         tranche: TrancheOfData,
         objectReferenceIds: Seq[ObjectReferenceId])
@@ -108,12 +104,16 @@ object ImmutableObjectStorage {
 
   trait Operation[Result]
 
+  type Session[X] = FreeT[Operation, EitherThrowableOr, X]
+}
+
+trait ImmutableObjectStorage[TrancheId] {
+  import ImmutableObjectStorage._
+
   case class Store[X](immutableObject: X) extends Operation[TrancheId]
 
   case class Retrieve[X](trancheId: TrancheId, clazz: Class[X])
       extends Operation[X]
-
-  type Session[X] = FreeT[Operation, EitherThrowableOr, X]
 
   def store[X](immutableObject: X): Session[TrancheId] =
     FreeT.liftF[Operation, EitherThrowableOr, TrancheId](Store(immutableObject))
@@ -121,21 +121,17 @@ object ImmutableObjectStorage {
   def retrieve[X: TypeTag](id: TrancheId): Session[X] =
     FreeT.liftF[Operation, EitherThrowableOr, X](
       Retrieve(id, classFromType(typeOf[X])))
-}
-
-trait ImmutableObjectStorage {
-  import ImmutableObjectStorage._
 
   def runToYieldTrancheIds(session: Session[Vector[TrancheId]])
-    : Tranches => EitherThrowableOr[Vector[TrancheId]] =
+    : Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
     unsafeRun(session)
 
-  def runToYieldTrancheId(
-      session: Session[TrancheId]): Tranches => EitherThrowableOr[TrancheId] =
+  def runToYieldTrancheId(session: Session[TrancheId])
+    : Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
     unsafeRun(session)
 
   def runForEffectsOnly(
-      session: Session[Unit]): Tranches => EitherThrowableOr[Unit] =
+      session: Session[Unit]): Tranches[TrancheId] => EitherThrowableOr[Unit] =
     unsafeRun(session)
 
   private val sessionReferenceResolver
@@ -358,14 +354,14 @@ trait ImmutableObjectStorage {
   }
 
   def unsafeRun[Result](session: Session[Result])(
-      tranches: Tranches): EitherThrowableOr[Result] = {
+      tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
 
       // TODO - cutover to using weak references, perhaps via 'WeakCache'?
       val completedOperationDataByTrancheId
-        : MutableSortedMap[TrancheId, CompletedOperationData] =
-        MutableSortedMap.empty
+        : MutableMap[TrancheId, CompletedOperationData] =
+        MutableMap.empty
 
       val objectToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
         new BiMapUsingIdentityOnForwardMappingOnly
