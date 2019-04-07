@@ -1,5 +1,7 @@
 package com.sageserpent.plutonium.curium
 
+import java.util.UUID
+
 import cats.free.FreeT
 import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
@@ -283,15 +285,20 @@ object ImmutableObjectStorageSpec {
     }
 
     override protected def storeTrancheAndAssociatedObjectReferenceIds(
-        trancheId: TrancheId,
         tranche: TrancheOfData,
-        objectReferenceIds: Seq[ObjectReferenceId]): EitherThrowableOr[Unit] =
+        objectReferenceIds: Seq[ObjectReferenceId])
+      : EitherThrowableOr[TrancheId] =
       Try {
+        val trancheId = UUID.randomUUID()
+
         tranchesById(trancheId) = tranche
+
         for (objectReferenceId <- objectReferenceIds) {
           objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) =
             trancheId
         }
+
+        trancheId
       }.toEither
 
     override def retrieveTranche(

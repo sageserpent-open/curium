@@ -57,11 +57,6 @@ object ImmutableObjectStorage {
   type EitherThrowableOr[X] = Either[Throwable, X]
 
   trait Tranches {
-    // TODO: either move 'createTrancheInStorage' into 'ImmutableObjectStorage', making tranche ids the responsibility of said class,
-    //  or go the other way and delegate the creation of the tranche id to the implementing subclass, so that say, a database backend
-    // can automatically generate the tranche ids as primary keys. The current state of affairs works, but seems to be sitting on the fence
-    // regarding tranche id responsibility.
-
     def createTrancheInStorage(serializedRepresentation: Array[Byte],
                                objectReferenceIdOffset: ObjectReferenceId,
                                objectReferenceIds: Seq[ObjectReferenceId])
@@ -69,22 +64,19 @@ object ImmutableObjectStorage {
       require(
         objectReferenceIds.isEmpty || objectReferenceIdOffset <= objectReferenceIds.min)
 
-      val id = UUID.randomUUID()
-
       val tranche =
         TrancheOfData(serializedRepresentation, objectReferenceIdOffset)
 
       for {
-        _ <- storeTrancheAndAssociatedObjectReferenceIds(id,
-                                                         tranche,
-                                                         objectReferenceIds)
+        id <- storeTrancheAndAssociatedObjectReferenceIds(tranche,
+                                                          objectReferenceIds)
       } yield id
     }
 
     protected def storeTrancheAndAssociatedObjectReferenceIds(
-        trancheId: TrancheId,
         tranche: TrancheOfData,
-        objectReferenceIds: Seq[ObjectReferenceId]): EitherThrowableOr[Unit]
+        objectReferenceIds: Seq[ObjectReferenceId])
+      : EitherThrowableOr[TrancheId]
 
     def objectReferenceIdOffsetForNewTranche
       : EitherThrowableOr[ObjectReferenceId]
@@ -97,9 +89,9 @@ object ImmutableObjectStorage {
 
   trait TranchesContracts extends Tranches {
     abstract override protected def storeTrancheAndAssociatedObjectReferenceIds(
-        trancheId: TrancheId,
         tranche: TrancheOfData,
-        objectReferenceIds: Seq[ObjectReferenceId]): EitherThrowableOr[Unit] =
+        objectReferenceIds: Seq[ObjectReferenceId])
+      : EitherThrowableOr[TrancheId] =
       for {
         objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
         _ <- Try {
@@ -108,11 +100,10 @@ object ImmutableObjectStorage {
           }
 
         }.toEither
-        _ <- super.storeTrancheAndAssociatedObjectReferenceIds(
-          trancheId,
+        id <- super.storeTrancheAndAssociatedObjectReferenceIds(
           tranche,
           objectReferenceIds)
-      } yield ()
+      } yield id
   }
 
   trait Operation[Result]
