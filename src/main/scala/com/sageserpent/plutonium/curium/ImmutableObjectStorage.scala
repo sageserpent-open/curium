@@ -105,10 +105,6 @@ object ImmutableObjectStorage {
   trait Operation[Result]
 
   type Session[X] = FreeT[Operation, EitherThrowableOr, X]
-
-  val cachedProxyClassInstantiators
-    : MutableMap[Class[_ <: AnyRef], ObjectInstantiator[_ <: AnyRef]] =
-    MutableMap.empty
 }
 
 trait ImmutableObjectStorage[TrancheId] {
@@ -331,6 +327,10 @@ trait ImmutableObjectStorage[TrancheId] {
         .getLoaded
         .asInstanceOf[Class[X]]
     }
+
+    private val cachedProxyClassInstantiators
+      : MutableMap[Class[_ <: AnyRef], ObjectInstantiator[_ <: AnyRef]] =
+      MutableMap.empty
 
     private val instantiatorStrategy: StdInstantiatorStrategy =
       new StdInstantiatorStrategy
