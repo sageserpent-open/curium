@@ -105,6 +105,78 @@ object ImmutableObjectStorage {
   trait Operation[Result]
 
   type Session[X] = FreeT[Operation, EitherThrowableOr, X]
+
+  protected trait ProxySupport {
+    val byteBuddy = new ByteBuddy()
+
+    trait AcquiredState {
+      def underlying: AnyRef
+    }
+
+    private[curium] trait StateAcquisition {
+      def acquire(acquiredState: AcquiredState): Unit
+    }
+
+    val clazzesThatShouldNotBeProxied: Set[Class[_]] =
+      Set(
+        /*
+          The next one is to workaround Kryo leaking its internal
+          fudge as to how it registers closure serializers into the
+          tranche specific reference resolver class, which in turn
+          creates proxies. We don't want to proxy a closure anyway.
+         */
+        classOf[Closure],
+        /*
+          The next one is to prevent the proxying of proxies. Strictly
+          speaking this shouldn't be needed, because there is logic elsewhere
+          that will ensure that a proxy is never stored into a tranche
+          as a distinct object from what it proxies; however due to the
+          rather dubious way *this* code allows proxy classes to be passed
+          to the reference resolver instances, that code will end up seeing
+          the class objects for proxies, so this exclusion guards against *that*.
+         */
+        classOf[StateAcquisition],
+        classOf[String],
+        classOf[Class[_]]
+      )
+
+    def isProxyClazz(clazz: Class[_]): Boolean =
+      classOf[AcquiredState].isAssignableFrom(clazz)
+
+    def isProxy(immutableObject: AnyRef): Boolean =
+      classOf[AcquiredState].isInstance(immutableObject)
+
+    val instantiatorStrategy: StdInstantiatorStrategy =
+      new StdInstantiatorStrategy
+
+    type PipeForwarding = Function[AnyRef, Nothing]
+
+    object proxyDelayedLoading {
+      @RuntimeType
+      def apply(
+          @Pipe pipeTo: PipeForwarding,
+          @FieldValue("acquiredState") acquiredState: AcquiredState
+      ): Any = {
+        val underlying: AnyRef = acquiredState.underlying
+
+        pipeTo(underlying)
+      }
+    }
+
+    object proxySerialization {
+      @RuntimeType
+      def write(
+          kryo: Kryo,
+          output: Output,
+          @FieldValue("acquiredState") acquiredState: AcquiredState): Unit =
+        kryo.writeClassAndObject(output, acquiredState)
+
+      @RuntimeType
+      def read(kryo: Kryo, input: Input, @This thiz: StateAcquisition): Unit = {
+        thiz.acquire(kryo.readClassAndObject(input).asInstanceOf[AcquiredState])
+      }
+    }
+  }
 }
 
 trait ImmutableObjectStorage[TrancheId] {
@@ -213,42 +285,9 @@ trait ImmutableObjectStorage[TrancheId] {
 
   protected val tranchesImplementationName: String
 
-  object proxySupport {
-    private val byteBuddy = new ByteBuddy()
-
+  object proxySupport extends ProxySupport {
     private val proxySuffix =
       s"delayedLoadProxyFor${tranchesImplementationName}"
-
-    trait AcquiredState {
-      def underlying: AnyRef
-    }
-
-    private[curium] trait StateAcquisition {
-      def acquire(acquiredState: AcquiredState): Unit
-    }
-
-    val clazzesThatShouldNotBeProxied: Set[Class[_]] =
-      Set(
-        /*
-          The next one is to workaround Kryo leaking its internal
-          fudge as to how it registers closure serializers into the
-          tranche specific reference resolver class, which in turn
-          creates proxies. We don't want to proxy a closure anyway.
-         */
-        classOf[Closure],
-        /*
-          The next one is to prevent the proxying of proxies. Strictly
-          speaking this shouldn't be needed, because there is logic elsewhere
-          that will ensure that a proxy is never stored into a tranche
-          as a distinct object from what it proxies; however due to the
-          rather dubious way *this* code allows proxy classes to be passed
-          to the reference resolver instances, that code will end up seeing
-          the class objects for proxies, so this exclusion guards against *that*.
-         */
-        classOf[StateAcquisition],
-        classOf[String],
-        classOf[Class[_]]
-      )
 
     def isNotToBeProxied(clazz: Class[_]): Boolean =
       try {
@@ -265,46 +304,9 @@ trait ImmutableObjectStorage[TrancheId] {
           true
       }
 
-    def isProxyClazz(clazz: Class[_]): Boolean =
-      classOf[AcquiredState].isAssignableFrom(clazz)
-
-    def isProxy(immutableObject: AnyRef): Boolean =
-      classOf[AcquiredState].isInstance(immutableObject)
-
     private def createProxyClass[X <: AnyRef](clazz: Class[X]): Class[X] = {
       // We should never end up having to make chains of delegating proxies!
       require(!clazz.getName.endsWith(proxySuffix))
-
-      type PipeForwarding = Function[AnyRef, Nothing]
-
-      object proxyDelayedLoading {
-        @RuntimeType
-        def apply(
-            @Pipe pipeTo: PipeForwarding,
-            @FieldValue("acquiredState") acquiredState: AcquiredState
-        ): Any = {
-          val underlying: AnyRef = acquiredState.underlying
-
-          pipeTo(underlying)
-        }
-      }
-
-      object proxySerialization {
-        @RuntimeType
-        def write(
-            kryo: Kryo,
-            output: Output,
-            @FieldValue("acquiredState") acquiredState: AcquiredState): Unit =
-          kryo.writeClassAndObject(output, acquiredState)
-
-        @RuntimeType
-        def read(kryo: Kryo,
-                 input: Input,
-                 @This thiz: StateAcquisition): Unit = {
-          thiz.acquire(
-            kryo.readClassAndObject(input).asInstanceOf[AcquiredState])
-        }
-      }
 
       byteBuddy
         .`with`(new NamingStrategy.AbstractBase {
@@ -334,9 +336,6 @@ trait ImmutableObjectStorage[TrancheId] {
     private val cachedProxyClassInstantiators
       : MutableMap[Class[_ <: AnyRef], ObjectInstantiator[_ <: AnyRef]] =
       MutableMap.empty
-
-    private val instantiatorStrategy: StdInstantiatorStrategy =
-      new StdInstantiatorStrategy
 
     def createProxy(clazz: Class[_ <: AnyRef],
                     acquiredState: AcquiredState): AnyRef = {
