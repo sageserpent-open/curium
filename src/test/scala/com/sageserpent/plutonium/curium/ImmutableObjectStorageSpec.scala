@@ -75,7 +75,10 @@ object ImmutableObjectStorageSpec {
 
   type TrancheId = FakeTranches#TrancheId
 
-  object immutableObjectStorage extends ImmutableObjectStorage[TrancheId]
+  object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
+    override protected val tranchesImplementationName: String =
+      classOf[FakeTranches].getSimpleName
+  }
 
   val aThing = "Foo"
 

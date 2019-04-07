@@ -211,10 +211,13 @@ trait ImmutableObjectStorage[TrancheId] {
 
   protected def configurableProxyExclusion(clazz: Class[_]): Boolean = false
 
+  protected val tranchesImplementationName: String
+
   object proxySupport {
     private val byteBuddy = new ByteBuddy()
 
-    private val proxySuffix = "delayedLoadProxy"
+    private val proxySuffix =
+      s"delayedLoadProxyFor${tranchesImplementationName}"
 
     trait AcquiredState {
       def underlying: AnyRef
