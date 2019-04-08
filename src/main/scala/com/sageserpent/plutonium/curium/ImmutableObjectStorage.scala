@@ -57,9 +57,6 @@ object ImmutableObjectStorage {
                                objectReferenceIdOffset: ObjectReferenceId,
                                objectReferenceIds: Seq[ObjectReferenceId])
       : EitherThrowableOr[TrancheId] = {
-      require(
-        objectReferenceIds.isEmpty || objectReferenceIdOffset <= objectReferenceIds.min)
-
       val tranche =
         TrancheOfData(serializedRepresentation, objectReferenceIdOffset)
 
@@ -84,18 +81,32 @@ object ImmutableObjectStorage {
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
+    abstract override def createTrancheInStorage(
+        serializedRepresentation: Array[Byte],
+        objectReferenceIdOffset: ObjectReferenceId,
+        objectReferenceIds: Seq[ObjectReferenceId])
+      : EitherThrowableOr[TrancheId] = {
+      require(
+        objectReferenceIds.isEmpty || objectReferenceIdOffset <= objectReferenceIds.min)
+
+      super.createTrancheInStorage(serializedRepresentation,
+                                   objectReferenceIdOffset,
+                                   objectReferenceIds)
+    }
+
     abstract override protected def storeTrancheAndAssociatedObjectReferenceIds(
         tranche: TrancheOfData,
         objectReferenceIds: Seq[ObjectReferenceId])
       : EitherThrowableOr[TrancheId] =
       for {
         objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
-        _ <- Try {
+        _ = {
+          // NOTE: don't wrap the precondition in the 'EitherThrowableOr'
+          // result type - it is *not* an admissible failure.
           for (objectReferenceId <- objectReferenceIds) {
             require(objectReferenceIdOffsetForNewTranche <= objectReferenceId)
           }
-
-        }.toEither
+        }
         id <- super.storeTrancheAndAssociatedObjectReferenceIds(
           tranche,
           objectReferenceIds)
