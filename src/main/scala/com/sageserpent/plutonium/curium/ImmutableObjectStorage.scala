@@ -45,59 +45,39 @@ import scala.util.{DynamicVariable, Try}
 object ImmutableObjectStorage {
   type ObjectReferenceId = Int
 
-  case class TrancheOfData(serializedRepresentation: Array[Byte],
-                           objectReferenceIdOffset: ObjectReferenceId)
+  case class TrancheOfData[Payload](payload: Payload,
+                                    objectReferenceIdOffset: ObjectReferenceId)
 
   type EitherThrowableOr[X] = Either[Throwable, X]
 
-  trait Tranches[TrancheIdImplementation] {
+  trait Tranches[TrancheIdImplementation, Payload] {
     type TrancheId = TrancheIdImplementation
 
-    def createTrancheInStorage(serializedRepresentation: Array[Byte],
+    def createTrancheInStorage(payload: Payload,
                                objectReferenceIdOffset: ObjectReferenceId,
                                objectReferenceIds: Seq[ObjectReferenceId])
-      : EitherThrowableOr[TrancheId] = {
-      val tranche =
-        TrancheOfData(serializedRepresentation, objectReferenceIdOffset)
-
-      for {
-        id <- storeTrancheAndAssociatedObjectReferenceIds(tranche,
-                                                          objectReferenceIds)
-      } yield id
-    }
-
-    protected def storeTrancheAndAssociatedObjectReferenceIds(
-        tranche: TrancheOfData,
-        objectReferenceIds: Seq[ObjectReferenceId])
       : EitherThrowableOr[TrancheId]
 
     def objectReferenceIdOffsetForNewTranche
       : EitherThrowableOr[ObjectReferenceId]
 
-    def retrieveTranche(trancheId: TrancheId): EitherThrowableOr[TrancheOfData]
+    def retrieveTranche(
+        trancheId: TrancheId): EitherThrowableOr[TrancheOfData[Payload]]
 
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
   }
 
-  trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
+  trait TranchesContracts[TrancheId, Payload]
+      extends Tranches[TrancheId, Payload] {
     abstract override def createTrancheInStorage(
-        serializedRepresentation: Array[Byte],
+        payload: Payload,
         objectReferenceIdOffset: ObjectReferenceId,
         objectReferenceIds: Seq[ObjectReferenceId])
       : EitherThrowableOr[TrancheId] = {
       require(
         objectReferenceIds.isEmpty || objectReferenceIdOffset <= objectReferenceIds.min)
 
-      super.createTrancheInStorage(serializedRepresentation,
-                                   objectReferenceIdOffset,
-                                   objectReferenceIds)
-    }
-
-    abstract override protected def storeTrancheAndAssociatedObjectReferenceIds(
-        tranche: TrancheOfData,
-        objectReferenceIds: Seq[ObjectReferenceId])
-      : EitherThrowableOr[TrancheId] =
       for {
         objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
         _ = {
@@ -107,10 +87,11 @@ object ImmutableObjectStorage {
             require(objectReferenceIdOffsetForNewTranche <= objectReferenceId)
           }
         }
-        id <- super.storeTrancheAndAssociatedObjectReferenceIds(
-          tranche,
-          objectReferenceIds)
+        id <- super.createTrancheInStorage(payload,
+                                           objectReferenceIdOffset,
+                                           objectReferenceIds)
       } yield id
+    }
 
     abstract override def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] =
@@ -216,15 +197,15 @@ trait ImmutableObjectStorage[TrancheId] {
       Retrieve(id, classFromType(typeOf[X])))
 
   def runToYieldTrancheIds(session: Session[Vector[TrancheId]])
-    : Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
+    : Tranches[TrancheId, Array[Byte]] => EitherThrowableOr[Vector[TrancheId]] =
     unsafeRun(session)
 
   def runToYieldTrancheId(session: Session[TrancheId])
-    : Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
+    : Tranches[TrancheId, Array[Byte]] => EitherThrowableOr[TrancheId] =
     unsafeRun(session)
 
-  def runForEffectsOnly(
-      session: Session[Unit]): Tranches[TrancheId] => EitherThrowableOr[Unit] =
+  def runForEffectsOnly(session: Session[Unit])
+    : Tranches[TrancheId, Array[Byte]] => EitherThrowableOr[Unit] =
     unsafeRun(session)
 
   private val sessionReferenceResolver
@@ -377,7 +358,7 @@ trait ImmutableObjectStorage[TrancheId] {
   }
 
   def unsafeRun[Result](session: Session[Result])(
-      tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
+      tranches: Tranches[TrancheId, Array[Byte]]): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
 
@@ -624,7 +605,7 @@ trait ImmutableObjectStorage[TrancheId] {
                     val deserialized =
                       sessionReferenceResolver.withValue(
                         Some(trancheSpecificReferenceResolver)) {
-                        kryoPool.fromBytes(tranche.serializedRepresentation)
+                        kryoPool.fromBytes(tranche.payload)
                       }
 
                     completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
