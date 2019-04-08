@@ -111,6 +111,16 @@ object ImmutableObjectStorage {
           tranche,
           objectReferenceIds)
       } yield id
+
+    abstract override def retrieveTrancheId(
+        objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] =
+      for {
+        objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
+        _ = {
+          require(objectReferenceIdOffsetForNewTranche > objectReferenceId)
+        }
+        trancheId <- super.retrieveTrancheId(objectReferenceId)
+      } yield trancheId
   }
 
   trait Operation[Result]
