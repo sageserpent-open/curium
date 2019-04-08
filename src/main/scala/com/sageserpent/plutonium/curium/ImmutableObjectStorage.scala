@@ -70,36 +70,40 @@ object ImmutableObjectStorage {
 
   trait TranchesContracts[TrancheId, Payload]
       extends Tranches[TrancheId, Payload] {
+    // NOTE: after some um-ing and ah-ing, the contracts have been lifted into
+    // the 'EitherThrowableOr' monad. This is motivated by the lack of transaction
+    // support in the current API; it is not reasonable to expect client code to
+    // satisfy preconditions dependent on state if the tranches implementation can
+    // spontaneously lose data behind the client's back.
+
     abstract override def createTrancheInStorage(
         payload: Payload,
         objectReferenceIdOffset: ObjectReferenceId,
         objectReferenceIds: Seq[ObjectReferenceId])
-      : EitherThrowableOr[TrancheId] = {
-      require(
-        objectReferenceIds.isEmpty || objectReferenceIdOffset <= objectReferenceIds.min)
-
+      : EitherThrowableOr[TrancheId] =
       for {
+        _ <- Try {
+          require(
+            objectReferenceIds.isEmpty || objectReferenceIdOffset <= objectReferenceIds.min)
+        }.toEither
         objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
-        _ = {
-          // NOTE: don't wrap the precondition in the 'EitherThrowableOr'
-          // result type - it is *not* an admissible failure.
+        _ <- Try {
           for (objectReferenceId <- objectReferenceIds) {
             require(objectReferenceIdOffsetForNewTranche <= objectReferenceId)
           }
-        }
+        }.toEither
         id <- super.createTrancheInStorage(payload,
                                            objectReferenceIdOffset,
                                            objectReferenceIds)
       } yield id
-    }
 
     abstract override def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] =
       for {
         objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
-        _ = {
+        _ <- Try {
           require(objectReferenceIdOffsetForNewTranche > objectReferenceId)
-        }
+        }.toEither
         trancheId <- super.retrieveTrancheId(objectReferenceId)
       } yield trancheId
   }
