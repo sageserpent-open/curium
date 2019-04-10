@@ -37,7 +37,6 @@ import net.bytebuddy.{ByteBuddy, NamingStrategy}
 import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
-import scala.collection.immutable
 import scala.collection.mutable.{Map => MutableMap}
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.{DynamicVariable, Try}
@@ -55,7 +54,7 @@ object ImmutableObjectStorage {
 
     def createTrancheInStorage(payload: Payload,
                                objectReferenceIdOffset: ObjectReferenceId,
-                               objectReferenceIds: Seq[ObjectReferenceId])
+                               objectReferenceIds: Set[ObjectReferenceId])
       : EitherThrowableOr[TrancheId]
 
     def objectReferenceIdOffsetForNewTranche
@@ -79,7 +78,7 @@ object ImmutableObjectStorage {
     abstract override def createTrancheInStorage(
         payload: Payload,
         objectReferenceIdOffset: ObjectReferenceId,
-        objectReferenceIds: Seq[ObjectReferenceId])
+        objectReferenceIds: Set[ObjectReferenceId])
       : EitherThrowableOr[TrancheId] =
       for {
         _ <- Try {
@@ -437,8 +436,8 @@ trait ImmutableObjectStorage[TrancheId] {
           extends ReferenceResolver {
         var numberOfAssociationsForTheRelevantTrancheOnly: ObjectReferenceId = 0
 
-        def writtenObjectReferenceIds: immutable.IndexedSeq[ObjectReferenceId] =
-          (0 until numberOfAssociationsForTheRelevantTrancheOnly) map (objectReferenceIdOffset + _)
+        def writtenObjectReferenceIds: Set[ObjectReferenceId] =
+          (0 until numberOfAssociationsForTheRelevantTrancheOnly) map (objectReferenceIdOffset + _) toSet
 
         override def getWrittenId(immutableObject: AnyRef): ObjectReferenceId =
           // PLAN: if 'immutableObject' is a proxy, it *must* be found in 'proxyToReferenceIdMap'.

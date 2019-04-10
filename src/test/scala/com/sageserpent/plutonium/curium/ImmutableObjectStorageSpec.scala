@@ -39,7 +39,7 @@ object ImmutableObjectStorageSpec {
     override def createTrancheInStorage(
         payload: Payload,
         objectReferenceIdOffset: ObjectReferenceId,
-        objectReferenceIds: Seq[ObjectReferenceId])
+        objectReferenceIds: Set[ObjectReferenceId])
       : EitherThrowableOr[TrancheId] =
       Try {
         val trancheId = UUID.randomUUID()
