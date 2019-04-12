@@ -6,7 +6,7 @@ import ImmutableObjectStorage.{
   Tranches,
   TranchesContracts
 }
-import cats.effect.{Resource, SyncIO}
+import cats.effect.{Resource, IO}
 import com.sageserpent.plutonium.curium.ImmutableObjectStorageSpec.FakeTranches
 import com.sageserpent.plutonium.curium.TranchesBehaviours.FakePayload
 import org.scalacheck.{Arbitrary, Gen}
@@ -17,7 +17,7 @@ import scala.collection.mutable.{Map => MutableMap, Set => MutableSet}
 
 trait TranchesResource[TrancheId] {
   val tranchesResourceGenerator: Resource[
-    SyncIO,
+    IO,
     Tranches[TrancheId, TranchesBehaviours.FakePayload]]
 }
 
@@ -51,7 +51,7 @@ trait TranchesBehaviours[TrancheId]
       (tranchesResource, payloadAndOffsetsPairs) =>
         tranchesResource
           .use(tranches =>
-            SyncIO {
+            IO {
               val numberOfPayloads = payloadAndOffsetsPairs.size
 
               val trancheIds = MutableSet.empty[TrancheId]
@@ -82,7 +82,7 @@ trait TranchesBehaviours[TrancheId]
       (tranchesResource, payloadAndOffsetsPairs) =>
         tranchesResource
           .use(tranches =>
-            SyncIO {
+            IO {
               val objectReferenceIdsByTrancheId =
                 MutableMap.empty[TrancheId, Set[ObjectReferenceId]]
 
@@ -119,7 +119,7 @@ trait TranchesBehaviours[TrancheId]
       (tranchesResource, payloadAndOffsetsPairs) =>
         tranchesResource
           .use(tranches =>
-            SyncIO {
+            IO {
               val trancheIdToExpectedTrancheMapping =
                 MutableMap.empty[TrancheId, TrancheOfData[FakePayload]]
 
@@ -158,8 +158,8 @@ trait FakeTranchesResource
     extends TranchesResource[FakeTranchesResource.TrancheId] {
 
   override val tranchesResourceGenerator
-    : Resource[SyncIO, Tranches[FakeTranchesResource.TrancheId, FakePayload]] =
-    Resource.liftF(SyncIO {
+    : Resource[IO, Tranches[FakeTranchesResource.TrancheId, FakePayload]] =
+    Resource.liftF(IO {
       new FakeTranches[FakePayload]
       with TranchesContracts[FakeTranchesResource.TrancheId, FakePayload]
     })
