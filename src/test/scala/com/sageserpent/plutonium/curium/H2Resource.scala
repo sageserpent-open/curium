@@ -1,8 +1,8 @@
 package com.sageserpent.plutonium.curium
 
-import resource._
+import cats.effect.{Resource, SyncIO}
 
 object H2Resource {
   // TODO - create tables in in-memory database and yield the transactor used to do so.
-  val transactorResource: ManagedResource[H2Tranches.Transactor] = ???
+  val transactorResource: Resource[SyncIO, H2Tranches.Transactor] = ???
 }

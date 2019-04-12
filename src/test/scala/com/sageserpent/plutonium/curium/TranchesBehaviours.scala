@@ -6,17 +6,18 @@ import ImmutableObjectStorage.{
   Tranches,
   TranchesContracts
 }
+import cats.effect.{Resource, SyncIO}
 import com.sageserpent.plutonium.curium.ImmutableObjectStorageSpec.FakeTranches
 import com.sageserpent.plutonium.curium.TranchesBehaviours.FakePayload
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Matchers}
-import resource._
 
 import scala.collection.mutable.{Map => MutableMap, Set => MutableSet}
 
 trait TranchesResource[TrancheId] {
-  val tranchesResourceGenerator: ManagedResource[
+  val tranchesResourceGenerator: Resource[
+    SyncIO,
     Tranches[TrancheId, TranchesBehaviours.FakePayload]]
 }
 
@@ -48,27 +49,30 @@ trait TranchesBehaviours[TrancheId]
       Gen
         .nonEmptyListOf(fakePayloadAndObjectReferenceIdOffsetsPairsGenerator)) {
       (tranchesResource, payloadAndOffsetsPairs) =>
-        tranchesResource.acquireAndGet { tranches =>
-          val numberOfPayloads = payloadAndOffsetsPairs.size
+        tranchesResource
+          .use(tranches =>
+            SyncIO {
+              val numberOfPayloads = payloadAndOffsetsPairs.size
 
-          val trancheIds = MutableSet.empty[TrancheId]
+              val trancheIds = MutableSet.empty[TrancheId]
 
-          for ((payload, offsets) <- payloadAndOffsetsPairs) {
-            val Right(trancheId) =
-              for {
-                objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
-                objectReferenceIds = offsets map (_ + objectReferenceIdOffset)
-                trancheId <- tranches.createTrancheInStorage(
-                  payload,
-                  objectReferenceIdOffset,
-                  objectReferenceIds)
-              } yield trancheId
+              for ((payload, offsets) <- payloadAndOffsetsPairs) {
+                val Right(trancheId) =
+                  for {
+                    objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
+                    objectReferenceIds = offsets map (_ + objectReferenceIdOffset)
+                    trancheId <- tranches.createTrancheInStorage(
+                      payload,
+                      objectReferenceIdOffset,
+                      objectReferenceIds)
+                  } yield trancheId
 
-            trancheIds += trancheId
-          }
+                trancheIds += trancheId
+              }
 
-          trancheIds should have size numberOfPayloads
-        }
+              trancheIds should have size numberOfPayloads
+          })
+          .unsafeRunSync
     }
 
     it should "permit retrieval of that tranche id from any of the associated object reference ids" in forAll(
@@ -76,33 +80,36 @@ trait TranchesBehaviours[TrancheId]
       Gen
         .nonEmptyListOf(fakePayloadAndObjectReferenceIdOffsetsPairsGenerator)) {
       (tranchesResource, payloadAndOffsetsPairs) =>
-        tranchesResource.acquireAndGet { tranches =>
-          val objectReferenceIdsByTrancheId =
-            MutableMap.empty[TrancheId, Set[ObjectReferenceId]]
+        tranchesResource
+          .use(tranches =>
+            SyncIO {
+              val objectReferenceIdsByTrancheId =
+                MutableMap.empty[TrancheId, Set[ObjectReferenceId]]
 
-          for ((payload, offsets) <- payloadAndOffsetsPairs) {
-            val Right((trancheId, objectReferenceIds)) =
-              for {
-                objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
-                objectReferenceIds = offsets map (_ + objectReferenceIdOffset)
-                trancheId <- tranches.createTrancheInStorage(
-                  payload,
-                  objectReferenceIdOffset,
-                  objectReferenceIds)
-              } yield trancheId -> objectReferenceIds
+              for ((payload, offsets) <- payloadAndOffsetsPairs) {
+                val Right((trancheId, objectReferenceIds)) =
+                  for {
+                    objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
+                    objectReferenceIds = offsets map (_ + objectReferenceIdOffset)
+                    trancheId <- tranches.createTrancheInStorage(
+                      payload,
+                      objectReferenceIdOffset,
+                      objectReferenceIds)
+                  } yield trancheId -> objectReferenceIds
 
-            objectReferenceIdsByTrancheId += (trancheId -> objectReferenceIds)
-          }
-
-          objectReferenceIdsByTrancheId.foreach {
-            case (trancheId, objectReferenceIds) =>
-              objectReferenceIds.foreach { objectReferenceId =>
-                val Right(retrievedTrancheId) =
-                  tranches.retrieveTrancheId(objectReferenceId)
-                retrievedTrancheId shouldBe trancheId
+                objectReferenceIdsByTrancheId += (trancheId -> objectReferenceIds)
               }
-          }
-        }
+
+              objectReferenceIdsByTrancheId.foreach {
+                case (trancheId, objectReferenceIds) =>
+                  objectReferenceIds.foreach { objectReferenceId =>
+                    val Right(retrievedTrancheId) =
+                      tranches.retrieveTrancheId(objectReferenceId)
+                    retrievedTrancheId shouldBe trancheId
+                  }
+              }
+          })
+          .unsafeRunSync
     }
 
     "retrieving a tranche by tranche id" should "yield a tranche that corresponds to what was used to create it" in forAll(
@@ -110,32 +117,35 @@ trait TranchesBehaviours[TrancheId]
       Gen
         .nonEmptyListOf(fakePayloadAndObjectReferenceIdOffsetsPairsGenerator)) {
       (tranchesResource, payloadAndOffsetsPairs) =>
-        tranchesResource.acquireAndGet { tranches =>
-          val trancheIdToExpectedTrancheMapping =
-            MutableMap.empty[TrancheId, TrancheOfData[FakePayload]]
+        tranchesResource
+          .use(tranches =>
+            SyncIO {
+              val trancheIdToExpectedTrancheMapping =
+                MutableMap.empty[TrancheId, TrancheOfData[FakePayload]]
 
-          for ((payload, offsets) <- payloadAndOffsetsPairs) {
-            val Right((trancheId, tranche)) =
-              for {
-                objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
-                objectReferenceIds = offsets map (_ + objectReferenceIdOffset)
-                trancheId <- tranches.createTrancheInStorage(
-                  payload,
-                  objectReferenceIdOffset,
-                  objectReferenceIds)
-              } yield
-                trancheId -> TrancheOfData(payload, objectReferenceIdOffset)
+              for ((payload, offsets) <- payloadAndOffsetsPairs) {
+                val Right((trancheId, tranche)) =
+                  for {
+                    objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
+                    objectReferenceIds = offsets map (_ + objectReferenceIdOffset)
+                    trancheId <- tranches.createTrancheInStorage(
+                      payload,
+                      objectReferenceIdOffset,
+                      objectReferenceIds)
+                  } yield
+                    trancheId -> TrancheOfData(payload, objectReferenceIdOffset)
 
-            trancheIdToExpectedTrancheMapping += (trancheId -> tranche)
-          }
+                trancheIdToExpectedTrancheMapping += (trancheId -> tranche)
+              }
 
-          trancheIdToExpectedTrancheMapping.foreach {
-            case (trancheId, expectedTranche) =>
-              val Right(tranche) = tranches.retrieveTranche(trancheId)
+              trancheIdToExpectedTrancheMapping.foreach {
+                case (trancheId, expectedTranche) =>
+                  val Right(tranche) = tranches.retrieveTranche(trancheId)
 
-              tranche shouldBe expectedTranche
-          }
-        }
+                  tranche shouldBe expectedTranche
+              }
+          })
+          .unsafeRunSync
     }
   }
 }
@@ -148,12 +158,11 @@ trait FakeTranchesResource
     extends TranchesResource[FakeTranchesResource.TrancheId] {
 
   override val tranchesResourceGenerator
-    : ManagedResource[Tranches[FakeTranchesResource.TrancheId, FakePayload]] =
-    makeManagedResource(
+    : Resource[SyncIO, Tranches[FakeTranchesResource.TrancheId, FakePayload]] =
+    Resource.liftF(SyncIO {
       new FakeTranches[FakePayload]
-      with TranchesContracts[FakeTranchesResource.TrancheId, FakePayload]) {
-      _ =>
-      }(List.empty)
+      with TranchesContracts[FakeTranchesResource.TrancheId, FakePayload]
+    })
 }
 
 class FakeTranchesSpec
