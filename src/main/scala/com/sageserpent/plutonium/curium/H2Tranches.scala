@@ -2,8 +2,8 @@ package com.sageserpent.plutonium.curium
 
 import java.util.UUID
 
-import cats.Id
-import ImmutableObjectStorage.{
+import cats.effect.IO
+import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
   ObjectReferenceId,
   TrancheOfData,
@@ -11,9 +11,9 @@ import ImmutableObjectStorage.{
 }
 
 object H2Tranches {
-  type Transactor = doobie.util.transactor.Transactor[Id]
+  type Transactor = doobie.util.transactor.Transactor[IO]
 
-  def setupDatabaseTables(transactor: Transactor): EitherThrowableOr[Unit] = ???
+  def setupDatabaseTables(transactor: Transactor): IO[Unit] = ???
 }
 
 class H2Tranches[Payload](transactor: H2Tranches.Transactor)
