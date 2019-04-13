@@ -25,7 +25,7 @@ object H2Resource {
       connectEC = fixedThreadPool,
       transactEC = cachedThreadPool
     )
-    _ <- Resource.liftF(H2Tranches.setupDatabaseTables(transactor))
+    _ <- Resource.make(H2Tranches.setupDatabaseTables(transactor))(_ =>
+      H2Tranches.dropDatabaseTables(transactor))
   } yield transactor
-
 }

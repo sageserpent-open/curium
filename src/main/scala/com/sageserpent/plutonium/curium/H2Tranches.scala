@@ -34,12 +34,22 @@ object H2Tranches {
 
   def setupDatabaseTables(transactor: Transactor): IO[Unit] = {
 
-    val setup: doobie.ConnectionIO[Unit] = for {
+    val setup: ConnectionIO[Unit] = for {
       _ <- trancheCreation
       _ <- objectReferenceIdCreation
     } yield {}
 
     setup.transact(transactor)
+  }
+
+  def dropDatabaseTables(transactor: Transactor): IO[Unit] = {
+    val dropAll: ConnectionIO[Unit] = for {
+      _ <- sql"""
+           DROP ALL OBJECTS
+         """.update.run
+    } yield {}
+
+    dropAll.transact(transactor)
   }
 
   val objectReferenceIdOffsetForNewTrancheQuery
