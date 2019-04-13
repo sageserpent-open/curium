@@ -44,15 +44,15 @@ import scala.util.{DynamicVariable, Try}
 object ImmutableObjectStorage {
   type ObjectReferenceId = Int
 
-  case class TrancheOfData[Payload](payload: Payload,
-                                    objectReferenceIdOffset: ObjectReferenceId)
+  case class TrancheOfData(payload: Array[Byte],
+                           objectReferenceIdOffset: ObjectReferenceId)
 
   type EitherThrowableOr[X] = Either[Throwable, X]
 
-  trait Tranches[TrancheIdImplementation, Payload] {
+  trait Tranches[TrancheIdImplementation] {
     type TrancheId = TrancheIdImplementation
 
-    def createTrancheInStorage(payload: Payload,
+    def createTrancheInStorage(payload: Array[Byte],
                                objectReferenceIdOffset: ObjectReferenceId,
                                objectReferenceIds: Set[ObjectReferenceId])
       : EitherThrowableOr[TrancheId]
@@ -60,15 +60,13 @@ object ImmutableObjectStorage {
     def objectReferenceIdOffsetForNewTranche
       : EitherThrowableOr[ObjectReferenceId]
 
-    def retrieveTranche(
-        trancheId: TrancheId): EitherThrowableOr[TrancheOfData[Payload]]
+    def retrieveTranche(trancheId: TrancheId): EitherThrowableOr[TrancheOfData]
 
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
   }
 
-  trait TranchesContracts[TrancheId, Payload]
-      extends Tranches[TrancheId, Payload] {
+  trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
     // NOTE: after some um-ing and ah-ing, the contracts have been lifted into
     // the 'EitherThrowableOr' monad. This is motivated by the lack of transaction
     // support in the current API; it is not reasonable to expect client code to
@@ -76,7 +74,7 @@ object ImmutableObjectStorage {
     // spontaneously lose data behind the client's back.
 
     abstract override def createTrancheInStorage(
-        payload: Payload,
+        payload: Array[Byte],
         objectReferenceIdOffset: ObjectReferenceId,
         objectReferenceIds: Set[ObjectReferenceId])
       : EitherThrowableOr[TrancheId] =
@@ -200,15 +198,15 @@ trait ImmutableObjectStorage[TrancheId] {
       Retrieve(id, classFromType(typeOf[X])))
 
   def runToYieldTrancheIds(session: Session[Vector[TrancheId]])
-    : Tranches[TrancheId, Array[Byte]] => EitherThrowableOr[Vector[TrancheId]] =
+    : Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
     unsafeRun(session)
 
   def runToYieldTrancheId(session: Session[TrancheId])
-    : Tranches[TrancheId, Array[Byte]] => EitherThrowableOr[TrancheId] =
+    : Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
     unsafeRun(session)
 
-  def runForEffectsOnly(session: Session[Unit])
-    : Tranches[TrancheId, Array[Byte]] => EitherThrowableOr[Unit] =
+  def runForEffectsOnly(
+      session: Session[Unit]): Tranches[TrancheId] => EitherThrowableOr[Unit] =
     unsafeRun(session)
 
   private val sessionReferenceResolver
@@ -361,7 +359,7 @@ trait ImmutableObjectStorage[TrancheId] {
   }
 
   def unsafeRun[Result](session: Session[Result])(
-      tranches: Tranches[TrancheId, Array[Byte]]): EitherThrowableOr[Result] = {
+      tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
 

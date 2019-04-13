@@ -8,7 +8,6 @@ import ImmutableObjectStorage.{
 }
 import cats.effect.{Resource, IO}
 import com.sageserpent.plutonium.curium.ImmutableObjectStorageSpec.FakeTranches
-import com.sageserpent.plutonium.curium.TranchesBehaviours.FakePayload
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Matchers}
@@ -16,22 +15,19 @@ import org.scalatest.{FlatSpec, Matchers}
 import scala.collection.mutable.{Map => MutableMap, Set => MutableSet}
 
 trait TranchesResource[TrancheId] {
-  val tranchesResource: Resource[
-    IO,
-    Tranches[TrancheId, TranchesBehaviours.FakePayload]]
+  val tranchesResource: Resource[IO, Tranches[TrancheId]]
 }
 
 object TranchesBehaviours {
-  type FakePayload = Int
-
-  val fakePayloadGenerator: Gen[FakePayload] = Arbitrary.arbInt.arbitrary
+  val payloadGenerator: Gen[Array[Byte]] =
+    Gen.containerOf[Array, Byte](Arbitrary.arbByte.arbitrary)
 
   val objectReferenceIdOffsetsGenerator: Gen[Set[Int]] =
-    Gen.containerOf[Set, Int](Gen.posNum[Int].map(_ - 1))
+    Gen.containerOf[Set, ObjectReferenceId](Gen.posNum[Int].map(_ - 1))
 
   val fakePayloadAndObjectReferenceIdOffsetsPairsGenerator
-    : Gen[(FakePayload, Set[FakePayload])] =
-    Gen.zip(fakePayloadGenerator, objectReferenceIdOffsetsGenerator)
+    : Gen[(Array[Byte], Set[ObjectReferenceId])] =
+    Gen.zip(payloadGenerator, objectReferenceIdOffsetsGenerator)
 }
 
 trait TranchesBehaviours[TrancheId]
@@ -45,10 +41,9 @@ trait TranchesBehaviours[TrancheId]
   def tranchesBehaviour: Unit = {
 
     "creating a tranche" should "yield a unique tranche id" in forAll(
-      tranchesResource,
       Gen
         .nonEmptyListOf(fakePayloadAndObjectReferenceIdOffsetsPairsGenerator)) {
-      (tranchesResource, payloadAndOffsetsPairs) =>
+      payloadAndOffsetsPairs =>
         tranchesResource
           .use(tranches =>
             IO {
@@ -76,10 +71,9 @@ trait TranchesBehaviours[TrancheId]
     }
 
     it should "permit retrieval of that tranche id from any of the associated object reference ids" in forAll(
-      tranchesResource,
       Gen
         .nonEmptyListOf(fakePayloadAndObjectReferenceIdOffsetsPairsGenerator)) {
-      (tranchesResource, payloadAndOffsetsPairs) =>
+      payloadAndOffsetsPairs =>
         tranchesResource
           .use(tranches =>
             IO {
@@ -113,15 +107,14 @@ trait TranchesBehaviours[TrancheId]
     }
 
     "retrieving a tranche by tranche id" should "yield a tranche that corresponds to what was used to create it" in forAll(
-      tranchesResource,
       Gen
         .nonEmptyListOf(fakePayloadAndObjectReferenceIdOffsetsPairsGenerator)) {
-      (tranchesResource, payloadAndOffsetsPairs) =>
+      payloadAndOffsetsPairs =>
         tranchesResource
           .use(tranches =>
             IO {
               val trancheIdToExpectedTrancheMapping =
-                MutableMap.empty[TrancheId, TrancheOfData[FakePayload]]
+                MutableMap.empty[TrancheId, TrancheOfData]
 
               for ((payload, offsets) <- payloadAndOffsetsPairs) {
                 val Right((trancheId, tranche)) =
@@ -151,17 +144,16 @@ trait TranchesBehaviours[TrancheId]
 }
 
 object FakeTranchesResource {
-  type TrancheId = FakeTranches[FakePayload]#TrancheId
+  type TrancheId = FakeTranches#TrancheId
 }
 
 trait FakeTranchesResource
     extends TranchesResource[FakeTranchesResource.TrancheId] {
 
   override val tranchesResource
-    : Resource[IO, Tranches[FakeTranchesResource.TrancheId, FakePayload]] =
+    : Resource[IO, Tranches[FakeTranchesResource.TrancheId]] =
     Resource.liftF(IO {
-      new FakeTranches[FakePayload]
-      with TranchesContracts[FakeTranchesResource.TrancheId, FakePayload]
+      new FakeTranches with TranchesContracts[FakeTranchesResource.TrancheId]
     })
 }
 
@@ -172,17 +164,17 @@ class FakeTranchesSpec
 }
 
 object H2TranchesResource {
-  type TrancheId = H2Tranches[FakePayload]#TrancheId
+  type TrancheId = H2Tranches#TrancheId
 }
 
 trait H2TranchesResource
     extends TranchesResource[H2TranchesResource.TrancheId] {
   override val tranchesResource
-    : Resource[IO, Tranches[H2TranchesResource.TrancheId, FakePayload]] =
+    : Resource[IO, Tranches[H2TranchesResource.TrancheId]] =
     H2Resource.transactorResource.map(
       transactor =>
-        new H2Tranches[FakePayload](transactor)
-        with TranchesContracts[H2TranchesResource.TrancheId, FakePayload])
+        new H2Tranches(transactor)
+        with TranchesContracts[H2TranchesResource.TrancheId])
 }
 
 class H2TranchesSpec

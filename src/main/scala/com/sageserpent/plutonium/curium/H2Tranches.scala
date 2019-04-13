@@ -16,10 +16,9 @@ object H2Tranches {
   def setupDatabaseTables(transactor: Transactor): IO[Unit] = ???
 }
 
-class H2Tranches[Payload](transactor: H2Tranches.Transactor)
-    extends Tranches[UUID, Payload] {
+class H2Tranches(transactor: H2Tranches.Transactor) extends Tranches[UUID] {
   override def createTrancheInStorage(
-      payload: Payload,
+      payload: Array[Byte],
       objectReferenceIdOffset: ObjectReferenceId,
       objectReferenceIds: Set[ObjectReferenceId])
     : EitherThrowableOr[TrancheId] = ???
@@ -28,7 +27,7 @@ class H2Tranches[Payload](transactor: H2Tranches.Transactor)
     : EitherThrowableOr[ObjectReferenceId] = ???
 
   override def retrieveTranche(
-      trancheId: TrancheId): EitherThrowableOr[TrancheOfData[Payload]] = ???
+      trancheId: TrancheId): EitherThrowableOr[TrancheOfData] = ???
 
   override def retrieveTrancheId(
       objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] =
