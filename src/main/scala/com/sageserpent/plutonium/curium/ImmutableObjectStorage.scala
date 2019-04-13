@@ -39,13 +39,27 @@ import org.objenesis.strategy.StdInstantiatorStrategy
 
 import scala.collection.mutable.{Map => MutableMap}
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
+import scala.util.hashing.MurmurHash3
 import scala.util.{DynamicVariable, Try}
 
 object ImmutableObjectStorage {
   type ObjectReferenceId = Int
 
   case class TrancheOfData(payload: Array[Byte],
-                           objectReferenceIdOffset: ObjectReferenceId)
+                           objectReferenceIdOffset: ObjectReferenceId) {
+    // TODO: have to override the default implementation solely to deal with array
+    // equality - should cutover to using the augmented array type in Scala when I
+    // remember what it is....
+    override def equals(another: Any): Boolean = another match {
+      case TrancheOfData(payload, objectReferenceIdOffset) =>
+        this.payload
+          .sameElements(payload) && this.objectReferenceIdOffset == objectReferenceIdOffset
+      case _ => false
+    }
+
+    override def toString: String =
+      s"TrancheOfData(payload hash: ${MurmurHash3.arrayHash(payload)}, object reference id offset: $objectReferenceIdOffset)"
+  }
 
   type EitherThrowableOr[X] = Either[Throwable, X]
 

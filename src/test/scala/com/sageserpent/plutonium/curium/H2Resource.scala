@@ -16,6 +16,7 @@ object H2Resource {
     fixedThreadPool <- ExecutionContexts.fixedThreadPool[IO](32)
     cachedThreadPool <- ExecutionContexts
       .cachedThreadPool[IO]
+    // TODO - use the H2 flavour of transactor, as it has its own connection pool implementation...
     transactor <- HikariTransactor.newHikariTransactor[IO](
       driverClassName = "org.h2.Driver",
       url = s"jdbc:h2:mem:$databaseName;DB_CLOSE_DELAY=-1",
