@@ -134,6 +134,8 @@ object ImmutableObjectStorage {
       def acquire(acquiredState: AcquiredState): Unit
     }
 
+    val kryoClosureMarkerClazz = classOf[Closure]
+
     val clazzesThatShouldNotBeProxied: Set[Class[_]] =
       Set(
         /*
@@ -142,7 +144,7 @@ object ImmutableObjectStorage {
           tranche specific reference resolver class, which in turn
           creates proxies. We don't want to proxy a closure anyway.
          */
-        classOf[Closure],
+        kryoClosureMarkerClazz,
         /*
           The next one is to prevent the proxying of proxies. Strictly
           speaking this shouldn't be needed, because there is logic elsewhere
@@ -157,11 +159,13 @@ object ImmutableObjectStorage {
         classOf[Class[_]]
       )
 
+    val stateAcquisitionClazz = classOf[StateAcquisition]
+
     def isProxyClazz(clazz: Class[_]): Boolean =
-      classOf[AcquiredState].isAssignableFrom(clazz)
+      stateAcquisitionClazz.isAssignableFrom(clazz)
 
     def isProxy(immutableObject: AnyRef): Boolean =
-      classOf[AcquiredState].isInstance(immutableObject)
+      stateAcquisitionClazz.isInstance(immutableObject)
 
     val instantiatorStrategy: StdInstantiatorStrategy =
       new StdInstantiatorStrategy
@@ -258,18 +262,19 @@ trait ImmutableObjectStorage[TrancheId] {
   }
 
   trait ReferenceResolverContracts extends ReferenceResolver {
+
     abstract override def getReadObject(
         clazz: Class[_],
         objectReferenceId: ObjectReferenceId): AnyRef = {
       val result = super.getReadObject(clazz, objectReferenceId)
 
       val nonProxyClazz =
-        if (classOf[proxySupport.StateAcquisition].isAssignableFrom(clazz))
+        if (proxySupport.isProxyClazz(clazz))
           clazz.getSuperclass
         else clazz
 
       assert(
-        nonProxyClazz.isInstance(result) || classOf[ClosureSerializer.Closure]
+        nonProxyClazz.isInstance(result) || proxySupport.kryoClosureMarkerClazz
           .isAssignableFrom(nonProxyClazz))
 
       result
@@ -291,7 +296,7 @@ trait ImmutableObjectStorage[TrancheId] {
       kryo =>
         // TODO - check that this is really necessary...
         kryo.register(
-          classOf[ClosureSerializer.Closure],
+          proxySupport.kryoClosureMarkerClazz,
           new CleaningSerializer(
             (new ClosureSerializer).asInstanceOf[Serializer[_ <: AnyRef]])))
 
@@ -337,7 +342,7 @@ trait ImmutableObjectStorage[TrancheId] {
           .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
           .to(proxyDelayedLoading))
         .defineField("acquiredState", classOf[AcquiredState])
-        .implement(classOf[StateAcquisition])
+        .implement(stateAcquisitionClazz)
         .method(ElementMatchers.named("acquire"))
         .intercept(FieldAccessor.ofField("acquiredState"))
         .implement(classOf[KryoSerializable])
