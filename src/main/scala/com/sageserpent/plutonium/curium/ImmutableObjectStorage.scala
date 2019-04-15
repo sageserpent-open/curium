@@ -5,7 +5,10 @@ import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
-import com.esotericsoftware.kryo.serializers.ClosureSerializer
+import com.esotericsoftware.kryo.serializers.{
+  ClosureSerializer,
+  FieldSerializer
+}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.{
   Kryo,
@@ -37,6 +40,7 @@ import net.bytebuddy.{ByteBuddy, NamingStrategy}
 import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
+import scala.collection.immutable.HashMap
 import scala.collection.mutable.{Map => MutableMap}
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
@@ -292,13 +296,23 @@ trait ImmutableObjectStorage[TrancheId] {
 
         result
       }
-    }.withRegistrar(
-      kryo =>
-        // TODO - check that this is really necessary...
-        kryo.register(
-          proxySupport.kryoClosureMarkerClazz,
-          new CleaningSerializer(
-            (new ClosureSerializer).asInstanceOf[Serializer[_ <: AnyRef]])))
+    }.withRegistrar { kryo =>
+      // TODO - check that this is really necessary...
+      kryo.register(
+        proxySupport.kryoClosureMarkerClazz,
+        new CleaningSerializer(
+          (new ClosureSerializer).asInstanceOf[Serializer[_ <: AnyRef]]))
+
+      def registerFieldSerializer[T](clazz: Class[T]) = {
+        val fieldSerializer =
+          new FieldSerializer[T](kryo, clazz)
+        fieldSerializer.setIgnoreSyntheticFields(false)
+        kryo.register(clazz, fieldSerializer)
+      }
+
+      registerFieldSerializer(classOf[Map[_, _]])
+      registerFieldSerializer(classOf[HashMap[_, _]])
+    }
 
   private val kryoPool: KryoPool =
     KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
