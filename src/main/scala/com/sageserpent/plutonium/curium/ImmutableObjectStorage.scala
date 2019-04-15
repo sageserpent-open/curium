@@ -312,6 +312,8 @@ trait ImmutableObjectStorage[TrancheId] {
 
       registerFieldSerializer(classOf[Map[_, _]])
       registerFieldSerializer(classOf[HashMap[_, _]])
+      registerFieldSerializer(classOf[HashMap.HashTrieMap[_, _]])
+      registerFieldSerializer(classOf[HashMap.HashMap1[_, _]])
     }
 
   private val kryoPool: KryoPool =
