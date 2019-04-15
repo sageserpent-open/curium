@@ -5,10 +5,7 @@ import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
-import com.esotericsoftware.kryo.serializers.{
-  ClosureSerializer,
-  FieldSerializer
-}
+import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.{
   Kryo,
@@ -20,10 +17,10 @@ import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{
   CleaningSerializer,
+  EmptyScalaKryoInstantiator,
   KryoBase,
   KryoInstantiator,
-  KryoPool,
-  ScalaKryoInstantiator
+  KryoPool
 }
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
@@ -40,7 +37,6 @@ import net.bytebuddy.{ByteBuddy, NamingStrategy}
 import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
-import scala.collection.immutable.HashMap
 import scala.collection.mutable.{Map => MutableMap}
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
@@ -286,7 +282,7 @@ trait ImmutableObjectStorage[TrancheId] {
   }
 
   private val kryoInstantiator: KryoInstantiator =
-    new ScalaKryoInstantiator {
+    new EmptyScalaKryoInstantiator {
       override def newKryo(): KryoBase = {
         val result = super.newKryo()
 
@@ -302,18 +298,6 @@ trait ImmutableObjectStorage[TrancheId] {
         proxySupport.kryoClosureMarkerClazz,
         new CleaningSerializer(
           (new ClosureSerializer).asInstanceOf[Serializer[_ <: AnyRef]]))
-
-      def registerFieldSerializer[T](clazz: Class[T]) = {
-        val fieldSerializer =
-          new FieldSerializer[T](kryo, clazz)
-        fieldSerializer.setIgnoreSyntheticFields(false)
-        kryo.register(clazz, fieldSerializer)
-      }
-
-      registerFieldSerializer(classOf[Map[_, _]])
-      registerFieldSerializer(classOf[HashMap[_, _]])
-      registerFieldSerializer(classOf[HashMap.HashTrieMap[_, _]])
-      registerFieldSerializer(classOf[HashMap.HashMap1[_, _]])
     }
 
   private val kryoPool: KryoPool =
