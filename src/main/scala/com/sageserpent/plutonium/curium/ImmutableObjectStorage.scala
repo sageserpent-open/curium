@@ -198,6 +198,9 @@ object ImmutableObjectStorage {
       }
     }
   }
+
+  case class CompletedOperationData(referenceResolver: ReferenceResolver,
+                                    topLevelObject: Any)
 }
 
 trait ImmutableObjectStorage[TrancheId] {
@@ -422,9 +425,9 @@ trait ImmutableObjectStorage[TrancheId] {
               trancheIdForExternalObjectReference)) {
           val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
           val Right(_) =
-            thisSessionInterpreter(
-              Retrieve(trancheIdForExternalObjectReference,
-                       placeholderClazzForTopLevelTrancheObject))
+            retrieveTrancheTopLevelObject(
+              trancheIdForExternalObjectReference,
+              placeholderClazzForTopLevelTrancheObject)
         }
 
         retrieveObjectThatIsNotAProxy(objectReferenceId).get
@@ -575,9 +578,30 @@ trait ImmutableObjectStorage[TrancheId] {
           thisSessionInterpreter.useReferences(clazz)
       }
 
-      case class CompletedOperationData(
-          referenceResolver: TrancheSpecificReferenceResolver,
-          topLevelObject: Any)
+      def retrieveTrancheTopLevelObject[X](
+          trancheId: TrancheId,
+          clazz: Class[X]): EitherThrowableOr[X] =
+        for {
+          tranche <- tranches.retrieveTranche(trancheId)
+          result <- Try {
+            val objectReferenceIdOffset =
+              tranche.objectReferenceIdOffset
+            val trancheSpecificReferenceResolver =
+              new TrancheSpecificReferenceResolver(objectReferenceIdOffset)
+              with ReferenceResolverContracts
+
+            val deserialized =
+              sessionReferenceResolver.withValue(
+                Some(trancheSpecificReferenceResolver)) {
+                kryoPool.fromBytes(tranche.payload)
+              }
+
+            completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
+              trancheSpecificReferenceResolver,
+              deserialized)
+            clazz.cast(deserialized)
+          }.toEither
+        } yield result
 
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
@@ -608,34 +632,12 @@ trait ImmutableObjectStorage[TrancheId] {
             }
 
           case retrieve @ Retrieve(trancheId, clazz) =>
-            for {
-              tranche <- tranches.retrieveTranche(trancheId)
-              result <- Try {
-                (completedOperationDataByTrancheId.get(trancheId) match {
-                  case Some(CompletedOperationData(_, topLevelObject)) =>
-                    topLevelObject
-
-                  case None =>
-                    val objectReferenceIdOffset =
-                      tranche.objectReferenceIdOffset
-                    val trancheSpecificReferenceResolver =
-                      new TrancheSpecificReferenceResolver(
-                        objectReferenceIdOffset) with ReferenceResolverContracts
-
-                    val deserialized =
-                      sessionReferenceResolver.withValue(
-                        Some(trancheSpecificReferenceResolver)) {
-                        kryoPool.fromBytes(tranche.payload)
-                      }
-
-                    completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
-                      trancheSpecificReferenceResolver,
-                      deserialized)
-                    clazz.cast(deserialized)
-                }).asInstanceOf[X]
-              }.toEither
-            } yield result
-
+            completedOperationDataByTrancheId
+              .get(trancheId)
+              .fold(retrieveTrancheTopLevelObject[X](trancheId, clazz)) {
+                case CompletedOperationData(_, topLevelObject) =>
+                  topLevelObject.asInstanceOf[X].pure[EitherThrowableOr]
+              }
         }
     }
 
