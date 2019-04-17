@@ -7,6 +7,7 @@ import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
+import com.esotericsoftware.kryo.util.Util
 import com.esotericsoftware.kryo.{
   Kryo,
   KryoSerializable,
@@ -145,18 +146,7 @@ object ImmutableObjectStorage {
           creates proxies. We don't want to proxy a closure anyway.
          */
         kryoClosureMarkerClazz,
-        /*
-          The next one is to prevent the proxying of proxies. Strictly
-          speaking this shouldn't be needed, because there is logic elsewhere
-          that will ensure that a proxy is never stored into a tranche
-          as a distinct object from what it proxies; however due to the
-          rather dubious way *this* code allows proxy classes to be passed
-          to the reference resolver instances, that code will end up seeing
-          the class objects for proxies, so this exclusion guards against *that*.
-         */
-        classOf[StateAcquisition],
-        classOf[String],
-        classOf[Class[_]]
+        classOf[String]
       )
 
     val stateAcquisitionClazz = classOf[StateAcquisition]
@@ -166,6 +156,11 @@ object ImmutableObjectStorage {
 
     def isProxy(immutableObject: AnyRef): Boolean =
       stateAcquisitionClazz.isInstance(immutableObject)
+
+    def nonProxyClazzFor(clazz: Class[_]): Class[_] =
+      if (isProxyClazz(clazz))
+        clazz.getSuperclass
+      else clazz
 
     val instantiatorStrategy: StdInstantiatorStrategy =
       new StdInstantiatorStrategy
@@ -272,9 +267,7 @@ trait ImmutableObjectStorage[TrancheId] {
       val result = super.getReadObject(clazz, objectReferenceId)
 
       val nonProxyClazz =
-        if (proxySupport.isProxyClazz(clazz))
-          clazz.getSuperclass
-        else clazz
+        proxySupport.nonProxyClazzFor(clazz)
 
       assert(
         nonProxyClazz.isInstance(result) || proxySupport.kryoClosureMarkerClazz
@@ -331,7 +324,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
     private def createProxyClass[X <: AnyRef](clazz: Class[X]): Class[X] = {
       // We should never end up having to make chains of delegating proxies!
-      require(!clazz.getName.endsWith(proxySuffix))
+      require(!isProxyClazz(clazz))
 
       byteBuddy
         .`with`(new NamingStrategy.AbstractBase {
@@ -410,7 +403,7 @@ trait ImmutableObjectStorage[TrancheId] {
           extends AnyRef
 
       private def useReferences(clazz: Class[_]): Boolean =
-        !clazz.isPrimitive && clazz != classOf[String]
+        !Util.isWrapperClass(clazz) && clazz != classOf[String]
 
       def retrieveObjectThatIsNotAProxy(
           objectReferenceId: ObjectReferenceId): Option[AnyRef] =
@@ -463,8 +456,8 @@ trait ImmutableObjectStorage[TrancheId] {
           // PLAN: if 'immutableObject' is a proxy, it *must* be found in 'proxyToReferenceIdMap'.
           // Otherwise it must be a non-proxied object in 'objectToReferenceIdMap', or it must be
           // an object not yet introduced to *any* reference resolver by either retrieval or storage.
-          //  We assume that any proxy instance
-          // must have already been stored in 'proxyToReferenceIdMap', and check accordingly.
+          // We assume that any proxy instance must have already been stored in 'proxyToReferenceIdMap',
+          // and check accordingly.
           {
             val result = Option(proxyToReferenceIdMap.get(immutableObject))
               .orElse(Option(objectToReferenceIdMap.get(immutableObject)))
@@ -554,13 +547,16 @@ trait ImmutableObjectStorage[TrancheId] {
                   tranches
                     .retrieveTrancheId(objectReferenceId)
 
-                if (proxySupport.isNotToBeProxied(clazz))
+                val nonProxyClazz =
+                  proxySupport.nonProxyClazzFor(clazz)
+
+                if (proxySupport.isNotToBeProxied(nonProxyClazz))
                   retrieveUnderlying(trancheIdForExternalObjectReference,
                                      objectReferenceId)
                 else {
                   val proxy =
                     proxySupport.createProxy(
-                      clazz.asInstanceOf[Class[_ <: AnyRef]],
+                      nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
                       new AcquiredState(trancheIdForExternalObjectReference,
                                         objectReferenceId))
 
