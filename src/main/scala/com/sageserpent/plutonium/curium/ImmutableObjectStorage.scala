@@ -1,19 +1,14 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
+import java.util.UUID
 
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
-import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
-import com.esotericsoftware.kryo.{
-  Kryo,
-  KryoSerializable,
-  ReferenceResolver,
-  Serializer
-}
+import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{
@@ -29,8 +24,7 @@ import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
 import net.bytebuddy.implementation.bind.annotation.{
   FieldValue,
   Pipe,
-  RuntimeType,
-  This
+  RuntimeType
 }
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
@@ -134,10 +128,14 @@ object ImmutableObjectStorage {
 
     trait AcquiredState {
       def underlying: AnyRef
+
+      def idOfCreatingSession: UUID
     }
 
     private[curium] trait StateAcquisition {
       def acquire(acquiredState: AcquiredState): Unit
+
+      def idOfCreatingSession: UUID
     }
 
     /*
@@ -182,17 +180,11 @@ object ImmutableObjectStorage {
       }
     }
 
-    object proxySerialization {
+    object sessionId {
       @RuntimeType
-      def write(
-          kryo: Kryo,
-          output: Output,
-          @FieldValue("acquiredState") acquiredState: AcquiredState): Unit =
-        kryo.writeClassAndObject(output, acquiredState)
-
-      @RuntimeType
-      def read(kryo: Kryo, input: Input, @This thiz: StateAcquisition): Unit = {
-        thiz.acquire(kryo.readClassAndObject(input).asInstanceOf[AcquiredState])
+      def apply(
+          @FieldValue("acquiredState") acquiredState: AcquiredState): UUID = {
+        acquiredState.idOfCreatingSession
       }
     }
   }
@@ -260,55 +252,6 @@ trait ImmutableObjectStorage[TrancheId] {
     override def useReferences(clazz: Class[_]): Boolean =
       sessionReferenceResolver.value.get.useReferences(clazz)
 
-  }
-
-  trait ReferenceResolverContracts extends ReferenceResolver {
-
-    abstract override def getWrittenId(
-        immutableObject: AnyRef): ObjectReferenceId = {
-      val result = super.getWrittenId(immutableObject)
-
-      if (-1 == result) {
-        assert(!proxySupport.isProxy(immutableObject))
-      }
-
-      result
-    }
-
-    abstract override def addWrittenObject(
-        immutableObject: AnyRef): ObjectReferenceId = {
-      require(!proxySupport.isProxy(immutableObject))
-
-      super.addWrittenObject(immutableObject)
-    }
-
-    abstract override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
-      require(!proxySupport.isProxyClazz(clazz))
-
-      super.nextReadId(clazz)
-    }
-
-    abstract override def setReadObject(objectReferenceId: ObjectReferenceId,
-                                        immutableObject: AnyRef): Unit = {
-      require(!proxySupport.isProxy(immutableObject))
-
-      super.setReadObject(objectReferenceId, immutableObject)
-    }
-
-    abstract override def getReadObject(
-        clazz: Class[_],
-        objectReferenceId: ObjectReferenceId): AnyRef = {
-      val result = super.getReadObject(clazz, objectReferenceId)
-
-      val nonProxyClazz =
-        proxySupport.nonProxyClazzFor(clazz)
-
-      assert(
-        nonProxyClazz.isInstance(result) || proxySupport.kryoClosureMarkerClazz
-          .isAssignableFrom(nonProxyClazz))
-
-      result
-    }
   }
 
   private val kryoInstantiator: KryoInstantiator =
@@ -392,10 +335,8 @@ trait ImmutableObjectStorage[TrancheId] {
         .implement(stateAcquisitionClazz)
         .method(ElementMatchers.named("acquire"))
         .intercept(FieldAccessor.ofField("acquiredState"))
-        .implement(classOf[KryoSerializable])
-        .method(
-          ElementMatchers.named("write").or(ElementMatchers.named("read")))
-        .intercept(MethodDelegation.to(proxySerialization))
+        .method(ElementMatchers.named("idOfCreatingSession"))
+        .intercept(MethodDelegation.to(sessionId))
         .make
         .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
         .getLoaded
@@ -428,6 +369,66 @@ trait ImmutableObjectStorage[TrancheId] {
       tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
+
+      val id: UUID = UUID.randomUUID()
+
+      trait ReferenceResolverContracts extends ReferenceResolver {
+
+        abstract override def getWrittenId(
+            immutableObject: AnyRef): ObjectReferenceId = {
+          val handlingAProxy = proxySupport.isProxy(immutableObject)
+
+          require(
+            !handlingAProxy || id == immutableObject
+              .asInstanceOf[proxySupport.StateAcquisition]
+              .idOfCreatingSession)
+
+          val result = super.getWrittenId(immutableObject)
+
+          if (-1 == result) {
+            assert(!handlingAProxy)
+          }
+
+          result
+        }
+
+        abstract override def addWrittenObject(
+            immutableObject: AnyRef): ObjectReferenceId = {
+          require(!proxySupport.isProxy(immutableObject))
+
+          super.addWrittenObject(immutableObject)
+        }
+
+        abstract override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
+          require(!proxySupport.isProxyClazz(clazz))
+
+          super.nextReadId(clazz)
+        }
+
+        abstract override def setReadObject(
+            objectReferenceId: ObjectReferenceId,
+            immutableObject: AnyRef): Unit = {
+          require(!proxySupport.isProxy(immutableObject))
+
+          super.setReadObject(objectReferenceId, immutableObject)
+        }
+
+        abstract override def getReadObject(
+            clazz: Class[_],
+            objectReferenceId: ObjectReferenceId): AnyRef = {
+          val result = super.getReadObject(clazz, objectReferenceId)
+
+          val nonProxyClazz =
+            proxySupport.nonProxyClazzFor(clazz)
+
+          assert(
+            nonProxyClazz
+              .isInstance(result) || proxySupport.kryoClosureMarkerClazz
+              .isAssignableFrom(nonProxyClazz))
+
+          result
+        }
+      }
 
       // TODO - cutover to using weak references, perhaps via 'WeakCache'?
       val completedOperationDataByTrancheId
@@ -482,7 +483,6 @@ trait ImmutableObjectStorage[TrancheId] {
       class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
                           objectReferenceId: ObjectReferenceId)
           extends proxySupport.AcquiredState {
-        @transient
         private var _underlying: Option[AnyRef] = None
 
         override def underlying: AnyRef = _underlying match {
@@ -495,6 +495,8 @@ trait ImmutableObjectStorage[TrancheId] {
 
             result
         }
+
+        override val idOfCreatingSession = thisSessionInterpreter.id
       }
 
       class TrancheSpecificReferenceResolver(
