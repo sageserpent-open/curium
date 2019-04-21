@@ -402,7 +402,7 @@ class ImmutableObjectStorageSpec
 
   }
 
-  it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
+  ignore should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
     MinSuccessful(100)) { partGrowth =>
     val tranches = new FakeTranches with TranchesContracts[TrancheId]

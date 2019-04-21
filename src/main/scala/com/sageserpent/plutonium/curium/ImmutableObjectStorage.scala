@@ -83,14 +83,18 @@ object ImmutableObjectStorage {
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
 
-    val objectCacheTimeToLive = Some(1 minutes)
+    val objectCacheByReferenceIdTimeToLive = Some(1 minutes)
 
-    val objectCache: Cache[AnyRef] =
+    val objectCacheByReferenceId: Cache[AnyRef] =
       CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
 
     val weakObjectToReferenceIdMap: ConcurrentMap[AnyRef, ObjectReferenceId] =
       new MapMaker().weakKeys().makeMap[AnyRef, ObjectReferenceId]()
 
+    val topLevelObjectCacheByTrancheIdTimeToLive = Some(1 minutes)
+
+    val topLevelObjectCacheByTrancheId: Cache[AnyRef] =
+      CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
@@ -190,8 +194,7 @@ object ImmutableObjectStorage {
     }
   }
 
-  case class CompletedOperationData(referenceResolver: ReferenceResolver,
-                                    topLevelObject: Any)
+  case class CompletedOperationData(referenceResolver: ReferenceResolver)
 }
 
 trait ImmutableObjectStorage[TrancheId] {
@@ -450,21 +453,22 @@ trait ImmutableObjectStorage[TrancheId] {
           case immutableObject @ _                      => immutableObject
         }
 
-      implicit val objectCache = tranches.objectCache
-
       def objectWithReferenceId(
-          objectReferenceId: ObjectReferenceId): Option[AnyRef] =
+          objectReferenceId: ObjectReferenceId): Option[AnyRef] = {
+        implicit val objectCacheByReferenceId =
+          tranches.objectCacheByReferenceId
+
         get(objectReferenceId).orElse {
           val result = Option(referenceIdToObjectMap.get(objectReferenceId))
             .map(decodePlaceholder)
 
-          result.foreach(
-            immutableObject =>
-              put(objectReferenceId)(immutableObject,
-                                     tranches.objectCacheTimeToLive))
+          result.foreach(immutableObject =>
+            put(objectReferenceId)(immutableObject,
+                                   tranches.objectCacheByReferenceIdTimeToLive))
 
           result
         }
+      }
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
                              objectReferenceId: ObjectReferenceId): AnyRef =
@@ -648,8 +652,7 @@ trait ImmutableObjectStorage[TrancheId] {
               }
 
             completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
-              trancheSpecificReferenceResolver,
-              deserialized)
+              trancheSpecificReferenceResolver)
             clazz.cast(deserialized)
           }.toEither
         } yield result
@@ -677,18 +680,25 @@ trait ImmutableObjectStorage[TrancheId] {
               }
             } yield {
               completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
-                trancheSpecificReferenceResolver,
-                immutableObject)
+                trancheSpecificReferenceResolver)
               trancheId
             }
 
           case retrieve @ Retrieve(trancheId, clazz) =>
-            completedOperationDataByTrancheId
-              .get(trancheId)
-              .fold(retrieveTrancheTopLevelObject[X](trancheId, clazz)) {
-                case CompletedOperationData(_, topLevelObject) =>
-                  topLevelObject.asInstanceOf[X].pure[EitherThrowableOr]
+            implicit val topLevelObjectCacheByTrancheId =
+              tranches.topLevelObjectCacheByTrancheId
+
+            get(trancheId).fold {
+              for {
+                topLevelObject <- retrieveTrancheTopLevelObject[X](trancheId,
+                                                                   clazz)
+              } yield {
+                put(trancheId)(
+                  topLevelObject.asInstanceOf[AnyRef],
+                  tranches.topLevelObjectCacheByTrancheIdTimeToLive)
+                topLevelObject
               }
+            }(_.asInstanceOf[X].pure[EitherThrowableOr])
         }
     }
 
