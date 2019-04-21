@@ -1,6 +1,7 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
 import java.util.UUID
+import java.util.concurrent.ConcurrentMap
 
 import cats.arrow.FunctionK
 import cats.free.FreeT
@@ -9,7 +10,11 @@ import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
-import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
+import com.google.common.collect.{
+  BiMap,
+  BiMapUsingIdentityOnForwardMappingOnly,
+  MapMaker
+}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{
   CleaningSerializer,
@@ -36,7 +41,7 @@ import scalacache.caffeine._
 import scalacache.memoization._
 import scalacache.modes.sync._
 
-import scala.collection.mutable.{Map => MutableMap}
+import scala.collection.mutable.{WeakHashMap, Map => MutableMap}
 import scala.concurrent.duration._
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
@@ -78,6 +83,15 @@ object ImmutableObjectStorage {
 
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
+
+    val objectCacheTimeToLive = Some(2 minutes)
+
+    val objectCache: Cache[Option[AnyRef]] =
+      CaffeineCache[Option[AnyRef]](CacheConfig.defaultCacheConfig)
+
+    val weakObjectToReferenceIdMap: ConcurrentMap[AnyRef, ObjectReferenceId] =
+      new MapMaker().weakKeys().makeMap[AnyRef, ObjectReferenceId]()
+
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
@@ -376,17 +390,10 @@ trait ImmutableObjectStorage[TrancheId] {
 
         abstract override def getWrittenId(
             immutableObject: AnyRef): ObjectReferenceId = {
-          val handlingAProxy = proxySupport.isProxy(immutableObject)
-
-          require(
-            !handlingAProxy || id == immutableObject
-              .asInstanceOf[proxySupport.StateAcquisition]
-              .idOfCreatingSession)
-
           val result = super.getWrittenId(immutableObject)
 
           if (-1 == result) {
-            assert(!handlingAProxy)
+            assert(!proxySupport.isProxy(immutableObject))
           }
 
           result
@@ -447,10 +454,6 @@ trait ImmutableObjectStorage[TrancheId] {
       val referenceIdToProxyMap: BiMap[ObjectReferenceId, AnyRef] =
         proxyToReferenceIdMap.inverse()
 
-      // NOTE: a class and *not* an object; we want a fresh instance each time, as the tranche-specific
-      // reference resolver uses bidirectional maps - so each value can only be associated with *one* key.
-      private case class PlaceholderAssociation() extends AnyRef
-
       private case class AssociatedValueForAlias(immutableObject: AnyRef)
           extends AnyRef
 
@@ -464,8 +467,19 @@ trait ImmutableObjectStorage[TrancheId] {
           case immutableObject @ _                      => immutableObject
         }
 
+      implicit val objectCache = tranches.objectCache
+
+      def objectWithReferenceId(
+          objectReferenceId: ObjectReferenceId): Option[AnyRef] =
+        caching(objectReferenceId)(tranches.objectCacheTimeToLive) {
+          Option(referenceIdToObjectMap.get(objectReferenceId))
+            .map(decodePlaceholder)
+        }
+
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
                              objectReferenceId: ObjectReferenceId): AnyRef = {
+        tranches.objectCache.remove(objectReferenceId)
+
         if (!completedOperationDataByTrancheId.contains(
               trancheIdForExternalObjectReference)) {
           val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
@@ -475,9 +489,7 @@ trait ImmutableObjectStorage[TrancheId] {
               placeholderClazzForTopLevelTrancheObject)
         }
 
-        Option(referenceIdToObjectMap.get(objectReferenceId))
-          .map(decodePlaceholder)
-          .get
+        objectWithReferenceId(objectReferenceId).get
       }
 
       class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
@@ -514,9 +526,13 @@ trait ImmutableObjectStorage[TrancheId] {
           // an object not yet introduced to *any* reference resolver by either retrieval or storage.
           // We assume that any proxy instance must have already been stored in 'proxyToReferenceIdMap',
           // and check accordingly.
-          Option(proxyToReferenceIdMap.get(immutableObject))
-            .orElse(Option(objectToReferenceIdMap
-              .get(immutableObject)))
+          Option(
+            tranches.weakObjectToReferenceIdMap
+              .get(immutableObject))
+            .orElse(
+              Option(proxyToReferenceIdMap.get(immutableObject))
+                .orElse(Option(objectToReferenceIdMap
+                  .get(immutableObject))))
             .getOrElse(-1)
 
         override def addWrittenObject(
@@ -527,6 +543,11 @@ trait ImmutableObjectStorage[TrancheId] {
           val _ @None = Option(
             objectToReferenceIdMap
               .put(immutableObject, nextObjectReferenceIdToAllocate))
+
+          tranches.objectCache.remove(nextObjectReferenceIdToAllocate)
+
+          tranches.weakObjectToReferenceIdMap
+            .put(immutableObject, nextObjectReferenceIdToAllocate)
 
           numberOfAssociationsForTheRelevantTrancheOnly += 1
 
@@ -539,9 +560,6 @@ trait ImmutableObjectStorage[TrancheId] {
           val nextObjectReferenceIdToAllocate = numberOfAssociationsForTheRelevantTrancheOnly + objectReferenceIdOffset
           assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
 
-          val _ @None = Option(
-            referenceIdToObjectMap
-              .put(nextObjectReferenceIdToAllocate, PlaceholderAssociation()))
           numberOfAssociationsForTheRelevantTrancheOnly += 1
 
           assert(0 <= numberOfAssociationsForTheRelevantTrancheOnly) // No wrapping around.
@@ -563,11 +581,16 @@ trait ImmutableObjectStorage[TrancheId] {
                   AssociatedValueForAlias(immutableObject)))
             case None =>
           }
+
+          tranches.objectCache.remove(objectReferenceId)
+
+          tranches.weakObjectToReferenceIdMap
+            .put(immutableObject, objectReferenceId)
         }
 
         override def getReadObject(
             clazz: Class[_],
-            objectReferenceId: ObjectReferenceId): AnyRef =
+            objectReferenceId: ObjectReferenceId): AnyRef = {
           // PLAN: if 'objectReferenceId' is greater than or equal to 'objectReferenceIdOffset',
           // we can resolve against the tranche associated with this reference resolver. Note that
           // we don't have to check any upper limit (and we couldn't anyway because it won't have been
@@ -578,40 +601,43 @@ trait ImmutableObjectStorage[TrancheId] {
           // Otherwise we have an inter-tranche resolution request - either yield a proxy (building it on the fly
           // if one has not already been introduced to the reference resolver), or look up an existing object
           // belonging to another tranche, loading that tranche if necessary.
-          if (objectReferenceId >= objectReferenceIdOffset)
-            Option(referenceIdToObjectMap.get(objectReferenceId))
-              .map(decodePlaceholder)
-              .get
-          else {
-            Option(referenceIdToObjectMap.get(objectReferenceId))
-              .map(decodePlaceholder)
-              .orElse(Option {
-                referenceIdToProxyMap.get(objectReferenceId)
-              })
-              .getOrElse {
-                val Right(trancheIdForExternalObjectReference) =
-                  tranches
-                    .retrieveTrancheId(objectReferenceId)
+          val result =
+            if (objectReferenceId >= objectReferenceIdOffset)
+              objectWithReferenceId(objectReferenceId).get
+            else {
+              objectWithReferenceId(objectReferenceId)
+                .orElse(Option {
+                  referenceIdToProxyMap.get(objectReferenceId)
+                })
+                .getOrElse {
+                  val Right(trancheIdForExternalObjectReference) =
+                    tranches
+                      .retrieveTrancheId(objectReferenceId)
 
-                val nonProxyClazz =
-                  proxySupport.nonProxyClazzFor(clazz)
+                  val nonProxyClazz =
+                    proxySupport.nonProxyClazzFor(clazz)
 
-                if (proxySupport.isNotToBeProxied(nonProxyClazz))
-                  retrieveUnderlying(trancheIdForExternalObjectReference,
-                                     objectReferenceId)
-                else {
-                  val proxy =
-                    proxySupport.createProxy(
-                      nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
-                      new AcquiredState(trancheIdForExternalObjectReference,
-                                        objectReferenceId))
+                  if (proxySupport.isNotToBeProxied(nonProxyClazz))
+                    retrieveUnderlying(trancheIdForExternalObjectReference,
+                                       objectReferenceId)
+                  else {
+                    val proxy =
+                      proxySupport.createProxy(
+                        nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
+                        new AcquiredState(trancheIdForExternalObjectReference,
+                                          objectReferenceId))
 
-                  referenceIdToProxyMap.put(objectReferenceId, proxy)
+                    referenceIdToProxyMap.put(objectReferenceId, proxy)
 
-                  proxy
+                    proxy
+                  }
                 }
-              }
-          }
+            }
+
+          tranches.weakObjectToReferenceIdMap.put(result, objectReferenceId)
+
+          result
+        }
 
         override def setKryo(kryo: Kryo): Unit = {}
 
