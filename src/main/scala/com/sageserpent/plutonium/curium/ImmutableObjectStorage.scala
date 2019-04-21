@@ -142,14 +142,10 @@ object ImmutableObjectStorage {
 
     trait AcquiredState {
       def underlying: AnyRef
-
-      def idOfCreatingSession: UUID
     }
 
     private[curium] trait StateAcquisition {
       def acquire(acquiredState: AcquiredState): Unit
-
-      def idOfCreatingSession: UUID
     }
 
     /*
@@ -191,14 +187,6 @@ object ImmutableObjectStorage {
         val underlying: AnyRef = acquiredState.underlying
 
         pipeTo(underlying)
-      }
-    }
-
-    object sessionId {
-      @RuntimeType
-      def apply(
-          @FieldValue("acquiredState") acquiredState: AcquiredState): UUID = {
-        acquiredState.idOfCreatingSession
       }
     }
   }
@@ -349,8 +337,6 @@ trait ImmutableObjectStorage[TrancheId] {
         .implement(stateAcquisitionClazz)
         .method(ElementMatchers.named("acquire"))
         .intercept(FieldAccessor.ofField("acquiredState"))
-        .method(ElementMatchers.named("idOfCreatingSession"))
-        .intercept(MethodDelegation.to(sessionId))
         .make
         .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
         .getLoaded
@@ -383,8 +369,6 @@ trait ImmutableObjectStorage[TrancheId] {
       tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
-
-      val id: UUID = UUID.randomUUID()
 
       trait ReferenceResolverContracts extends ReferenceResolver {
 
@@ -511,8 +495,6 @@ trait ImmutableObjectStorage[TrancheId] {
 
             result
         }
-
-        override val idOfCreatingSession = thisSessionInterpreter.id
       }
 
       class TrancheSpecificReferenceResolver(
