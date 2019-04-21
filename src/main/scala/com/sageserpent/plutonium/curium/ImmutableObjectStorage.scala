@@ -1,6 +1,5 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
-import java.util.UUID
 import java.util.concurrent.ConcurrentMap
 
 import cats.arrow.FunctionK
@@ -41,7 +40,7 @@ import scalacache.caffeine._
 import scalacache.memoization._
 import scalacache.modes.sync._
 
-import scala.collection.mutable.{WeakHashMap, Map => MutableMap}
+import scala.collection.mutable.{Map => MutableMap}
 import scala.concurrent.duration._
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
@@ -84,10 +83,10 @@ object ImmutableObjectStorage {
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
 
-    val objectCacheTimeToLive = Some(2 minutes)
+    val objectCacheTimeToLive = Some(1 minutes)
 
-    val objectCache: Cache[Option[AnyRef]] =
-      CaffeineCache[Option[AnyRef]](CacheConfig.defaultCacheConfig)
+    val objectCache: Cache[AnyRef] =
+      CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
 
     val weakObjectToReferenceIdMap: ConcurrentMap[AnyRef, ObjectReferenceId] =
       new MapMaker().weakKeys().makeMap[AnyRef, ObjectReferenceId]()
@@ -455,18 +454,21 @@ trait ImmutableObjectStorage[TrancheId] {
 
       def objectWithReferenceId(
           objectReferenceId: ObjectReferenceId): Option[AnyRef] =
-        caching(objectReferenceId)(tranches.objectCacheTimeToLive) {
-          Option(referenceIdToObjectMap.get(objectReferenceId))
+        get(objectReferenceId).orElse {
+          val result = Option(referenceIdToObjectMap.get(objectReferenceId))
             .map(decodePlaceholder)
+
+          result.foreach(
+            immutableObject =>
+              put(objectReferenceId)(immutableObject,
+                                     tranches.objectCacheTimeToLive))
+
+          result
         }
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
-                             objectReferenceId: ObjectReferenceId): AnyRef = {
-        val resultFromObjectCache = get(objectReferenceId).flatten
-
-        resultFromObjectCache.getOrElse {
-          objectCache.remove(objectReferenceId)
-
+                             objectReferenceId: ObjectReferenceId): AnyRef =
+        objectWithReferenceId(objectReferenceId).orElse {
           if (!completedOperationDataByTrancheId.contains(
                 trancheIdForExternalObjectReference)) {
             val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
@@ -476,9 +478,8 @@ trait ImmutableObjectStorage[TrancheId] {
                 placeholderClazzForTopLevelTrancheObject)
           }
 
-          objectWithReferenceId(objectReferenceId).get
-        }
-      }
+          objectWithReferenceId(objectReferenceId)
+        }.get
 
       class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
                           objectReferenceId: ObjectReferenceId)
@@ -530,8 +531,6 @@ trait ImmutableObjectStorage[TrancheId] {
             objectToReferenceIdMap
               .put(immutableObject, nextObjectReferenceIdToAllocate))
 
-          objectCache.remove(nextObjectReferenceIdToAllocate)
-
           tranches.weakObjectToReferenceIdMap
             .put(immutableObject, nextObjectReferenceIdToAllocate)
 
@@ -568,8 +567,6 @@ trait ImmutableObjectStorage[TrancheId] {
             case None =>
           }
 
-          objectCache.remove(objectReferenceId)
-
           tranches.weakObjectToReferenceIdMap
             .put(immutableObject, objectReferenceId)
         }
@@ -590,7 +587,7 @@ trait ImmutableObjectStorage[TrancheId] {
           val result =
             if (objectReferenceId >= objectReferenceIdOffset)
               objectWithReferenceId(objectReferenceId).get
-            else {
+            else
               objectWithReferenceId(objectReferenceId)
                 .orElse(Option {
                   referenceIdToProxyMap.get(objectReferenceId)
@@ -618,7 +615,6 @@ trait ImmutableObjectStorage[TrancheId] {
                     proxy
                   }
                 }
-            }
 
           tranches.weakObjectToReferenceIdMap.put(result, objectReferenceId)
 
