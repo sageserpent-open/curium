@@ -478,18 +478,22 @@ trait ImmutableObjectStorage[TrancheId] {
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
                              objectReferenceId: ObjectReferenceId): AnyRef = {
-        tranches.objectCache.remove(objectReferenceId)
+        val resultFromObjectCache = get(objectReferenceId).flatten
 
-        if (!completedOperationDataByTrancheId.contains(
-              trancheIdForExternalObjectReference)) {
-          val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
-          val Right(_) =
-            retrieveTrancheTopLevelObject(
-              trancheIdForExternalObjectReference,
-              placeholderClazzForTopLevelTrancheObject)
+        resultFromObjectCache.getOrElse {
+          objectCache.remove(objectReferenceId)
+
+          if (!completedOperationDataByTrancheId.contains(
+                trancheIdForExternalObjectReference)) {
+            val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
+            val Right(_) =
+              retrieveTrancheTopLevelObject(
+                trancheIdForExternalObjectReference,
+                placeholderClazzForTopLevelTrancheObject)
+          }
+
+          objectWithReferenceId(objectReferenceId).get
         }
-
-        objectWithReferenceId(objectReferenceId).get
       }
 
       class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
@@ -544,7 +548,7 @@ trait ImmutableObjectStorage[TrancheId] {
             objectToReferenceIdMap
               .put(immutableObject, nextObjectReferenceIdToAllocate))
 
-          tranches.objectCache.remove(nextObjectReferenceIdToAllocate)
+          objectCache.remove(nextObjectReferenceIdToAllocate)
 
           tranches.weakObjectToReferenceIdMap
             .put(immutableObject, nextObjectReferenceIdToAllocate)
@@ -582,7 +586,7 @@ trait ImmutableObjectStorage[TrancheId] {
             case None =>
           }
 
-          tranches.objectCache.remove(objectReferenceId)
+          objectCache.remove(objectReferenceId)
 
           tranches.weakObjectToReferenceIdMap
             .put(immutableObject, objectReferenceId)
