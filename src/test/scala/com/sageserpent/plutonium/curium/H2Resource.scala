@@ -17,7 +17,7 @@ object H2Resource {
     cachedThreadPool <- ExecutionContexts
       .cachedThreadPool[IO]
     transactor <- H2Transactor.newH2Transactor[IO](
-      url = s"jdbc:h2:mem:$databaseName;DB_CLOSE_DELAY=-1",
+      url = s"jdbc:h2:mem:$databaseName",
       user = "automatedTestIdentity",
       pass = "",
       connectEC = fixedThreadPool,
