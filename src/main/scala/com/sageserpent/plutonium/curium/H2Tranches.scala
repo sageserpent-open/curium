@@ -32,11 +32,17 @@ object H2Tranches {
            )
          """.update.run
 
+  val objectReferenceIdIndexCreation: ConnectionIO[Int] =
+    sql"""
+         CREATE INDEX ObjectReferenceIdIndex ON ObjectReference(objectReferenceId)
+       """.update.run
+
   def setupDatabaseTables(transactor: Transactor): IO[Unit] = {
 
     val setup: ConnectionIO[Unit] = for {
       _ <- trancheCreation
       _ <- objectReferenceIdCreation
+      _ <- objectReferenceIdIndexCreation
     } yield {}
 
     setup.transact(transactor)
