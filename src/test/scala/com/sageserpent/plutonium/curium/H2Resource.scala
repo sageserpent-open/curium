@@ -4,7 +4,7 @@ import java.util.UUID
 
 import cats.effect.{IO, Resource}
 import doobie._
-import doobie.hikari._
+import doobie.h2._
 
 import scala.concurrent.ExecutionContext
 
@@ -16,9 +16,7 @@ object H2Resource {
     fixedThreadPool <- ExecutionContexts.fixedThreadPool[IO](32)
     cachedThreadPool <- ExecutionContexts
       .cachedThreadPool[IO]
-    // TODO - use the H2 flavour of transactor, as it has its own connection pool implementation...
-    transactor <- HikariTransactor.newHikariTransactor[IO](
-      driverClassName = "org.h2.Driver",
+    transactor <- H2Transactor.newH2Transactor[IO](
       url = s"jdbc:h2:mem:$databaseName;DB_CLOSE_DELAY=-1",
       user = "automatedTestIdentity",
       pass = "",
