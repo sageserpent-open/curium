@@ -83,18 +83,55 @@ object ImmutableObjectStorage {
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
 
-    val objectCacheByReferenceIdTimeToLive = Some(1 minutes)
+    protected val objectCacheByReferenceIdTimeToLive = Some(1 minutes)
 
-    val objectCacheByReferenceId: Cache[AnyRef] =
+    private val objectCacheByReferenceId: Cache[AnyRef] =
       CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
 
-    val weakObjectToReferenceIdMap: ConcurrentMap[AnyRef, ObjectReferenceId] =
+    def noteObject(objectReferenceId: ObjectReferenceId,
+                   immutableObject: AnyRef): Unit = {
+      implicit val cache = objectCacheByReferenceId
+
+      sync.put(objectReferenceId)(immutableObject,
+                                  objectCacheByReferenceIdTimeToLive)
+    }
+
+    def objectFor(objectReferenceId: ObjectReferenceId): Option[AnyRef] = {
+      implicit val cache = objectCacheByReferenceId
+
+      sync.get(objectReferenceId)
+    }
+
+    private val weakObjectToReferenceIdMap
+      : ConcurrentMap[AnyRef, ObjectReferenceId] =
       new MapMaker().weakKeys().makeMap[AnyRef, ObjectReferenceId]()
 
-    val topLevelObjectCacheByTrancheIdTimeToLive = Some(1 minutes)
+    def noteReferenceId(immutableObject: AnyRef,
+                        objectReferenceId: ObjectReferenceId): Unit = {
+      weakObjectToReferenceIdMap.put(immutableObject, objectReferenceId)
+    }
 
-    val topLevelObjectCacheByTrancheId: Cache[AnyRef] =
+    def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
+      Option(weakObjectToReferenceIdMap.get(immutableObject))
+
+    protected val topLevelObjectCacheByTrancheIdTimeToLive = Some(1 minutes)
+
+    private val topLevelObjectCacheByTrancheId: Cache[AnyRef] =
       CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
+
+    def noteTopLevelObject(trancheId: TrancheId,
+                           topLevelObject: AnyRef): Unit = {
+      implicit val cache = topLevelObjectCacheByTrancheId
+
+      sync.put(trancheId)(topLevelObject,
+                          topLevelObjectCacheByTrancheIdTimeToLive)
+    }
+
+    def topLevelObjectFor(trancheId: TrancheId): Option[AnyRef] = {
+      implicit val cache = topLevelObjectCacheByTrancheId
+
+      sync.get(trancheId)
+    }
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
@@ -454,21 +491,16 @@ trait ImmutableObjectStorage[TrancheId] {
         }
 
       def objectWithReferenceId(
-          objectReferenceId: ObjectReferenceId): Option[AnyRef] = {
-        implicit val objectCacheByReferenceId =
-          tranches.objectCacheByReferenceId
-
-        get(objectReferenceId).orElse {
+          objectReferenceId: ObjectReferenceId): Option[AnyRef] =
+        tranches.objectFor(objectReferenceId).orElse {
           val result = Option(referenceIdToObjectMap.get(objectReferenceId))
             .map(decodePlaceholder)
 
           result.foreach(immutableObject =>
-            put(objectReferenceId)(immutableObject,
-                                   tranches.objectCacheByReferenceIdTimeToLive))
+            tranches.noteObject(objectReferenceId, immutableObject))
 
           result
         }
-      }
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
                              objectReferenceId: ObjectReferenceId): AnyRef =
@@ -517,9 +549,8 @@ trait ImmutableObjectStorage[TrancheId] {
           // an object not yet introduced to *any* reference resolver by either retrieval or storage.
           // We assume that any proxy instance must have already been stored in 'proxyToReferenceIdMap',
           // and check accordingly.
-          Option(
-            tranches.weakObjectToReferenceIdMap
-              .get(immutableObject))
+          tranches
+            .referenceIdFor(immutableObject)
             .orElse(
               Option(proxyToReferenceIdMap.get(immutableObject))
                 .orElse(Option(objectToReferenceIdMap
@@ -535,8 +566,8 @@ trait ImmutableObjectStorage[TrancheId] {
             objectToReferenceIdMap
               .put(immutableObject, nextObjectReferenceIdToAllocate))
 
-          tranches.weakObjectToReferenceIdMap
-            .put(immutableObject, nextObjectReferenceIdToAllocate)
+          tranches.noteReferenceId(immutableObject,
+                                   nextObjectReferenceIdToAllocate)
 
           numberOfAssociationsForTheRelevantTrancheOnly += 1
 
@@ -571,8 +602,7 @@ trait ImmutableObjectStorage[TrancheId] {
             case None =>
           }
 
-          tranches.weakObjectToReferenceIdMap
-            .put(immutableObject, objectReferenceId)
+          tranches.noteReferenceId(immutableObject, objectReferenceId)
         }
 
         override def getReadObject(
@@ -620,7 +650,7 @@ trait ImmutableObjectStorage[TrancheId] {
                   }
                 }
 
-          tranches.weakObjectToReferenceIdMap.put(result, objectReferenceId)
+          tranches.noteReferenceId(result, objectReferenceId)
 
           result
         }
@@ -685,20 +715,19 @@ trait ImmutableObjectStorage[TrancheId] {
             }
 
           case retrieve @ Retrieve(trancheId, clazz) =>
-            implicit val topLevelObjectCacheByTrancheId =
-              tranches.topLevelObjectCacheByTrancheId
-
-            get(trancheId).fold {
-              for {
-                topLevelObject <- retrieveTrancheTopLevelObject[X](trancheId,
-                                                                   clazz)
-              } yield {
-                put(trancheId)(
-                  topLevelObject.asInstanceOf[AnyRef],
-                  tranches.topLevelObjectCacheByTrancheIdTimeToLive)
-                topLevelObject
-              }
-            }(_.asInstanceOf[X].pure[EitherThrowableOr])
+            tranches
+              .topLevelObjectFor(trancheId)
+              .fold {
+                for {
+                  topLevelObject <- retrieveTrancheTopLevelObject[X](trancheId,
+                                                                     clazz)
+                } yield {
+                  tranches.noteTopLevelObject(
+                    trancheId,
+                    topLevelObject.asInstanceOf[AnyRef])
+                  topLevelObject
+                }
+              }(_.asInstanceOf[X].pure[EitherThrowableOr])
         }
     }
 
