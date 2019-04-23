@@ -566,7 +566,7 @@ class ImmutableObjectStorageSpec
     rootTranche.payload.length should be < isolatedSpokeTranche.payload.length
   }
 
-  ignore should "be idempotent in terms of object identity when retrieving using the same tranche id" in forAll(
+  it should "be idempotent in terms of object identity when retrieving using the same tranche id" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
     MinSuccessful(100)) { partGrowth =>
     val tranches = new FakeTranches with TranchesContracts[TrancheId]

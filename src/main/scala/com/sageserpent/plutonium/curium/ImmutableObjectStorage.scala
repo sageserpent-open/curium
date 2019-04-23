@@ -190,7 +190,8 @@ object ImmutableObjectStorage {
     }
   }
 
-  case class CompletedOperationData(referenceResolver: ReferenceResolver)
+  case class CompletedOperationData(referenceResolver: ReferenceResolver,
+                                    topLevelObject: Any)
 }
 
 trait ImmutableObjectStorage[TrancheId] {
@@ -641,7 +642,8 @@ trait ImmutableObjectStorage[TrancheId] {
               }
 
             completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
-              trancheSpecificReferenceResolver)
+              trancheSpecificReferenceResolver,
+              deserialized)
             clazz.cast(deserialized)
           }.toEither
         } yield result
@@ -669,13 +671,18 @@ trait ImmutableObjectStorage[TrancheId] {
               }
             } yield {
               completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
-                trancheSpecificReferenceResolver)
+                trancheSpecificReferenceResolver,
+                immutableObject)
               trancheId
             }
 
           case retrieve @ Retrieve(trancheId, clazz) =>
             tranches
               .topLevelObjectFor(trancheId)
+              .orElse(
+                completedOperationDataByTrancheId
+                  .get(trancheId)
+                  .map(_.topLevelObject))
               .fold {
                 for {
                   topLevelObject <- retrieveTrancheTopLevelObject[X](trancheId,
