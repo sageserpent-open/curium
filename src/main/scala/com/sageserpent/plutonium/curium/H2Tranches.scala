@@ -126,7 +126,7 @@ class H2Tranches(transactor: H2Tranches.Transactor) extends Tranches[Long] {
     Try { trancheIdQuery.transact(transactor).unsafeRunSync }.toEither
   }
 
-  private val objectCacheByReferenceIdTimeToLive = Some(1 minutes)
+  private val objectCacheByReferenceIdTimeToLive = Some(3 minutes)
 
   private val objectCacheByReferenceId: Cache[AnyRef] =
     CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
@@ -159,7 +159,7 @@ class H2Tranches(transactor: H2Tranches.Transactor) extends Tranches[Long] {
       immutableObject: AnyRef): Option[ObjectReferenceId] =
     Option(weakObjectToReferenceIdMap.get(immutableObject))
 
-  private val topLevelObjectCacheByTrancheIdTimeToLive = Some(1 minutes)
+  private val topLevelObjectCacheByTrancheIdTimeToLive = Some(3 minutes)
 
   private val topLevelObjectCacheByTrancheId: Cache[AnyRef] =
     CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
