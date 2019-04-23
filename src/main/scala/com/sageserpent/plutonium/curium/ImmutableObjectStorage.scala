@@ -1,6 +1,5 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
-import java.util.concurrent.ConcurrentMap
 
 import cats.arrow.FunctionK
 import cats.free.FreeT
@@ -9,11 +8,7 @@ import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
-import com.google.common.collect.{
-  BiMap,
-  BiMapUsingIdentityOnForwardMappingOnly,
-  MapMaker
-}
+import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{
   CleaningSerializer,
@@ -83,55 +78,19 @@ object ImmutableObjectStorage {
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
 
-    protected val objectCacheByReferenceIdTimeToLive = Some(1 minutes)
-
-    private val objectCacheByReferenceId: Cache[AnyRef] =
-      CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
-
     def noteObject(objectReferenceId: ObjectReferenceId,
-                   immutableObject: AnyRef): Unit = {
-      implicit val cache = objectCacheByReferenceId
+                   immutableObject: AnyRef): Unit
 
-      sync.put(objectReferenceId)(immutableObject,
-                                  objectCacheByReferenceIdTimeToLive)
-    }
-
-    def objectFor(objectReferenceId: ObjectReferenceId): Option[AnyRef] = {
-      implicit val cache = objectCacheByReferenceId
-
-      sync.get(objectReferenceId)
-    }
-
-    private val weakObjectToReferenceIdMap
-      : ConcurrentMap[AnyRef, ObjectReferenceId] =
-      new MapMaker().weakKeys().makeMap[AnyRef, ObjectReferenceId]()
+    def objectFor(objectReferenceId: ObjectReferenceId): Option[AnyRef]
 
     def noteReferenceId(immutableObject: AnyRef,
-                        objectReferenceId: ObjectReferenceId): Unit = {
-      weakObjectToReferenceIdMap.put(immutableObject, objectReferenceId)
-    }
+                        objectReferenceId: ObjectReferenceId): Unit
 
-    def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
-      Option(weakObjectToReferenceIdMap.get(immutableObject))
+    def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId]
 
-    protected val topLevelObjectCacheByTrancheIdTimeToLive = Some(1 minutes)
+    def noteTopLevelObject(trancheId: TrancheId, topLevelObject: AnyRef): Unit
 
-    private val topLevelObjectCacheByTrancheId: Cache[AnyRef] =
-      CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
-
-    def noteTopLevelObject(trancheId: TrancheId,
-                           topLevelObject: AnyRef): Unit = {
-      implicit val cache = topLevelObjectCacheByTrancheId
-
-      sync.put(trancheId)(topLevelObject,
-                          topLevelObjectCacheByTrancheIdTimeToLive)
-    }
-
-    def topLevelObjectFor(trancheId: TrancheId): Option[AnyRef] = {
-      implicit val cache = topLevelObjectCacheByTrancheId
-
-      sync.get(trancheId)
-    }
+    def topLevelObjectFor(trancheId: TrancheId): Option[AnyRef]
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
