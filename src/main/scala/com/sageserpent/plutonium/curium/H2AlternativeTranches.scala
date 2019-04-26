@@ -2,8 +2,7 @@ package com.sageserpent.plutonium.curium
 
 import java.util.concurrent.ConcurrentMap
 
-import alleycats.std.all._
-import cats.effect.IO
+import cats.effect.{IO, Resource}
 import com.google.common.collect.MapMaker
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
@@ -11,120 +10,145 @@ import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
   TrancheOfData,
   Tranches
 }
-import doobie._
-import doobie.implicits._
 import scalacache._
 import scalacache.caffeine._
 import scalacache.modes.sync._
+import scalikejdbc._
 
-import scala.concurrent.duration._
 import scala.util.Try
+import scala.concurrent.duration._
 
-object H2Tranches {
-  type Transactor = doobie.util.transactor.Transactor[IO]
+object H2AlternativeTranches {
+  def dbResource(connectionPool: ConnectionPool): Resource[IO, DB] =
+    Resource.make(IO { DB(connectionPool.borrow()) })(db => IO { db.close })
 
-  val trancheCreation: ConnectionIO[Int] = sql"""
+  def setupDatabaseTables(connectionPool: ConnectionPool): IO[Unit] =
+    dbResource(connectionPool)
+      .use(db =>
+        IO {
+          db localTx { implicit session: DBSession =>
+            sql"""
                              CREATE TABLE Tranche(
                                 trancheId	              IDENTITY  PRIMARY KEY,
                                 payload		              BLOB      NOT NULL,
                                 objectReferenceIdOffset INTEGER   NOT NULL
                              )
-      """.update.run
-
-  val objectReferenceIdCreation: ConnectionIO[Int] =
-    sql"""
+      """.update.apply()
+            sql"""
            CREATE TABLE ObjectReference(
               objectReferenceId	INTEGER		PRIMARY KEY,
            	  trancheId			    BIGINT  	REFERENCES Tranche(trancheId)
            )
-         """.update.run
-
-  val objectReferenceIdIndexCreation: ConnectionIO[Int] =
-    sql"""
+         """.update.apply()
+            sql"""
          CREATE INDEX ObjectReferenceIdIndex ON ObjectReference(objectReferenceId)
-       """.update.run
+       """.update.apply()
+          }
+      })
 
-  def setupDatabaseTables(transactor: Transactor): IO[Unit] = {
-
-    val setup: ConnectionIO[Unit] = for {
-      _ <- trancheCreation
-      _ <- objectReferenceIdCreation
-      _ <- objectReferenceIdIndexCreation
-    } yield {}
-
-    setup.transact(transactor)
-  }
-
-  def dropDatabaseTables(transactor: Transactor): IO[Unit] = {
-    val dropAll: ConnectionIO[Unit] = for {
-      _ <- sql"""
+  def dropDatabaseTables(connectionPool: ConnectionPool): IO[Unit] =
+    dbResource(connectionPool)
+      .use(db =>
+        IO {
+          db localTx { implicit session: DBSession =>
+            sql"""
            DROP ALL OBJECTS
-         """.update.run
-    } yield {}
-
-    dropAll.transact(transactor)
-  }
-
-  val objectReferenceIdOffsetForNewTrancheQuery
-    : ConnectionIO[ObjectReferenceId] =
-    sql"""
-          SELECT MAX(objectReferenceId) FROM ObjectReference
-       """
-      .query[Option[ObjectReferenceId]]
-      .unique
-      .map(_.fold(0)(100 + _)) // TODO - switch back to an offset of 1.
+         """.update.apply()
+          }
+      })
 }
 
-class H2Tranches(transactor: H2Tranches.Transactor) extends Tranches[Long] {
-  import H2Tranches.objectReferenceIdOffsetForNewTrancheQuery
+class H2AlternativeTranches(connectionPool: ConnectionPool)
+    extends Tranches[Long] {
+  import H2AlternativeTranches.dbResource
 
   override def createTrancheInStorage(
       payload: Array[Byte],
       objectReferenceIdOffset: ObjectReferenceId,
       objectReferenceIds: Set[ObjectReferenceId])
-    : EitherThrowableOr[TrancheId] = {
-    val insertion: ConnectionIO[TrancheId] = for {
-      trancheId <- sql"""
+    : EitherThrowableOr[TrancheId] =
+    Try {
+      dbResource(connectionPool)
+        .use(db =>
+          IO {
+            db localTx {
+              implicit session: DBSession =>
+                val trancheId: TrancheId = sql"""
           INSERT INTO Tranche(payload, objectReferenceIdOffset) VALUES ($payload, $objectReferenceIdOffset)
-       """.update
-        .withUniqueGeneratedKeys[Long]("trancheId")
+       """.map(_.long("trancheId"))
+                  .updateAndReturnGeneratedKey
+                  .apply()
 
-      _ <- Update[(ObjectReferenceId, TrancheId)](
-        """
+                val _ = sql"""
           INSERT INTO ObjectReference(objectReferenceId, trancheId) VALUES (?, ?)
-         """).updateMany(objectReferenceIds map (_ -> trancheId))
-    } yield trancheId
+         """.batch(objectReferenceIds.toSeq map (objectReferenceId =>
+                    Seq(objectReferenceId, trancheId.toString)): _*)
+                  .apply()
 
-    Try { insertion.transact(transactor).unsafeRunSync }.toEither
-  }
+                trancheId
+            }
+        })
+        .unsafeRunSync()
+    }.toEither
 
   override def objectReferenceIdOffsetForNewTranche
     : EitherThrowableOr[ObjectReferenceId] =
     Try {
-      objectReferenceIdOffsetForNewTrancheQuery
-        .transact(transactor)
-        .unsafeRunSync
+      dbResource(connectionPool)
+        .use(db =>
+          IO {
+            db localTx { implicit session: DBSession =>
+              sql"""
+          SELECT MAX(objectReferenceId) FROM ObjectReference
+       """.map(_.intOpt(1)
+                  .fold(0)(100 + _) /* TODO - switch back to an offset of 1. */ )
+                .single()
+                .apply()
+                .get
+            }
+        })
+        .unsafeRunSync()
     }.toEither
 
   override def retrieveTranche(
-      trancheId: TrancheId): EitherThrowableOr[TrancheOfData] = {
-    val trancheOfDataQuery: ConnectionIO[TrancheOfData] =
-      sql"""
-          SELECT payload, objectReferenceIdOffset FROM Tranche WHERE $trancheId = TrancheId 
-       """.query[TrancheOfData].unique
-
-    Try { trancheOfDataQuery.transact(transactor).unsafeRunSync }.toEither
-  }
+      trancheId: TrancheId): EitherThrowableOr[TrancheOfData] =
+    Try {
+      dbResource(connectionPool)
+        .use(db =>
+          IO {
+            db localTx {
+              implicit session: DBSession =>
+                sql"""
+          SELECT payload, objectReferenceIdOffset FROM Tranche WHERE $trancheId = TrancheId
+       """.map { resultSet =>
+                    val blob = resultSet.blob("payload")
+                    TrancheOfData(payload =
+                                    blob.getBytes(1, blob.length().toInt),
+                                  objectReferenceIdOffset =
+                                    resultSet.int("objectReferenceIdOffset"))
+                  }
+                  .single()
+                  .apply()
+                  .get
+            }
+        })
+        .unsafeRunSync()
+    }.toEither
 
   override def retrieveTrancheId(
-      objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] = {
-    val trancheIdQuery: ConnectionIO[TrancheId] =
-      sql"""
-             SELECT trancheId FROM ObjectReference WHERE $objectReferenceId = objectReferenceId
-           """.query[TrancheId].unique
-
-    Try { trancheIdQuery.transact(transactor).unsafeRunSync }.toEither
-  }
+      objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] =
+    Try {
+      dbResource(connectionPool)
+        .use(db =>
+          IO {
+            db localTx { implicit session: DBSession =>
+              sql"""
+           SELECT trancheId FROM ObjectReference WHERE $objectReferenceId = objectReferenceId
+         """.map(_.long("trancheId")).single().apply().get
+            }
+        })
+        .unsafeRunSync()
+    }.toEither
 
   private val objectCacheByReferenceIdTimeToLive = Some(3 minutes)
 
@@ -177,4 +201,5 @@ class H2Tranches(transactor: H2Tranches.Transactor) extends Tranches[Long] {
 
     sync.get(trancheId)
   }
+
 }

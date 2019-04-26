@@ -182,3 +182,23 @@ class H2TranchesSpec
     with H2TranchesResource {
   "H2 tranches" should behave like tranchesBehaviour
 }
+
+object H2AlternativeTranchesResource {
+  type TrancheId = H2AlternativeTranches#TrancheId
+}
+
+trait H2AlternativeTranchesResource
+    extends TranchesResource[H2AlternativeTranchesResource.TrancheId] {
+  override val tranchesResource
+    : Resource[IO, Tranches[H2AlternativeTranchesResource.TrancheId]] =
+    H2AlternativeResource.connectionPoolResource.map(
+      connectionPool =>
+        new H2AlternativeTranches(connectionPool)
+        with TranchesContracts[H2TranchesResource.TrancheId])
+}
+
+class H2AlternativeTranchesSpec
+    extends TranchesBehaviours[H2AlternativeTranchesResource.TrancheId]
+    with H2AlternativeTranchesResource {
+  "H2 tranches" should behave like tranchesBehaviour
+}
