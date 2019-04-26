@@ -120,13 +120,10 @@ class H2AlternativeTranches(connectionPool: ConnectionPool)
               implicit session: DBSession =>
                 sql"""
           SELECT payload, objectReferenceIdOffset FROM Tranche WHERE $trancheId = TrancheId
-       """.map { resultSet =>
-                    val blob = resultSet.blob("payload")
-                    TrancheOfData(payload =
-                                    blob.getBytes(1, blob.length().toInt),
+       """.map(resultSet =>
+                    TrancheOfData(payload = resultSet.bytes("payload"),
                                   objectReferenceIdOffset =
-                                    resultSet.int("objectReferenceIdOffset"))
-                  }
+                                    resultSet.int("objectReferenceIdOffset")))
                   .single()
                   .apply()
                   .get
