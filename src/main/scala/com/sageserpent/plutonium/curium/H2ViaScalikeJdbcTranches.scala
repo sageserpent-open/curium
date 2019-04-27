@@ -1,22 +1,19 @@
 package com.sageserpent.plutonium.curium
 
-import java.util.concurrent.ConcurrentMap
+import java.util.concurrent.TimeUnit
+import java.util.{Map => JavaMap}
 
 import cats.effect.{IO, Resource}
-import com.google.common.collect.MapMaker
+import com.github.benmanes.caffeine.cache.Caffeine
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
   ObjectReferenceId,
   TrancheOfData,
   Tranches
 }
-import scalacache._
-import scalacache.caffeine._
-import scalacache.modes.sync._
 import scalikejdbc._
 
 import scala.util.Try
-import scala.concurrent.duration._
 
 object H2ViaScalikeJdbcTranches {
   def dbResource(connectionPool: ConnectionPool): Resource[IO, DB] =
@@ -147,56 +144,57 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
         .unsafeRunSync()
     }.toEither
 
-  private val objectCacheByReferenceIdTimeToLive = Some(3 minutes)
-
-  private val objectCacheByReferenceId: Cache[AnyRef] =
-    CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
+  private val referenceIdToObjectCacheBackedMap
+    : JavaMap[ObjectReferenceId, AnyRef] =
+    Caffeine.newBuilder
+      .asInstanceOf[Caffeine[ObjectReferenceId, AnyRef]] // Good grief!
+      .expireAfterAccess(30, TimeUnit.SECONDS)
+      .maximumSize(10000)
+      .build[ObjectReferenceId, AnyRef]()
+      .asMap
 
   override def noteObject(objectReferenceId: ObjectReferenceId,
                           immutableObject: AnyRef): Unit = {
-    implicit val cache = objectCacheByReferenceId
-
-    sync.put(objectReferenceId)(immutableObject,
-                                objectCacheByReferenceIdTimeToLive)
+    referenceIdToObjectCacheBackedMap.put(objectReferenceId, immutableObject)
   }
 
   override def objectFor(
       objectReferenceId: ObjectReferenceId): Option[AnyRef] = {
-    implicit val cache = objectCacheByReferenceId
-
-    sync.get(objectReferenceId)
+    Option(referenceIdToObjectCacheBackedMap.get(objectReferenceId))
   }
 
-  private val weakObjectToReferenceIdMap
-    : ConcurrentMap[AnyRef, ObjectReferenceId] =
-    new MapMaker().weakKeys().makeMap[AnyRef, ObjectReferenceId]()
+  private val objectToReferenceIdCacheBackedMap
+    : JavaMap[AnyRef, ObjectReferenceId] =
+    Caffeine.newBuilder
+      .asInstanceOf[Caffeine[AnyRef, ObjectReferenceId]] // Good grief!
+      .weakKeys()
+      .build[AnyRef, ObjectReferenceId]()
+      .asMap
 
   override def noteReferenceId(immutableObject: AnyRef,
                                objectReferenceId: ObjectReferenceId): Unit = {
-    weakObjectToReferenceIdMap.put(immutableObject, objectReferenceId)
+    objectToReferenceIdCacheBackedMap.put(immutableObject, objectReferenceId)
   }
 
   override def referenceIdFor(
       immutableObject: AnyRef): Option[ObjectReferenceId] =
-    Option(weakObjectToReferenceIdMap.get(immutableObject))
+    Option(objectToReferenceIdCacheBackedMap.get(immutableObject))
 
-  private val topLevelObjectCacheByTrancheIdTimeToLive = Some(3 minutes)
-
-  private val topLevelObjectCacheByTrancheId: Cache[AnyRef] =
-    CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
+  private val trancheToTopLevelObjectCacheBackedMap
+    : JavaMap[TrancheId, AnyRef] =
+    Caffeine.newBuilder
+      .asInstanceOf[Caffeine[TrancheId, AnyRef]] // Good grief!
+      .expireAfterAccess(30, TimeUnit.SECONDS)
+      .maximumSize(10000)
+      .build[TrancheId, AnyRef]()
+      .asMap
 
   override def noteTopLevelObject(trancheId: TrancheId,
                                   topLevelObject: AnyRef): Unit = {
-    implicit val cache = topLevelObjectCacheByTrancheId
-
-    sync.put(trancheId)(topLevelObject,
-                        topLevelObjectCacheByTrancheIdTimeToLive)
+    trancheToTopLevelObjectCacheBackedMap.put(trancheId, topLevelObject)
   }
 
   override def topLevelObjectFor(trancheId: TrancheId): Option[AnyRef] = {
-    implicit val cache = topLevelObjectCacheByTrancheId
-
-    sync.get(trancheId)
+    Option(trancheToTopLevelObjectCacheBackedMap.get(trancheId))
   }
-
 }
