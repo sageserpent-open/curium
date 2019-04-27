@@ -1,5 +1,6 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
+import java.util.concurrent.TimeUnit
 
 import cats.arrow.FunctionK
 import cats.free.FreeT
@@ -8,6 +9,7 @@ import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
+import com.github.benmanes.caffeine.cache.Caffeine
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{
@@ -36,7 +38,6 @@ import scalacache.memoization._
 import scalacache.modes.sync._
 
 import scala.collection.mutable.{Map => MutableMap}
-import scala.concurrent.duration._
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
 import scala.util.{DynamicVariable, Try}
@@ -282,7 +283,7 @@ trait ImmutableObjectStorage[TrancheId] {
   protected val tranchesImplementationName: String
 
   object proxySupport extends ProxySupport {
-    private val cacheTimeToLive = Some(10 minutes)
+    private val cacheTimeToLive = None
 
     private val memoizationConfig = MemoizationConfig(
       (fullClassName: String,
@@ -293,6 +294,11 @@ trait ImmutableObjectStorage[TrancheId] {
 
     private implicit val isNotToBeProxiedCache: Cache[Boolean] =
       CaffeineCache[Boolean](
+        Caffeine
+          .newBuilder()
+          .maximumSize(10000L)
+          .expireAfterAccess(1, TimeUnit.MINUTES)
+          .build[String, Entry[Boolean]])(
         CacheConfig.defaultCacheConfig.copy(memoization = memoizationConfig))
 
     def isNotToBeProxied(clazz: Class[_]): Boolean =

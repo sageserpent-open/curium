@@ -1,8 +1,9 @@
 package com.sageserpent.plutonium.curium
 
-import java.util.concurrent.ConcurrentMap
+import java.util.concurrent.{ConcurrentMap, TimeUnit}
 
 import cats.effect.{IO, Resource}
+import com.github.benmanes.caffeine.cache.Caffeine
 import com.google.common.collect.MapMaker
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
@@ -16,7 +17,6 @@ import scalacache.modes.sync._
 import scalikejdbc._
 
 import scala.util.Try
-import scala.concurrent.duration._
 
 object H2AlternativeTranches {
   def dbResource(connectionPool: ConnectionPool): Resource[IO, DB] =
@@ -147,10 +147,15 @@ class H2AlternativeTranches(connectionPool: ConnectionPool)
         .unsafeRunSync()
     }.toEither
 
-  private val objectCacheByReferenceIdTimeToLive = Some(3 minutes)
+  private val objectCacheByReferenceIdTimeToLive = None
 
   private val objectCacheByReferenceId: Cache[AnyRef] =
-    CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
+    CaffeineCache[AnyRef](
+      Caffeine
+        .newBuilder()
+        /*        .maximumSize(100000L)
+        .expireAfterAccess(1, TimeUnit.MINUTES)*/
+        .build[String, Entry[AnyRef]])
 
   override def noteObject(objectReferenceId: ObjectReferenceId,
                           immutableObject: AnyRef): Unit = {
@@ -180,10 +185,15 @@ class H2AlternativeTranches(connectionPool: ConnectionPool)
       immutableObject: AnyRef): Option[ObjectReferenceId] =
     Option(weakObjectToReferenceIdMap.get(immutableObject))
 
-  private val topLevelObjectCacheByTrancheIdTimeToLive = Some(3 minutes)
+  private val topLevelObjectCacheByTrancheIdTimeToLive = None
 
   private val topLevelObjectCacheByTrancheId: Cache[AnyRef] =
-    CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
+    CaffeineCache[AnyRef](
+      Caffeine
+        .newBuilder()
+        /*        .maximumSize(10000L)
+        .expireAfterAccess(1, TimeUnit.MINUTES)*/
+        .build[String, Entry[AnyRef]])
 
   override def noteTopLevelObject(trancheId: TrancheId,
                                   topLevelObject: AnyRef): Unit = {
