@@ -296,7 +296,7 @@ trait ImmutableObjectStorage[TrancheId] {
       CaffeineCache[Boolean](
         Caffeine
           .newBuilder()
-          .maximumSize(10000L)
+          .maximumSize(200L)
           .expireAfterAccess(1, TimeUnit.MINUTES)
           .build[String, Entry[Boolean]])(
         CacheConfig.defaultCacheConfig.copy(memoization = memoizationConfig))
@@ -459,13 +459,8 @@ trait ImmutableObjectStorage[TrancheId] {
       def objectWithReferenceId(
           objectReferenceId: ObjectReferenceId): Option[AnyRef] =
         tranches.objectFor(objectReferenceId).orElse {
-          val result = Option(referenceIdToObjectMap.get(objectReferenceId))
+          Option(referenceIdToObjectMap.get(objectReferenceId))
             .map(decodePlaceholder)
-
-          result.foreach(immutableObject =>
-            tranches.noteObject(objectReferenceId, immutableObject))
-
-          result
         }
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
@@ -532,6 +527,7 @@ trait ImmutableObjectStorage[TrancheId] {
             objectToReferenceIdMap
               .put(immutableObject, nextObjectReferenceIdToAllocate))
 
+          tranches.noteObject(nextObjectReferenceIdToAllocate, immutableObject)
           tranches.noteReferenceId(immutableObject,
                                    nextObjectReferenceIdToAllocate)
 
@@ -561,13 +557,17 @@ trait ImmutableObjectStorage[TrancheId] {
             referenceIdToObjectMap.inverse
               .forcePut(immutableObject, objectReferenceId)) match {
             case Some(aliasObjectReferenceId) =>
+              val associatedValueForAlias = AssociatedValueForAlias(
+                immutableObject)
               val _ @None = Option(
-                referenceIdToObjectMap.put(
-                  aliasObjectReferenceId,
-                  AssociatedValueForAlias(immutableObject)))
+                referenceIdToObjectMap.put(aliasObjectReferenceId,
+                                           associatedValueForAlias))
+              tranches.noteObject(aliasObjectReferenceId,
+                                  associatedValueForAlias)
             case None =>
           }
 
+          tranches.noteObject(objectReferenceId, immutableObject)
           tranches.noteReferenceId(immutableObject, objectReferenceId)
         }
 
@@ -612,11 +612,11 @@ trait ImmutableObjectStorage[TrancheId] {
 
                     referenceIdToProxyMap.put(objectReferenceId, proxy)
 
+                    tranches.noteReferenceId(proxy, objectReferenceId)
+
                     proxy
                   }
                 }
-
-          tranches.noteReferenceId(result, objectReferenceId)
 
           result
         }

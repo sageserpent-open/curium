@@ -153,8 +153,8 @@ class H2AlternativeTranches(connectionPool: ConnectionPool)
     CaffeineCache[AnyRef](
       Caffeine
         .newBuilder()
-        /*        .maximumSize(100000L)
-        .expireAfterAccess(1, TimeUnit.MINUTES)*/
+        .maximumSize(100000L)
+        .expireAfterAccess(30, TimeUnit.SECONDS)
         .build[String, Entry[AnyRef]])
 
   override def noteObject(objectReferenceId: ObjectReferenceId,
@@ -191,8 +191,8 @@ class H2AlternativeTranches(connectionPool: ConnectionPool)
     CaffeineCache[AnyRef](
       Caffeine
         .newBuilder()
-        /*        .maximumSize(10000L)
-        .expireAfterAccess(1, TimeUnit.MINUTES)*/
+        .maximumSize(100000L)
+        .expireAfterAccess(30, TimeUnit.SECONDS)
         .build[String, Entry[AnyRef]])
 
   override def noteTopLevelObject(trancheId: TrancheId,
