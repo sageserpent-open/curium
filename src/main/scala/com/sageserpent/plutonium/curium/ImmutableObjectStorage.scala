@@ -1,5 +1,6 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
+import java.util.{HashMap => JavaHashMap}
 
 import cats.arrow.FunctionK
 import cats.free.FreeT
@@ -426,13 +427,15 @@ trait ImmutableObjectStorage[TrancheId] {
         MutableMap.empty
 
       val objectToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
-        new BiMapUsingIdentityOnForwardMappingOnly
+        BiMapUsingIdentityOnForwardMappingOnly.fromReverseMap(
+          new JavaHashMap[ObjectReferenceId, AnyRef]())
 
       val referenceIdToObjectMap: BiMap[ObjectReferenceId, AnyRef] =
         objectToReferenceIdMap.inverse()
 
       val proxyToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
-        new BiMapUsingIdentityOnForwardMappingOnly
+        BiMapUsingIdentityOnForwardMappingOnly.fromReverseMap(
+          new JavaHashMap[ObjectReferenceId, AnyRef]())
 
       val referenceIdToProxyMap: BiMap[ObjectReferenceId, AnyRef] =
         proxyToReferenceIdMap.inverse()
@@ -579,36 +582,36 @@ trait ImmutableObjectStorage[TrancheId] {
           // if one has not already been introduced to the reference resolver), or look up an existing object
           // belonging to another tranche, loading that tranche if necessary.
           val result =
-            if (objectReferenceId >= objectReferenceIdOffset)
-              objectWithReferenceId(objectReferenceId).get
-            else
-              objectWithReferenceId(objectReferenceId)
-                .orElse(Option {
-                  referenceIdToProxyMap.get(objectReferenceId)
-                })
-                .getOrElse {
-                  val Right(trancheIdForExternalObjectReference) =
-                    tranches
-                      .retrieveTrancheId(objectReferenceId)
+          if (objectReferenceId >= objectReferenceIdOffset)
+            objectWithReferenceId(objectReferenceId).get
+          else
+            objectWithReferenceId(objectReferenceId)
+              .orElse(Option {
+                referenceIdToProxyMap.get(objectReferenceId)
+              })
+              .getOrElse {
+                val Right(trancheIdForExternalObjectReference) =
+                  tranches
+                    .retrieveTrancheId(objectReferenceId)
 
-                  val nonProxyClazz =
-                    proxySupport.nonProxyClazzFor(clazz)
+                val nonProxyClazz =
+                  proxySupport.nonProxyClazzFor(clazz)
 
-                  if (proxySupport.isNotToBeProxied(nonProxyClazz))
-                    retrieveUnderlying(trancheIdForExternalObjectReference,
-                                       objectReferenceId)
-                  else {
-                    val proxy =
-                      proxySupport.createProxy(
-                        nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
-                        new AcquiredState(trancheIdForExternalObjectReference,
-                                          objectReferenceId))
+                if (proxySupport.isNotToBeProxied(nonProxyClazz))
+                  retrieveUnderlying(trancheIdForExternalObjectReference,
+                                     objectReferenceId)
+                else {
+                  val proxy =
+                    proxySupport.createProxy(
+                      nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
+                      new AcquiredState(trancheIdForExternalObjectReference,
+                                        objectReferenceId))
 
-                    referenceIdToProxyMap.put(objectReferenceId, proxy)
+                  referenceIdToProxyMap.put(objectReferenceId, proxy)
 
-                    proxy
-                  }
+                  proxy
                 }
+              }
 
           tranches.noteReferenceId(result, objectReferenceId)
 
