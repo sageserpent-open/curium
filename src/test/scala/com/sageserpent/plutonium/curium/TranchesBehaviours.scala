@@ -163,42 +163,42 @@ class FakeTranchesSpec
   "Fake tranches" should behave like tranchesBehaviour
 }
 
-object H2TranchesResource {
+object H2ViaDoobieTranchesResource {
   type TrancheId = H2ViaDoobieTranches#TrancheId
 }
 
-trait H2TranchesResource
-    extends TranchesResource[H2TranchesResource.TrancheId] {
+trait H2ViaDoobieTranchesResource
+    extends TranchesResource[H2ViaDoobieTranchesResource.TrancheId] {
   override val tranchesResource
-    : Resource[IO, Tranches[H2TranchesResource.TrancheId]] =
+    : Resource[IO, Tranches[H2ViaDoobieTranchesResource.TrancheId]] =
     H2ViaDoobieResource.transactorResource.map(
       transactor =>
         new H2ViaDoobieTranches(transactor)
-        with TranchesContracts[H2TranchesResource.TrancheId])
+        with TranchesContracts[H2ViaDoobieTranchesResource.TrancheId])
 }
 
 class H2ViaDoobieTranchesSpec
-    extends TranchesBehaviours[H2TranchesResource.TrancheId]
-    with H2TranchesResource {
+    extends TranchesBehaviours[H2ViaDoobieTranchesResource.TrancheId]
+    with H2ViaDoobieTranchesResource {
   "H2 tranches" should behave like tranchesBehaviour
 }
 
-object H2AlternativeTranchesResource {
+object H2ViaScalikeJdbcTranchesResource {
   type TrancheId = H2ViaScalikeJdbcTranches#TrancheId
 }
 
-trait H2AlternativeTranchesResource
-    extends TranchesResource[H2AlternativeTranchesResource.TrancheId] {
+trait H2ViaScalikeJdbcTranchesResource
+    extends TranchesResource[H2ViaScalikeJdbcTranchesResource.TrancheId] {
   override val tranchesResource
-    : Resource[IO, Tranches[H2AlternativeTranchesResource.TrancheId]] =
+    : Resource[IO, Tranches[H2ViaScalikeJdbcTranchesResource.TrancheId]] =
     H2ViaScalikeJdbcResource.connectionPoolResource.map(
       connectionPool =>
         new H2ViaScalikeJdbcTranches(connectionPool)
-        with TranchesContracts[H2TranchesResource.TrancheId])
+        with TranchesContracts[H2ViaDoobieTranchesResource.TrancheId])
 }
 
 class H2ViaScalikeJdbcTranchesSpec
-    extends TranchesBehaviours[H2AlternativeTranchesResource.TrancheId]
-    with H2AlternativeTranchesResource {
+    extends TranchesBehaviours[H2ViaScalikeJdbcTranchesResource.TrancheId]
+    with H2ViaScalikeJdbcTranchesResource {
   "H2 tranches" should behave like tranchesBehaviour
 }

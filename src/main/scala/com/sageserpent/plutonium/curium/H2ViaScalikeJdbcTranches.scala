@@ -1,6 +1,5 @@
 package com.sageserpent.plutonium.curium
 
-import java.util.concurrent.TimeUnit
 import java.util.{Map => JavaMap}
 
 import cats.effect.{IO, Resource}
@@ -147,7 +146,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
   private val referenceIdToObjectCacheBackedMap
     : JavaMap[ObjectReferenceId, AnyRef] =
     caffeineBuilder()
-      .expireAfterAccess(30, TimeUnit.SECONDS)
+      .softValues()
       .build[ObjectReferenceId, AnyRef]()
       .asMap
 
@@ -180,7 +179,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
   private val trancheToTopLevelObjectCacheBackedMap
     : JavaMap[TrancheId, AnyRef] =
     caffeineBuilder()
-      .expireAfterAccess(30, TimeUnit.SECONDS)
+      .softValues()
       .build[TrancheId, AnyRef]()
       .asMap
 
