@@ -436,9 +436,6 @@ trait ImmutableObjectStorage[TrancheId] {
         BiMapUsingIdentityOnForwardMappingOnly.fromReverseMap(
           new JavaHashMap[ObjectReferenceId, AnyRef]())
 
-      val referenceIdToObjectMap: BiMap[ObjectReferenceId, AnyRef] =
-        objectToReferenceIdMap.inverse()
-
       val proxyToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
         BiMapUsingIdentityOnForwardMappingOnly.fromReverseMap(
           new JavaHashMap[ObjectReferenceId, AnyRef]())
@@ -462,7 +459,7 @@ trait ImmutableObjectStorage[TrancheId] {
       def objectWithReferenceId(
           objectReferenceId: ObjectReferenceId): Option[AnyRef] =
         tranches.objectFor(objectReferenceId).orElse {
-          Option(referenceIdToObjectMap.get(objectReferenceId))
+          Option(objectToReferenceIdMap.inverse().get(objectReferenceId))
             .map(decodePlaceholder)
         }
 
@@ -557,14 +554,15 @@ trait ImmutableObjectStorage[TrancheId] {
           require(objectReferenceIdOffset <= objectReferenceId)
 
           Option(
-            referenceIdToObjectMap.inverse
+            objectToReferenceIdMap
               .forcePut(immutableObject, objectReferenceId)) match {
             case Some(aliasObjectReferenceId) =>
               val associatedValueForAlias = AssociatedValueForAlias(
                 immutableObject)
               val _ @None = Option(
-                referenceIdToObjectMap.put(aliasObjectReferenceId,
-                                           associatedValueForAlias))
+                objectToReferenceIdMap
+                  .inverse()
+                  .put(aliasObjectReferenceId, associatedValueForAlias))
               tranches.noteObject(aliasObjectReferenceId,
                                   associatedValueForAlias)
             case None =>
