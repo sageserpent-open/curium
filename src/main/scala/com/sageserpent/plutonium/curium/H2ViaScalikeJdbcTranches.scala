@@ -63,7 +63,7 @@ object H2ViaScalikeJdbcTranches {
 
 class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     extends Tranches[Long] {
-  import H2ViaScalikeJdbcTranches.{dbResource, caffeineBuilder}
+  import H2ViaScalikeJdbcTranches.{caffeineBuilder, dbResource}
 
   override def createTrancheInStorage(
       payload: Array[Byte],
