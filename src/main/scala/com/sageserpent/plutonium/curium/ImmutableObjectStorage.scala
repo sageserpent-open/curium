@@ -1,6 +1,5 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
-import java.util.concurrent.TimeUnit
 import java.util.{HashMap => JavaHashMap}
 
 import cats.arrow.FunctionK
@@ -10,9 +9,9 @@ import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
-import com.github.benmanes.caffeine.cache.Caffeine
+import com.github.benmanes.caffeine.cache.Cache
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
-import com.sageserpent.plutonium.classFromType
+import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
 import com.twitter.chill.{
   CleaningSerializer,
   EmptyScalaKryoInstantiator,
@@ -33,10 +32,6 @@ import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
 import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
-import scalacache._
-import scalacache.caffeine._
-import scalacache.memoization._
-import scalacache.modes.sync._
 
 import scala.collection.mutable.{Map => MutableMap}
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
@@ -284,42 +279,29 @@ trait ImmutableObjectStorage[TrancheId] {
   protected val tranchesImplementationName: String
 
   object proxySupport extends ProxySupport {
-    private val cacheTimeToLive = None
-
-    private val memoizationConfig = MemoizationConfig(
-      (fullClassName: String,
-       constructorParameters: IndexedSeq[IndexedSeq[Any]],
-       methodName: String,
-       parameters: IndexedSeq[IndexedSeq[Any]]) =>
-        parameters.head.head.toString)
-
-    private implicit val isNotToBeProxiedCache: Cache[Boolean] =
-      CaffeineCache[Boolean](
-        Caffeine
-          .newBuilder()
-          .maximumSize(200L)
-          .expireAfterAccess(1, TimeUnit.MINUTES)
-          .build[String, Entry[Boolean]])(
-        CacheConfig.defaultCacheConfig.copy(memoization = memoizationConfig))
+    val isNotToBeProxiedCache: Cache[Class[_], Boolean] =
+      caffeineBuilder().build()
 
     def isNotToBeProxied(clazz: Class[_]): Boolean =
-      memoizeSync(cacheTimeToLive) {
-        require(!isProxyClazz(clazz))
+      isNotToBeProxiedCache.get(
+        clazz, { clazz =>
+          require(!isProxyClazz(clazz))
 
-        kryoClosureMarkerClazz.isAssignableFrom(clazz) ||
-        clazz.isSynthetic || (try {
-          clazz.isAnonymousClass ||
-          clazz.isLocalClass
-        } catch {
-          case _: InternalError =>
-            // Workaround: https://github.com/scala/bug/issues/2034 - if it throws,
-            // it's probably an inner class of some kind.
-            true
-        }) ||
-        configurableProxyExclusion(clazz) ||
-        Modifier.isFinal(clazz.getModifiers) ||
-        clazzesThatShouldNotBeProxied.exists(_.isAssignableFrom(clazz))
-      }
+          kryoClosureMarkerClazz.isAssignableFrom(clazz) ||
+          clazz.isSynthetic || (try {
+            clazz.isAnonymousClass ||
+            clazz.isLocalClass
+          } catch {
+            case _: InternalError =>
+              // Workaround: https://github.com/scala/bug/issues/2034 - if it throws,
+              // it's probably an inner class of some kind.
+              true
+          }) ||
+          configurableProxyExclusion(clazz) ||
+          Modifier.isFinal(clazz.getModifiers) ||
+          clazzesThatShouldNotBeProxied.exists(_.isAssignableFrom(clazz))
+        }
+      )
 
     private val proxySuffix =
       s"delayedLoadProxyFor${tranchesImplementationName}"

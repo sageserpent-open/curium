@@ -13,9 +13,6 @@ import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
 }
 import doobie._
 import doobie.implicits._
-import scalacache._
-import scalacache.caffeine._
-import scalacache.modes.sync._
 
 import scala.concurrent.duration._
 import scala.util.Try
@@ -127,55 +124,22 @@ class H2ViaDoobieTranches(transactor: H2ViaDoobieTranches.Transactor)
     Try { trancheIdQuery.transact(transactor).unsafeRunSync }.toEither
   }
 
-  private val objectCacheByReferenceIdTimeToLive = Some(3 minutes)
-
-  private val objectCacheByReferenceId: Cache[AnyRef] =
-    CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
-
   override def noteObject(objectReferenceId: ObjectReferenceId,
-                          immutableObject: AnyRef): Unit = {
-    implicit val cache = objectCacheByReferenceId
+                          immutableObject: AnyRef): Unit = {}
 
-    sync.put(objectReferenceId)(immutableObject,
-                                objectCacheByReferenceIdTimeToLive)
-  }
-
-  override def objectFor(
-      objectReferenceId: ObjectReferenceId): Option[AnyRef] = {
-    implicit val cache = objectCacheByReferenceId
-
-    sync.get(objectReferenceId)
-  }
-
-  private val weakObjectToReferenceIdMap
-    : ConcurrentMap[AnyRef, ObjectReferenceId] =
-    new MapMaker().weakKeys().makeMap[AnyRef, ObjectReferenceId]()
+  override def objectFor(objectReferenceId: ObjectReferenceId): Option[AnyRef] =
+    None
 
   override def noteReferenceId(immutableObject: AnyRef,
-                               objectReferenceId: ObjectReferenceId): Unit = {
-    weakObjectToReferenceIdMap.put(immutableObject, objectReferenceId)
-  }
+                               objectReferenceId: ObjectReferenceId): Unit = {}
 
   override def referenceIdFor(
-      immutableObject: AnyRef): Option[ObjectReferenceId] =
-    Option(weakObjectToReferenceIdMap.get(immutableObject))
+      immutableObject: AnyRef): Option[ObjectReferenceId] = None
 
   private val topLevelObjectCacheByTrancheIdTimeToLive = Some(3 minutes)
 
-  private val topLevelObjectCacheByTrancheId: Cache[AnyRef] =
-    CaffeineCache[AnyRef](CacheConfig.defaultCacheConfig)
-
   override def noteTopLevelObject(trancheId: TrancheId,
-                                  topLevelObject: AnyRef): Unit = {
-    implicit val cache = topLevelObjectCacheByTrancheId
+                                  topLevelObject: AnyRef): Unit = {}
 
-    sync.put(trancheId)(topLevelObject,
-                        topLevelObjectCacheByTrancheIdTimeToLive)
-  }
-
-  override def topLevelObjectFor(trancheId: TrancheId): Option[AnyRef] = {
-    implicit val cache = topLevelObjectCacheByTrancheId
-
-    sync.get(trancheId)
-  }
+  override def topLevelObjectFor(trancheId: TrancheId): Option[AnyRef] = None
 }

@@ -4,7 +4,7 @@ import java.util.concurrent.TimeUnit
 import java.util.{Map => JavaMap}
 
 import cats.effect.{IO, Resource}
-import com.github.benmanes.caffeine.cache.Caffeine
+import com.sageserpent.plutonium.caffeineBuilder
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
   ObjectReferenceId,
@@ -53,17 +53,11 @@ object H2ViaScalikeJdbcTranches {
          """.update.apply()
           }
       })
-
-  // HACK: have to workaround the freezing of the nominal type parameters
-  // to [AnyRef, AnyRef] in the Caffeine library code. Although it is a lie,
-  // the instance created as only used as a springboard to another instance.
-  def caffeineBuilder(): Caffeine[Any, Any] =
-    Caffeine.newBuilder.asInstanceOf[Caffeine[Any, Any]]
 }
 
 class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     extends Tranches[Long] {
-  import H2ViaScalikeJdbcTranches.{caffeineBuilder, dbResource}
+  import H2ViaScalikeJdbcTranches.dbResource
 
   override def createTrancheInStorage(
       payload: Array[Byte],
@@ -154,7 +148,6 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     : JavaMap[ObjectReferenceId, AnyRef] =
     caffeineBuilder()
       .expireAfterAccess(30, TimeUnit.SECONDS)
-      .maximumSize(10000)
       .build[ObjectReferenceId, AnyRef]()
       .asMap
 
@@ -188,7 +181,6 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     : JavaMap[TrancheId, AnyRef] =
     caffeineBuilder()
       .expireAfterAccess(30, TimeUnit.SECONDS)
-      .maximumSize(10000)
       .build[TrancheId, AnyRef]()
       .asMap
 
