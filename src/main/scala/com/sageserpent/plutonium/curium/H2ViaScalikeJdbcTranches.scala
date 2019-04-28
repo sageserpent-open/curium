@@ -53,11 +53,17 @@ object H2ViaScalikeJdbcTranches {
          """.update.apply()
           }
       })
+
+  // HACK: have to workaround the freezing of the nominal type parameters
+  // to [AnyRef, AnyRef] in the Caffeine library code. Although it is a lie,
+  // the instance created as only used as a springboard to another instance.
+  def caffeineBuilder(): Caffeine[Any, Any] =
+    Caffeine.newBuilder.asInstanceOf[Caffeine[Any, Any]]
 }
 
 class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     extends Tranches[Long] {
-  import H2ViaScalikeJdbcTranches.dbResource
+  import H2ViaScalikeJdbcTranches.{dbResource, caffeineBuilder}
 
   override def createTrancheInStorage(
       payload: Array[Byte],
@@ -146,8 +152,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
 
   private val referenceIdToObjectCacheBackedMap
     : JavaMap[ObjectReferenceId, AnyRef] =
-    Caffeine.newBuilder
-      .asInstanceOf[Caffeine[ObjectReferenceId, AnyRef]] // Good grief!
+    caffeineBuilder()
       .expireAfterAccess(30, TimeUnit.SECONDS)
       .maximumSize(10000)
       .build[ObjectReferenceId, AnyRef]()
@@ -165,8 +170,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
 
   private val objectToReferenceIdCacheBackedMap
     : JavaMap[AnyRef, ObjectReferenceId] =
-    Caffeine.newBuilder
-      .asInstanceOf[Caffeine[AnyRef, ObjectReferenceId]] // Good grief!
+    caffeineBuilder()
       .weakKeys()
       .build[AnyRef, ObjectReferenceId]()
       .asMap
@@ -182,8 +186,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
 
   private val trancheToTopLevelObjectCacheBackedMap
     : JavaMap[TrancheId, AnyRef] =
-    Caffeine.newBuilder
-      .asInstanceOf[Caffeine[TrancheId, AnyRef]] // Good grief!
+    caffeineBuilder()
       .expireAfterAccess(30, TimeUnit.SECONDS)
       .maximumSize(10000)
       .build[TrancheId, AnyRef]()
