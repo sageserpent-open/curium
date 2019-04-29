@@ -545,6 +545,9 @@ trait ImmutableObjectStorage[TrancheId] {
                 objectToReferenceIdMap
                   .inverse()
                   .put(aliasObjectReferenceId, associatedValueForAlias))
+              // NOTE: there is no need to call 'tranches.noteReferenceId' for the alias' associated value,
+              // it will never be passed to 'getWrittenId' - it will be object currenty referenced by
+              // 'immutableObject' instead.
               tranches.noteObject(aliasObjectReferenceId,
                                   associatedValueForAlias)
             case None =>
