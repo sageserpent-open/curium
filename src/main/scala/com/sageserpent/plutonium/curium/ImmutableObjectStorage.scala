@@ -663,6 +663,8 @@ trait ImmutableObjectStorage[TrancheId] {
               completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
                 trancheSpecificReferenceResolver,
                 immutableObject)
+              tranches.noteTopLevelObject(trancheId,
+                                          immutableObject.asInstanceOf[AnyRef])
               trancheId
             }
 
