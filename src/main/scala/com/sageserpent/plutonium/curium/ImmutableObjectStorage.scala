@@ -10,7 +10,6 @@ import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
 import com.github.benmanes.caffeine.cache.Cache
-import com.google.common.collect.{BiMap, BiMapUsingIdentityOnForwardMappingOnly}
 import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
 import com.twitter.chill.{
   CleaningSerializer,
@@ -424,28 +423,17 @@ trait ImmutableObjectStorage[TrancheId] {
         : MutableMap[TrancheId, CompletedOperationData] =
         MutableMap.empty
 
-      val objectToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
-        BiMapUsingIdentityOnForwardMappingOnly.fromReverseMap(
-          new JavaHashMap[ObjectReferenceId, AnyRef]())
-
-      private case class AssociatedValueForAlias(immutableObject: AnyRef)
-          extends AnyRef
+      val referenceIdToObjectMap: JavaMap[ObjectReferenceId, AnyRef] =
+        new JavaHashMap()
 
       private def useReferences(clazz: Class[_]): Boolean =
         !Util.isWrapperClass(clazz) &&
           clazz != classOf[String]
 
-      def decodePlaceholder(placeholderOrActualObject: AnyRef): AnyRef =
-        placeholderOrActualObject match {
-          case AssociatedValueForAlias(immutableObject) => immutableObject
-          case immutableObject @ _                      => immutableObject
-        }
-
       def objectWithReferenceId(
           objectReferenceId: ObjectReferenceId): Option[AnyRef] =
         tranches.objectFor(objectReferenceId).orElse {
-          Option(objectToReferenceIdMap.inverse().get(objectReferenceId))
-            .map(decodePlaceholder)
+          Option(referenceIdToObjectMap.get(objectReferenceId))
         }
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
@@ -500,8 +488,8 @@ trait ImmutableObjectStorage[TrancheId] {
           assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
 
           val _ @None = Option(
-            objectToReferenceIdMap
-              .put(immutableObject, nextObjectReferenceIdToAllocate))
+            referenceIdToObjectMap
+              .put(nextObjectReferenceIdToAllocate, immutableObject))
 
           tranches.noteObject(nextObjectReferenceIdToAllocate, immutableObject)
           tranches.noteReferenceId(immutableObject,
@@ -529,23 +517,9 @@ trait ImmutableObjectStorage[TrancheId] {
                                    immutableObject: AnyRef): Unit = {
           require(objectReferenceIdOffset <= objectReferenceId)
 
-          Option(
-            objectToReferenceIdMap
-              .forcePut(immutableObject, objectReferenceId)) match {
-            case Some(aliasObjectReferenceId) =>
-              val associatedValueForAlias = AssociatedValueForAlias(
-                immutableObject)
-              val _ @None = Option(
-                objectToReferenceIdMap
-                  .inverse()
-                  .put(aliasObjectReferenceId, associatedValueForAlias))
-              // NOTE: there is no need to call 'tranches.noteReferenceId' for the alias' associated value,
-              // it will never be passed to 'getWrittenId' - it will be object currenty referenced by
-              // 'immutableObject' instead.
-              tranches.noteObject(aliasObjectReferenceId,
-                                  associatedValueForAlias)
-            case None =>
-          }
+          val _ @None = Option(
+            referenceIdToObjectMap
+              .put(objectReferenceId, immutableObject))
 
           tranches.noteObject(objectReferenceId, immutableObject)
           tranches.noteReferenceId(immutableObject, objectReferenceId)
