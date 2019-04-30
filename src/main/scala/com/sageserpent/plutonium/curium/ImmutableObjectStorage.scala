@@ -418,13 +418,6 @@ trait ImmutableObjectStorage[TrancheId] {
         BiMapUsingIdentityOnForwardMappingOnly.fromReverseMap(
           new JavaHashMap[ObjectReferenceId, AnyRef]())
 
-      val proxyToReferenceIdMap: BiMap[AnyRef, ObjectReferenceId] =
-        BiMapUsingIdentityOnForwardMappingOnly.fromReverseMap(
-          new JavaHashMap[ObjectReferenceId, AnyRef]())
-
-      val referenceIdToProxyMap: BiMap[ObjectReferenceId, AnyRef] =
-        proxyToReferenceIdMap.inverse()
-
       private case class AssociatedValueForAlias(immutableObject: AnyRef)
           extends AnyRef
 
@@ -494,10 +487,8 @@ trait ImmutableObjectStorage[TrancheId] {
           // and check accordingly.
           tranches
             .referenceIdFor(immutableObject)
-            .orElse(
-              Option(proxyToReferenceIdMap.get(immutableObject))
-                .orElse(Option(objectToReferenceIdMap
-                  .get(immutableObject))))
+            .orElse(Option(objectToReferenceIdMap
+              .get(immutableObject)))
             .getOrElse(-1)
 
         override def addWrittenObject(
@@ -575,9 +566,6 @@ trait ImmutableObjectStorage[TrancheId] {
             objectWithReferenceId(objectReferenceId).get
           else
             objectWithReferenceId(objectReferenceId)
-              .orElse(Option {
-                referenceIdToProxyMap.get(objectReferenceId)
-              })
               .getOrElse {
                 val Right(trancheIdForExternalObjectReference) =
                   tranches
@@ -595,8 +583,6 @@ trait ImmutableObjectStorage[TrancheId] {
                       nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
                       new AcquiredState(trancheIdForExternalObjectReference,
                                         objectReferenceId))
-
-                  referenceIdToProxyMap.put(objectReferenceId, proxy)
 
                   tranches.noteReferenceId(proxy, objectReferenceId)
 
