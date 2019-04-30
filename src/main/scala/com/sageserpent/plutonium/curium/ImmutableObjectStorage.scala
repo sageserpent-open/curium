@@ -195,9 +195,6 @@ object ImmutableObjectStorage {
       }
     }
   }
-
-  case class CompletedOperationData(referenceResolver: ReferenceResolver,
-                                    topLevelObject: Any)
 }
 
 trait ImmutableObjectStorage[TrancheId] {
@@ -418,38 +415,34 @@ trait ImmutableObjectStorage[TrancheId] {
         }
       }
 
+      case class CompletedOperationData(
+          referenceResolver: TrancheSpecificReferenceResolver,
+          topLevelObject: Any)
+
       // TODO - cutover to using weak references, perhaps via 'WeakCache'?
       val completedOperationDataByTrancheId
         : MutableMap[TrancheId, CompletedOperationData] =
         MutableMap.empty
 
-      val referenceIdToObjectMap: JavaMap[ObjectReferenceId, AnyRef] =
-        new JavaHashMap()
-
       private def useReferences(clazz: Class[_]): Boolean =
         !Util.isWrapperClass(clazz) &&
           clazz != classOf[String]
 
-      def objectWithReferenceId(
-          objectReferenceId: ObjectReferenceId): Option[AnyRef] =
-        tranches.objectFor(objectReferenceId).orElse {
-          Option(referenceIdToObjectMap.get(objectReferenceId))
+      def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
+                             objectReferenceId: ObjectReferenceId): AnyRef = {
+        if (!completedOperationDataByTrancheId.contains(
+              trancheIdForExternalObjectReference)) {
+          val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
+          val Right(_) =
+            retrieveTrancheTopLevelObject(
+              trancheIdForExternalObjectReference,
+              placeholderClazzForTopLevelTrancheObject)
         }
 
-      def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
-                             objectReferenceId: ObjectReferenceId): AnyRef =
-        objectWithReferenceId(objectReferenceId).orElse {
-          if (!completedOperationDataByTrancheId.contains(
-                trancheIdForExternalObjectReference)) {
-            val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
-            val Right(_) =
-              retrieveTrancheTopLevelObject(
-                trancheIdForExternalObjectReference,
-                placeholderClazzForTopLevelTrancheObject)
-          }
-
-          objectWithReferenceId(objectReferenceId)
-        }.get
+        completedOperationDataByTrancheId(trancheIdForExternalObjectReference).referenceResolver
+          .objectWithReferenceId(objectReferenceId)
+          .get
+      }
 
       class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
                           objectReferenceId: ObjectReferenceId)
@@ -474,8 +467,17 @@ trait ImmutableObjectStorage[TrancheId] {
         private var numberOfAssociationsForTheRelevantTrancheOnly
           : ObjectReferenceId = 0
 
+        private val referenceIdToObjectMap: JavaMap[ObjectReferenceId, AnyRef] =
+          new JavaHashMap()
+
         def writtenObjectReferenceIds: Set[ObjectReferenceId] =
           (0 until numberOfAssociationsForTheRelevantTrancheOnly) map (objectReferenceIdOffset + _) toSet
+
+        def objectWithReferenceId(
+            objectReferenceId: ObjectReferenceId): Option[AnyRef] =
+          tranches.objectFor(objectReferenceId).orElse {
+            Option(referenceIdToObjectMap.get(objectReferenceId))
+          }
 
         override def getWrittenId(immutableObject: AnyRef): ObjectReferenceId =
           tranches
