@@ -1,6 +1,6 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
-import java.util.{HashMap => JavaHashMap}
+import java.util.{HashMap => JavaHashMap, Map => JavaMap}
 
 import cats.arrow.FunctionK
 import cats.free.FreeT
@@ -80,10 +80,20 @@ object ImmutableObjectStorage {
 
     def objectFor(objectReferenceId: ObjectReferenceId): Option[AnyRef]
 
-    def noteReferenceId(immutableObject: AnyRef,
-                        objectReferenceId: ObjectReferenceId): Unit
+    private val objectToReferenceIdCacheBackedMap
+      : JavaMap[AnyRef, ObjectReferenceId] =
+      caffeineBuilder()
+        .weakKeys()
+        .build[AnyRef, ObjectReferenceId]()
+        .asMap
 
-    def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId]
+    def noteReferenceId(immutableObject: AnyRef,
+                        objectReferenceId: ObjectReferenceId): Unit = {
+      objectToReferenceIdCacheBackedMap.put(immutableObject, objectReferenceId)
+    }
+
+    def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
+      Option(objectToReferenceIdCacheBackedMap.get(immutableObject))
 
     def noteTopLevelObject(trancheId: TrancheId, topLevelObject: AnyRef): Unit
 
@@ -480,15 +490,8 @@ trait ImmutableObjectStorage[TrancheId] {
           (0 until numberOfAssociationsForTheRelevantTrancheOnly) map (objectReferenceIdOffset + _) toSet
 
         override def getWrittenId(immutableObject: AnyRef): ObjectReferenceId =
-          // PLAN: if 'immutableObject' is a proxy, it *must* be found in 'proxyToReferenceIdMap'.
-          // Otherwise it must be a non-proxied object in 'objectToReferenceIdMap', or it must be
-          // an object not yet introduced to *any* reference resolver by either retrieval or storage.
-          // We assume that any proxy instance must have already been stored in 'proxyToReferenceIdMap',
-          // and check accordingly.
           tranches
             .referenceIdFor(immutableObject)
-            .orElse(Option(objectToReferenceIdMap
-              .get(immutableObject)))
             .getOrElse(-1)
 
         override def addWrittenObject(

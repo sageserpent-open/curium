@@ -83,13 +83,6 @@ object ImmutableObjectStorageSpec {
     override def objectFor(
         objectReferenceId: ObjectReferenceId): Option[AnyRef] = None
 
-    override def noteReferenceId(
-        immutableObject: AnyRef,
-        objectReferenceId: ObjectReferenceId): Unit = {}
-
-    override def referenceIdFor(
-        immutableObject: AnyRef): Option[ObjectReferenceId] = None
-
     override def noteTopLevelObject(trancheId: TrancheId,
                                     topLevelObject: AnyRef): Unit = {}
 

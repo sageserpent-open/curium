@@ -160,22 +160,6 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     Option(referenceIdToObjectCacheBackedMap.get(objectReferenceId))
   }
 
-  private val objectToReferenceIdCacheBackedMap
-    : JavaMap[AnyRef, ObjectReferenceId] =
-    caffeineBuilder()
-      .weakKeys()
-      .build[AnyRef, ObjectReferenceId]()
-      .asMap
-
-  override def noteReferenceId(immutableObject: AnyRef,
-                               objectReferenceId: ObjectReferenceId): Unit = {
-    objectToReferenceIdCacheBackedMap.put(immutableObject, objectReferenceId)
-  }
-
-  override def referenceIdFor(
-      immutableObject: AnyRef): Option[ObjectReferenceId] =
-    Option(objectToReferenceIdCacheBackedMap.get(immutableObject))
-
   private val trancheToTopLevelObjectCacheBackedMap
     : JavaMap[TrancheId, AnyRef] =
     caffeineBuilder()
