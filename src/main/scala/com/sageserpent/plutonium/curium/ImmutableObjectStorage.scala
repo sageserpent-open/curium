@@ -1,5 +1,6 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
+import java.util.concurrent.TimeUnit
 import java.util.{HashMap => JavaHashMap, Map => JavaMap}
 
 import cats.arrow.FunctionK
@@ -96,7 +97,11 @@ object ImmutableObjectStorage {
 
     private val trancheIdToCompletedOperationCacheBackedMap
       : JavaMap[TrancheId, CompletedOperation] =
-      caffeineBuilder().softValues().build[TrancheId, CompletedOperation].asMap
+      caffeineBuilder()
+        .softValues()
+        .expireAfterAccess(10, TimeUnit.SECONDS)
+        .build[TrancheId, CompletedOperation]
+        .asMap
 
     def noteCompletedOperation(trancheId: TrancheId,
                                completedOperation: CompletedOperation): Unit = {
