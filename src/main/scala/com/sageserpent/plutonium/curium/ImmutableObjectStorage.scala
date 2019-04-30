@@ -74,11 +74,6 @@ object ImmutableObjectStorage {
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
 
-    def noteObject(objectReferenceId: ObjectReferenceId,
-                   immutableObject: AnyRef): Unit
-
-    def objectFor(objectReferenceId: ObjectReferenceId): Option[AnyRef]
-
     private val objectToReferenceIdCacheBackedMap
       : JavaMap[AnyRef, ObjectReferenceId] =
       caffeineBuilder()
@@ -93,10 +88,6 @@ object ImmutableObjectStorage {
 
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
       Option(objectToReferenceIdCacheBackedMap.get(immutableObject))
-
-    def noteTopLevelObject(trancheId: TrancheId, topLevelObject: AnyRef): Unit
-
-    def topLevelObjectFor(trancheId: TrancheId): Option[AnyRef]
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
@@ -475,9 +466,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
         def objectWithReferenceId(
             objectReferenceId: ObjectReferenceId): Option[AnyRef] =
-          tranches.objectFor(objectReferenceId).orElse {
-            Option(referenceIdToObjectMap.get(objectReferenceId))
-          }
+          Option(referenceIdToObjectMap.get(objectReferenceId))
 
         override def getWrittenId(immutableObject: AnyRef): ObjectReferenceId =
           tranches
@@ -493,7 +482,6 @@ trait ImmutableObjectStorage[TrancheId] {
             referenceIdToObjectMap
               .put(nextObjectReferenceIdToAllocate, immutableObject))
 
-          tranches.noteObject(nextObjectReferenceIdToAllocate, immutableObject)
           tranches.noteReferenceId(immutableObject,
                                    nextObjectReferenceIdToAllocate)
 
@@ -523,7 +511,6 @@ trait ImmutableObjectStorage[TrancheId] {
             referenceIdToObjectMap
               .put(objectReferenceId, immutableObject))
 
-          tranches.noteObject(objectReferenceId, immutableObject)
           tranches.noteReferenceId(immutableObject, objectReferenceId)
         }
 
@@ -628,28 +615,19 @@ trait ImmutableObjectStorage[TrancheId] {
               completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
                 trancheSpecificReferenceResolver,
                 immutableObject)
-              tranches.noteTopLevelObject(trancheId,
-                                          immutableObject.asInstanceOf[AnyRef])
               trancheId
             }
 
           case retrieve @ Retrieve(trancheId, clazz) =>
-            tranches
-              .topLevelObjectFor(trancheId)
-              .orElse(
-                completedOperationDataByTrancheId
-                  .get(trancheId)
-                  .map(_.topLevelObject))
+            completedOperationDataByTrancheId
+              .get(trancheId)
+              .map(_.topLevelObject)
               .fold {
                 for {
                   topLevelObject <- retrieveTrancheTopLevelObject[X](trancheId,
                                                                      clazz)
-                } yield {
-                  tranches.noteTopLevelObject(
-                    trancheId,
-                    topLevelObject.asInstanceOf[AnyRef])
-                  topLevelObject
-                }
+                } yield topLevelObject
+
               }(_.asInstanceOf[X].pure[EitherThrowableOr])
         }
     }

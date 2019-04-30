@@ -76,17 +76,6 @@ object ImmutableObjectStorageSpec {
     override def objectReferenceIdOffsetForNewTranche
       : EitherThrowableOr[ObjectReferenceId] =
       _objectReferenceIdOffsetForNewTranche.pure[EitherThrowableOr]
-
-    override def noteObject(objectReferenceId: ObjectReferenceId,
-                            immutableObject: AnyRef): Unit = {}
-
-    override def objectFor(
-        objectReferenceId: ObjectReferenceId): Option[AnyRef] = None
-
-    override def noteTopLevelObject(trancheId: TrancheId,
-                                    topLevelObject: AnyRef): Unit = {}
-
-    override def topLevelObjectFor(trancheId: TrancheId): Option[AnyRef] = None
   }
 
   type TrancheId = FakeTranches#TrancheId

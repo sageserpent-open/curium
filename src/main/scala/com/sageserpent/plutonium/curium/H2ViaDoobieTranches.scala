@@ -123,23 +123,4 @@ class H2ViaDoobieTranches(transactor: H2ViaDoobieTranches.Transactor)
 
     Try { trancheIdQuery.transact(transactor).unsafeRunSync }.toEither
   }
-
-  override def noteObject(objectReferenceId: ObjectReferenceId,
-                          immutableObject: AnyRef): Unit = {}
-
-  override def objectFor(objectReferenceId: ObjectReferenceId): Option[AnyRef] =
-    None
-
-  override def noteReferenceId(immutableObject: AnyRef,
-                               objectReferenceId: ObjectReferenceId): Unit = {}
-
-  override def referenceIdFor(
-      immutableObject: AnyRef): Option[ObjectReferenceId] = None
-
-  private val topLevelObjectCacheByTrancheIdTimeToLive = Some(3 minutes)
-
-  override def noteTopLevelObject(trancheId: TrancheId,
-                                  topLevelObject: AnyRef): Unit = {}
-
-  override def topLevelObjectFor(trancheId: TrancheId): Option[AnyRef] = None
 }

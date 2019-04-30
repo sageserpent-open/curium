@@ -142,37 +142,4 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
         })
         .unsafeRunSync()
     }.toEither
-
-  private val referenceIdToObjectCacheBackedMap
-    : JavaMap[ObjectReferenceId, AnyRef] =
-    caffeineBuilder()
-      .softValues()
-      .build[ObjectReferenceId, AnyRef]()
-      .asMap
-
-  override def noteObject(objectReferenceId: ObjectReferenceId,
-                          immutableObject: AnyRef): Unit = {
-    referenceIdToObjectCacheBackedMap.put(objectReferenceId, immutableObject)
-  }
-
-  override def objectFor(
-      objectReferenceId: ObjectReferenceId): Option[AnyRef] = {
-    Option(referenceIdToObjectCacheBackedMap.get(objectReferenceId))
-  }
-
-  private val trancheToTopLevelObjectCacheBackedMap
-    : JavaMap[TrancheId, AnyRef] =
-    caffeineBuilder()
-      .softValues()
-      .build[TrancheId, AnyRef]()
-      .asMap
-
-  override def noteTopLevelObject(trancheId: TrancheId,
-                                  topLevelObject: AnyRef): Unit = {
-    trancheToTopLevelObjectCacheBackedMap.put(trancheId, topLevelObject)
-  }
-
-  override def topLevelObjectFor(trancheId: TrancheId): Option[AnyRef] = {
-    Option(trancheToTopLevelObjectCacheBackedMap.get(trancheId))
-  }
 }
