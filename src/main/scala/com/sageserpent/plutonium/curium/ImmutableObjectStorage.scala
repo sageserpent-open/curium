@@ -58,6 +58,11 @@ object ImmutableObjectStorage {
 
   type EitherThrowableOr[X] = Either[Throwable, X]
 
+  trait CompletedOperation {
+    def topLevelObject: Any
+    def objectWithReferenceId(objectReferenceId: ObjectReferenceId): AnyRef
+  }
+
   trait Tranches[TrancheIdImplementation] {
     type TrancheId = TrancheIdImplementation
 
@@ -88,6 +93,20 @@ object ImmutableObjectStorage {
 
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
       Option(objectToReferenceIdCacheBackedMap.get(immutableObject))
+
+    private val trancheIdToCompletedOperationCacheBackedMap
+      : JavaMap[TrancheId, CompletedOperation] =
+      caffeineBuilder().softValues().build[TrancheId, CompletedOperation].asMap
+
+    def noteCompletedOperation(trancheId: TrancheId,
+                               completedOperation: CompletedOperation): Unit = {
+      trancheIdToCompletedOperationCacheBackedMap.put(trancheId,
+                                                      completedOperation)
+    }
+
+    def completedOperationFor(
+        trancheId: TrancheId): Option[CompletedOperation] =
+      Option(trancheIdToCompletedOperationCacheBackedMap.get(trancheId))
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
@@ -406,34 +425,36 @@ trait ImmutableObjectStorage[TrancheId] {
         }
       }
 
-      case class CompletedOperationData(
-          referenceResolver: TrancheSpecificReferenceResolver,
-          topLevelObject: Any)
-
-      // TODO - cutover to using weak references, perhaps via 'WeakCache'?
-      val completedOperationDataByTrancheId
-        : MutableMap[TrancheId, CompletedOperationData] =
-        MutableMap.empty
+      class CompleteOperationImplementation(
+          override val topLevelObject: Any,
+          trancheSpecificReferenceResolver: TrancheSpecificReferenceResolver)
+          extends CompletedOperation {
+        override def objectWithReferenceId(
+            objectReferenceId: ObjectReferenceId): AnyRef =
+          trancheSpecificReferenceResolver
+            .objectWithReferenceId(objectReferenceId)
+            .get
+      }
 
       private def useReferences(clazz: Class[_]): Boolean =
         !Util.isWrapperClass(clazz) &&
           clazz != classOf[String]
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
-                             objectReferenceId: ObjectReferenceId): AnyRef = {
-        if (!completedOperationDataByTrancheId.contains(
-              trancheIdForExternalObjectReference)) {
-          val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
-          val Right(_) =
-            retrieveTrancheTopLevelObject(
-              trancheIdForExternalObjectReference,
-              placeholderClazzForTopLevelTrancheObject)
-        }
+                             objectReferenceId: ObjectReferenceId): AnyRef =
+        tranches
+          .completedOperationFor(trancheIdForExternalObjectReference)
+          .orElse {
+            val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
+            val Right(_) =
+              retrieveTrancheTopLevelObject(
+                trancheIdForExternalObjectReference,
+                placeholderClazzForTopLevelTrancheObject)
 
-        completedOperationDataByTrancheId(trancheIdForExternalObjectReference).referenceResolver
-          .objectWithReferenceId(objectReferenceId)
+            tranches.completedOperationFor(trancheIdForExternalObjectReference)
+          }
           .get
-      }
+          .objectWithReferenceId(objectReferenceId)
 
       class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
                           objectReferenceId: ObjectReferenceId)
@@ -583,9 +604,11 @@ trait ImmutableObjectStorage[TrancheId] {
                 kryoPool.fromBytes(tranche.payload)
               }
 
-            completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
-              trancheSpecificReferenceResolver,
-              deserialized)
+            tranches.noteCompletedOperation(trancheId,
+                                            new CompleteOperationImplementation(
+                                              deserialized,
+                                              trancheSpecificReferenceResolver))
+
             clazz.cast(deserialized)
           }.toEither
         } yield result
@@ -612,15 +635,18 @@ trait ImmutableObjectStorage[TrancheId] {
                     trancheSpecificReferenceResolver.writtenObjectReferenceIds)
               }
             } yield {
-              completedOperationDataByTrancheId += trancheId -> CompletedOperationData(
-                trancheSpecificReferenceResolver,
-                immutableObject)
+              tranches.noteCompletedOperation(
+                trancheId,
+                new CompleteOperationImplementation(
+                  immutableObject,
+                  trancheSpecificReferenceResolver))
+
               trancheId
             }
 
           case retrieve @ Retrieve(trancheId, clazz) =>
-            completedOperationDataByTrancheId
-              .get(trancheId)
+            tranches
+              .completedOperationFor(trancheId)
               .map(_.topLevelObject)
               .fold {
                 for {

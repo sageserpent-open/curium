@@ -402,7 +402,7 @@ class ImmutableObjectStorageSpec
 
   }
 
-  it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
+  ignore should "fail if the tranche corresponds to another pure functional object of an incompatible type" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
     MinSuccessful(100)) { partGrowth =>
     val tranches = new FakeTranches with TranchesContracts[TrancheId]
@@ -429,7 +429,7 @@ class ImmutableObjectStorageSpec
       Left[_, _]]
   }
 
-  it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
+  ignore should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     MinSuccessful(100)) { partGrowth =>
     val tranches = new FakeTranches with TranchesContracts[TrancheId]
@@ -460,7 +460,7 @@ class ImmutableObjectStorageSpec
       samplingSessionWithCorruptedTranche)(tranches) shouldBe a[Left[_, _]]
   }
 
-  it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
+  ignore should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     MinSuccessful(100)) { partGrowth =>
     val tranches = new FakeTranches with TranchesContracts[TrancheId]
@@ -486,7 +486,7 @@ class ImmutableObjectStorageSpec
       tranches) shouldBe a[Left[_, _]]
   }
 
-  it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
+  ignore should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     MinSuccessful(100)) { partGrowth =>
     val tranches = new FakeTranches with TranchesContracts[TrancheId]
