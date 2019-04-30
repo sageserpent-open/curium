@@ -10,7 +10,7 @@ import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
-import com.github.benmanes.caffeine.cache.Cache
+import com.github.benmanes.caffeine.cache.{Cache, Expiry, Weigher}
 import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
 import com.twitter.chill.{
   CleaningSerializer,
@@ -62,6 +62,7 @@ object ImmutableObjectStorage {
   trait CompletedOperation {
     def topLevelObject: Any
     def objectWithReferenceId(objectReferenceId: ObjectReferenceId): AnyRef
+    def payloadSize: Int
   }
 
   trait Tranches[TrancheIdImplementation] {
@@ -95,11 +96,36 @@ object ImmutableObjectStorage {
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
       Option(objectToReferenceIdCacheBackedMap.get(immutableObject))
 
+    val maximumExpiryTimeInNanoseconds = TimeUnit.MINUTES.toNanos(1L)
+
+    val expiry: Expiry[TrancheId, CompletedOperation] =
+      new Expiry[TrancheId, CompletedOperation] {
+        private def expiryDuration(completedOperation: CompletedOperation) =
+          ((1.0 - 1.0 / (1 max completedOperation.payloadSize)) * maximumExpiryTimeInNanoseconds).toLong
+
+        override def expireAfterCreate(key: TrancheId,
+                                       value: CompletedOperation,
+                                       currentTime: Long): Long =
+          expiryDuration(value)
+
+        override def expireAfterUpdate(key: TrancheId,
+                                       value: CompletedOperation,
+                                       currentTime: Long,
+                                       currentDuration: Long): Long =
+          expiryDuration(value)
+
+        override def expireAfterRead(key: TrancheId,
+                                     value: CompletedOperation,
+                                     currentTime: Long,
+                                     currentDuration: Long): Long =
+          expiryDuration(value)
+      }
+
     private val trancheIdToCompletedOperationCacheBackedMap
       : JavaMap[TrancheId, CompletedOperation] =
       caffeineBuilder()
         .softValues()
-        .expireAfterAccess(10, TimeUnit.SECONDS)
+        .expireAfter(expiry)
         .build[TrancheId, CompletedOperation]
         .asMap
 
@@ -432,7 +458,8 @@ trait ImmutableObjectStorage[TrancheId] {
 
       class CompleteOperationImplementation(
           override val topLevelObject: Any,
-          trancheSpecificReferenceResolver: TrancheSpecificReferenceResolver)
+          trancheSpecificReferenceResolver: TrancheSpecificReferenceResolver,
+          override val payloadSize: Int)
           extends CompletedOperation {
         override def objectWithReferenceId(
             objectReferenceId: ObjectReferenceId): AnyRef =
@@ -612,7 +639,8 @@ trait ImmutableObjectStorage[TrancheId] {
             tranches.noteCompletedOperation(trancheId,
                                             new CompleteOperationImplementation(
                                               deserialized,
-                                              trancheSpecificReferenceResolver))
+                                              trancheSpecificReferenceResolver,
+                                              tranche.payload.length))
 
             clazz.cast(deserialized)
           }.toEither
@@ -626,25 +654,22 @@ trait ImmutableObjectStorage[TrancheId] {
               trancheSpecificReferenceResolver = new TrancheSpecificReferenceResolver(
                 objectReferenceIdOffsetForNewTranche)
               with ReferenceResolverContracts
-              trancheId <- {
-                val serializedRepresentation: Array[Byte] =
-                  sessionReferenceResolver.withValue(
-                    Some(trancheSpecificReferenceResolver)) {
-                    kryoPool.toBytesWithClass(immutableObject)
-                  }
-
-                tranches
-                  .createTrancheInStorage(
-                    serializedRepresentation,
-                    objectReferenceIdOffsetForNewTranche,
-                    trancheSpecificReferenceResolver.writtenObjectReferenceIds)
-              }
+              serializedRepresentation: Array[Byte] = sessionReferenceResolver
+                .withValue(Some(trancheSpecificReferenceResolver)) {
+                  kryoPool.toBytesWithClass(immutableObject)
+                }
+              trancheId <- tranches
+                .createTrancheInStorage(
+                  serializedRepresentation,
+                  objectReferenceIdOffsetForNewTranche,
+                  trancheSpecificReferenceResolver.writtenObjectReferenceIds)
             } yield {
               tranches.noteCompletedOperation(
                 trancheId,
                 new CompleteOperationImplementation(
                   immutableObject,
-                  trancheSpecificReferenceResolver))
+                  trancheSpecificReferenceResolver,
+                  serializedRepresentation.length))
 
               trancheId
             }
