@@ -96,12 +96,24 @@ object ImmutableObjectStorage {
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
       Option(objectToReferenceIdCacheBackedMap.get(immutableObject))
 
-    val maximumExpiryTimeInNanoseconds = TimeUnit.MINUTES.toNanos(1L)
+    val minimumExpiryTimeInNanoseconds = TimeUnit.SECONDS.toNanos(10L)
+    val maximumExpiryTimeInNanoseconds = TimeUnit.MINUTES.toNanos(10L)
 
     val expiry: Expiry[TrancheId, CompletedOperation] =
       new Expiry[TrancheId, CompletedOperation] {
-        private def expiryDuration(completedOperation: CompletedOperation) =
-          ((1.0 - 1.0 / (1 max completedOperation.payloadSize)) * maximumExpiryTimeInNanoseconds).toLong
+        private var minimumPayloadSize: Int = 1
+        private var maximumPayloadSize: Int = 1
+
+        private def expiryDuration(completedOperation: CompletedOperation) = {
+          val payloadSize = completedOperation.payloadSize
+
+          minimumPayloadSize = minimumPayloadSize min payloadSize
+          maximumPayloadSize = maximumPayloadSize max payloadSize
+
+          ((payloadSize.toDouble - minimumPayloadSize) / (maximumPayloadSize - minimumPayloadSize) *
+            (maximumExpiryTimeInNanoseconds - minimumExpiryTimeInNanoseconds) +
+            minimumExpiryTimeInNanoseconds).toLong
+        }
 
         override def expireAfterCreate(key: TrancheId,
                                        value: CompletedOperation,
