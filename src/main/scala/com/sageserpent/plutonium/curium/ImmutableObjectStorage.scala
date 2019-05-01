@@ -97,7 +97,7 @@ object ImmutableObjectStorage {
       Option(objectToReferenceIdCacheBackedMap.get(immutableObject))
 
     val minimumExpiryTimeInNanoseconds = TimeUnit.SECONDS.toNanos(10L)
-    val maximumExpiryTimeInNanoseconds = TimeUnit.MINUTES.toNanos(10L)
+    val maximumExpiryTimeInNanoseconds = TimeUnit.MINUTES.toNanos(1L)
 
     val expiry: Expiry[TrancheId, CompletedOperation] =
       new Expiry[TrancheId, CompletedOperation] {
