@@ -602,31 +602,29 @@ trait ImmutableObjectStorage[TrancheId] {
 
           if (objectReferenceId >= objectReferenceIdOffset)
             objectWithReferenceId(objectReferenceId).get
-          else
-            objectWithReferenceId(objectReferenceId)
-              .getOrElse {
-                val Right(trancheIdForExternalObjectReference) =
-                  tranches
-                    .retrieveTrancheId(objectReferenceId)
+          else {
+            val Right(trancheIdForExternalObjectReference) =
+              tranches
+                .retrieveTrancheId(objectReferenceId)
 
-                val nonProxyClazz =
-                  proxySupport.nonProxyClazzFor(clazz)
+            val nonProxyClazz =
+              proxySupport.nonProxyClazzFor(clazz)
 
-                if (proxySupport.isNotToBeProxied(nonProxyClazz))
-                  retrieveUnderlying(trancheIdForExternalObjectReference,
-                                     objectReferenceId)
-                else {
-                  val proxy =
-                    proxySupport.createProxy(
-                      nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
-                      new AcquiredState(trancheIdForExternalObjectReference,
-                                        objectReferenceId))
+            if (proxySupport.isNotToBeProxied(nonProxyClazz))
+              retrieveUnderlying(trancheIdForExternalObjectReference,
+                                 objectReferenceId)
+            else {
+              val proxy =
+                proxySupport.createProxy(
+                  nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
+                  new AcquiredState(trancheIdForExternalObjectReference,
+                                    objectReferenceId))
 
-                  tranches.noteReferenceId(proxy, objectReferenceId)
+              tranches.noteReferenceId(proxy, objectReferenceId)
 
-                  proxy
-                }
-              }
+              proxy
+            }
+          }
         }
 
         override def setKryo(kryo: Kryo): Unit = {}
