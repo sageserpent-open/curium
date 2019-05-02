@@ -229,6 +229,12 @@ object ImmutableObjectStorage {
     def nonProxyClazzFor(clazz: Class[_]): Class[_] =
       if (isProxyClazz(clazz))
         clazz.getSuperclass
+      else if ((clazz.getName.contains("plutonium") || clazz.getName.contains(
+                 "scala") || clazz.getName.contains("RangedSeq") || clazz.getName
+                 .contains("FingerTree")) && Modifier
+                 .isFinal(clazz.getModifiers))
+        clazz.getInterfaces.headOption
+          .getOrElse(nonProxyClazzFor(clazz.getSuperclass))
       else clazz
 
     val instantiatorStrategy: StdInstantiatorStrategy =
@@ -347,7 +353,7 @@ trait ImmutableObjectStorage[TrancheId] {
           require(!isProxyClazz(clazz))
 
           kryoClosureMarkerClazz.isAssignableFrom(clazz) ||
-          clazz.isSynthetic || (try {
+          clazz.isSynthetic || /*(try {
             clazz.isAnonymousClass ||
             clazz.isLocalClass
           } catch {
@@ -355,7 +361,7 @@ trait ImmutableObjectStorage[TrancheId] {
               // Workaround: https://github.com/scala/bug/issues/2034 - if it throws,
               // it's probably an inner class of some kind.
               true
-          }) ||
+          }) ||*/
           configurableProxyExclusion(clazz) ||
           Modifier.isFinal(clazz.getModifiers) ||
           clazzesThatShouldNotBeProxied.exists(_.isAssignableFrom(clazz))
@@ -370,16 +376,17 @@ trait ImmutableObjectStorage[TrancheId] {
       require(!isProxyClazz(clazz))
 
       byteBuddy
-        .`with`(new NamingStrategy.AbstractBase {
+      /*        .`with`(new NamingStrategy.AbstractBase {
           override def name(superClass: TypeDescription): String =
             s"${superClass.getSimpleName}_$proxySuffix"
-        })
+        })*/
         .subclass(clazz, ConstructorStrategy.Default.NO_CONSTRUCTORS)
         .method(ElementMatchers.any().and(ElementMatchers.isPublic()))
-        .intercept(MethodDelegation
-          .withDefaultConfiguration()
-          .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
-          .to(proxyDelayedLoading))
+        .intercept(
+          MethodDelegation
+            .withDefaultConfiguration()
+            .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
+            .to(proxyDelayedLoading))
         .defineField("acquiredState", classOf[AcquiredState])
         .implement(stateAcquisitionClazz)
         .method(ElementMatchers.named("acquire"))
