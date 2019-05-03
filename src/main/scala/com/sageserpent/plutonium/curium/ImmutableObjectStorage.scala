@@ -11,6 +11,7 @@ import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
 import com.github.benmanes.caffeine.cache.{Cache, Expiry, Weigher}
+import com.google.common.collect.{BiMap, BiMapUsingIdentityOnReverseMappingOnly}
 import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
 import com.twitter.chill.{
   CleaningSerializer,
@@ -226,11 +227,14 @@ object ImmutableObjectStorage {
     def isProxy(immutableObject: AnyRef): Boolean =
       stateAcquisitionClazz.isInstance(immutableObject)
 
+    def isClosureClazz(clazz: Class[_]): Boolean =
+      clazz.getName.indexOf('/') >= 0 // Cut and pasted from the Kryo implementation.
+
     def nonProxyClazzFor(clazz: Class[_]): Class[_] =
       if (isProxyClazz(clazz))
         clazz.getSuperclass
-      else if ((clazz.getName.contains("plutonium") || clazz.getName.contains(
-                 "scala") || clazz.getName.contains("RangedSeq") || clazz.getName
+      else if (!isClosureClazz(clazz) && (clazz.getName.contains("plutonium") || clazz.getName
+                 .contains("scala") || clazz.getName.contains("RangedSeq") || clazz.getName
                  .contains("FingerTree")) && Modifier
                  .isFinal(clazz.getModifiers))
         clazz.getInterfaces.headOption
@@ -353,6 +357,7 @@ trait ImmutableObjectStorage[TrancheId] {
           require(!isProxyClazz(clazz))
 
           kryoClosureMarkerClazz.isAssignableFrom(clazz) ||
+          isClosureClazz(clazz) ||
           clazz.isSynthetic || /*(try {
             clazz.isAnonymousClass ||
             clazz.isLocalClass
@@ -530,8 +535,9 @@ trait ImmutableObjectStorage[TrancheId] {
         private var numberOfAssociationsForTheRelevantTrancheOnly
           : ObjectReferenceId = 0
 
-        private val referenceIdToObjectMap: JavaMap[ObjectReferenceId, AnyRef] =
-          new JavaHashMap()
+        private val referenceIdToObjectMap: BiMap[ObjectReferenceId, AnyRef] =
+          BiMapUsingIdentityOnReverseMappingOnly.fromForwardMap(
+            new JavaHashMap())
 
         def writtenObjectReferenceIds: Set[ObjectReferenceId] =
           (0 until numberOfAssociationsForTheRelevantTrancheOnly) map (objectReferenceIdOffset + _) toSet
@@ -540,10 +546,18 @@ trait ImmutableObjectStorage[TrancheId] {
             objectReferenceId: ObjectReferenceId): Option[AnyRef] =
           Option(referenceIdToObjectMap.get(objectReferenceId))
 
-        override def getWrittenId(immutableObject: AnyRef): ObjectReferenceId =
-          tranches
-            .referenceIdFor(immutableObject)
+        override def getWrittenId(
+            immutableObject: AnyRef): ObjectReferenceId = {
+          val nonProxyClazz =
+            proxySupport.nonProxyClazzFor(immutableObject.getClass)
+
+          (if (proxySupport.isNotToBeProxied(nonProxyClazz))
+             Option(referenceIdToObjectMap.inverse().get(immutableObject))
+           else
+             tranches
+               .referenceIdFor(immutableObject))
             .getOrElse(-1)
+        }
 
         override def addWrittenObject(
             immutableObject: AnyRef): ObjectReferenceId = {
@@ -554,8 +568,13 @@ trait ImmutableObjectStorage[TrancheId] {
             referenceIdToObjectMap
               .put(nextObjectReferenceIdToAllocate, immutableObject))
 
-          tranches.noteReferenceId(immutableObject,
-                                   nextObjectReferenceIdToAllocate)
+          val nonProxyClazz =
+            proxySupport.nonProxyClazzFor(immutableObject.getClass)
+
+          if (!proxySupport.isNotToBeProxied(nonProxyClazz)) {
+            tranches.noteReferenceId(immutableObject,
+                                     nextObjectReferenceIdToAllocate)
+          }
 
           numberOfAssociationsForTheRelevantTrancheOnly += 1
 
@@ -583,7 +602,12 @@ trait ImmutableObjectStorage[TrancheId] {
             referenceIdToObjectMap
               .put(objectReferenceId, immutableObject))
 
-          tranches.noteReferenceId(immutableObject, objectReferenceId)
+          val nonProxyClazz =
+            proxySupport.nonProxyClazzFor(immutableObject.getClass)
+
+          if (!proxySupport.isNotToBeProxied(nonProxyClazz)) {
+            tranches.noteReferenceId(immutableObject, objectReferenceId)
+          }
         }
 
         override def getReadObject(
@@ -610,20 +634,17 @@ trait ImmutableObjectStorage[TrancheId] {
             val nonProxyClazz =
               proxySupport.nonProxyClazzFor(clazz)
 
-            if (proxySupport.isNotToBeProxied(nonProxyClazz))
-              retrieveUnderlying(trancheIdForExternalObjectReference,
-                                 objectReferenceId)
-            else {
-              val proxy =
-                proxySupport.createProxy(
-                  nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
-                  new AcquiredState(trancheIdForExternalObjectReference,
-                                    objectReferenceId))
+            assert(!proxySupport.isNotToBeProxied(nonProxyClazz))
 
-              tranches.noteReferenceId(proxy, objectReferenceId)
+            val proxy =
+              proxySupport.createProxy(
+                nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
+                new AcquiredState(trancheIdForExternalObjectReference,
+                                  objectReferenceId))
 
-              proxy
-            }
+            tranches.noteReferenceId(proxy, objectReferenceId)
+
+            proxy
           }
         }
 
