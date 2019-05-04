@@ -1,9 +1,6 @@
 package com.sageserpent.plutonium.curium
 
-import java.util.{Map => JavaMap}
-
 import cats.effect.{IO, Resource}
-import com.sageserpent.plutonium.caffeineBuilder
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
   ObjectReferenceId,
