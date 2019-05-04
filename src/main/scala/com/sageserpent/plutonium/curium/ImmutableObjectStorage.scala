@@ -229,6 +229,12 @@ object ImmutableObjectStorage {
     def nonProxyClazzFor(clazz: Class[_]): Class[_] =
       if (isProxyClazz(clazz))
         clazz.getSuperclass
+      else if ((clazz.getName.contains("plutonium") || clazz.getName.contains(
+                 "scala") || clazz.getName.contains("RangedSeq") || clazz.getName
+                 .contains("FingerTree")) && Modifier
+                 .isFinal(clazz.getModifiers))
+        clazz.getInterfaces.headOption
+          .getOrElse(nonProxyClazzFor(clazz.getSuperclass))
       else clazz
 
     val instantiatorStrategy: StdInstantiatorStrategy =
@@ -347,7 +353,7 @@ trait ImmutableObjectStorage[TrancheId] {
           require(!isProxyClazz(clazz))
 
           kryoClosureMarkerClazz.isAssignableFrom(clazz) ||
-          clazz.isSynthetic || (try {
+          clazz.isSynthetic || /*(try {
             clazz.isAnonymousClass ||
             clazz.isLocalClass
           } catch {
@@ -355,7 +361,7 @@ trait ImmutableObjectStorage[TrancheId] {
               // Workaround: https://github.com/scala/bug/issues/2034 - if it throws,
               // it's probably an inner class of some kind.
               true
-          }) ||
+          }) ||*/
           configurableProxyExclusion(clazz) ||
           Modifier.isFinal(clazz.getModifiers) ||
           clazzesThatShouldNotBeProxied.exists(_.isAssignableFrom(clazz))
@@ -370,16 +376,17 @@ trait ImmutableObjectStorage[TrancheId] {
       require(!isProxyClazz(clazz))
 
       byteBuddy
-        .`with`(new NamingStrategy.AbstractBase {
+      /*        .`with`(new NamingStrategy.AbstractBase {
           override def name(superClass: TypeDescription): String =
             s"${superClass.getSimpleName}_$proxySuffix"
-        })
+        })*/
         .subclass(clazz, ConstructorStrategy.Default.NO_CONSTRUCTORS)
         .method(ElementMatchers.any().and(ElementMatchers.isPublic()))
-        .intercept(MethodDelegation
-          .withDefaultConfiguration()
-          .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
-          .to(proxyDelayedLoading))
+        .intercept(
+          MethodDelegation
+            .withDefaultConfiguration()
+            .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
+            .to(proxyDelayedLoading))
         .defineField("acquiredState", classOf[AcquiredState])
         .implement(stateAcquisitionClazz)
         .method(ElementMatchers.named("acquire"))
@@ -595,31 +602,29 @@ trait ImmutableObjectStorage[TrancheId] {
 
           if (objectReferenceId >= objectReferenceIdOffset)
             objectWithReferenceId(objectReferenceId).get
-          else
-            objectWithReferenceId(objectReferenceId)
-              .getOrElse {
-                val Right(trancheIdForExternalObjectReference) =
-                  tranches
-                    .retrieveTrancheId(objectReferenceId)
+          else {
+            val Right(trancheIdForExternalObjectReference) =
+              tranches
+                .retrieveTrancheId(objectReferenceId)
 
-                val nonProxyClazz =
-                  proxySupport.nonProxyClazzFor(clazz)
+            val nonProxyClazz =
+              proxySupport.nonProxyClazzFor(clazz)
 
-                if (proxySupport.isNotToBeProxied(nonProxyClazz))
-                  retrieveUnderlying(trancheIdForExternalObjectReference,
-                                     objectReferenceId)
-                else {
-                  val proxy =
-                    proxySupport.createProxy(
-                      nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
-                      new AcquiredState(trancheIdForExternalObjectReference,
-                                        objectReferenceId))
+            if (proxySupport.isNotToBeProxied(nonProxyClazz))
+              retrieveUnderlying(trancheIdForExternalObjectReference,
+                                 objectReferenceId)
+            else {
+              val proxy =
+                proxySupport.createProxy(
+                  nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
+                  new AcquiredState(trancheIdForExternalObjectReference,
+                                    objectReferenceId))
 
-                  tranches.noteReferenceId(proxy, objectReferenceId)
+              tranches.noteReferenceId(proxy, objectReferenceId)
 
-                  proxy
-                }
-              }
+              proxy
+            }
+          }
         }
 
         override def setKryo(kryo: Kryo): Unit = {}
