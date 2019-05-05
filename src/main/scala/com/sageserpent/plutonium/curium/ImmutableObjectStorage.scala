@@ -10,7 +10,7 @@ import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
 import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
-import com.github.benmanes.caffeine.cache.{Cache, Expiry, Weigher}
+import com.github.benmanes.caffeine.cache.{Cache, Expiry}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnReverseMappingOnly}
 import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
 import com.twitter.chill.{
@@ -20,7 +20,8 @@ import com.twitter.chill.{
   KryoInstantiator,
   KryoPool
 }
-import net.bytebuddy.description.`type`.TypeDescription
+import de.sciss.fingertree.{FingerTree, RangedSeq}
+import net.bytebuddy.ByteBuddy
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
 import net.bytebuddy.implementation.bind.annotation.{
@@ -30,7 +31,6 @@ import net.bytebuddy.implementation.bind.annotation.{
 }
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
-import net.bytebuddy.{ByteBuddy, NamingStrategy}
 import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
@@ -233,10 +233,16 @@ object ImmutableObjectStorage {
     def nonProxyClazzFor(clazz: Class[_]): Class[_] =
       if (isProxyClazz(clazz))
         clazz.getSuperclass
-      else if (!isClosureClazz(clazz) && (clazz.getName.contains("plutonium") || clazz.getName
-                 .contains("scala") || clazz.getName.contains("RangedSeq") || clazz.getName
-                 .contains("FingerTree")) && Modifier
-                 .isFinal(clazz.getModifiers))
+      else if (Modifier
+                 .isFinal(clazz.getModifiers) &&
+               !classOf[Vector[_]].isAssignableFrom(clazz) &&
+               !Map.empty[Any, Nothing].getClass.isAssignableFrom(clazz) &&
+               (classOf[Traversable[_]]
+                 .isAssignableFrom(clazz) ||
+               classOf[RangedSeq[_, _]]
+                 .isAssignableFrom(clazz) ||
+               classOf[FingerTree[_, _]]
+                 .isAssignableFrom(clazz)))
         clazz.getInterfaces.headOption
           .getOrElse(nonProxyClazzFor(clazz.getSuperclass))
       else clazz
@@ -358,6 +364,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
           kryoClosureMarkerClazz.isAssignableFrom(clazz) ||
           isClosureClazz(clazz) ||
+          classOf[Product].isAssignableFrom(clazz) ||
           clazz.isSynthetic || /*(try {
             clazz.isAnonymousClass ||
             clazz.isLocalClass
