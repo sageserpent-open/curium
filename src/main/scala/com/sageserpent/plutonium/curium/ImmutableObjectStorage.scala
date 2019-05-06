@@ -214,11 +214,6 @@ object ImmutableObjectStorage {
      */
     val kryoClosureMarkerClazz = classOf[Closure]
 
-    val clazzesThatShouldNotBeProxied: Set[Class[_]] =
-      Set(
-        classOf[String]
-      )
-
     val stateAcquisitionClazz = classOf[StateAcquisition]
 
     def isProxyClazz(clazz: Class[_]): Boolean =
@@ -227,24 +222,9 @@ object ImmutableObjectStorage {
     def isProxy(immutableObject: AnyRef): Boolean =
       stateAcquisitionClazz.isInstance(immutableObject)
 
-    def isClosureClazz(clazz: Class[_]): Boolean =
-      clazz.getName.indexOf('/') >= 0 // Cut and pasted from the Kryo implementation.
-
     def nonProxyClazzFor(clazz: Class[_]): Class[_] =
       if (isProxyClazz(clazz))
         clazz.getSuperclass
-      else if (Modifier
-                 .isFinal(clazz.getModifiers) &&
-               !classOf[Vector[_]].isAssignableFrom(clazz) &&
-               !Map.empty[Any, Nothing].getClass.isAssignableFrom(clazz) &&
-               (classOf[Traversable[_]]
-                 .isAssignableFrom(clazz) ||
-               classOf[RangedSeq[_, _]]
-                 .isAssignableFrom(clazz) ||
-               classOf[FingerTree[_, _]]
-                 .isAssignableFrom(clazz)))
-        clazz.getInterfaces.headOption
-          .getOrElse(nonProxyClazzFor(clazz.getSuperclass))
       else clazz
 
     val instantiatorStrategy: StdInstantiatorStrategy =
@@ -267,6 +247,8 @@ object ImmutableObjectStorage {
 }
 
 trait ImmutableObjectStorage[TrancheId] {
+  storage =>
+
   import ImmutableObjectStorage._
 
   case class Store[X](immutableObject: X) extends Operation[TrancheId]
@@ -349,56 +331,102 @@ trait ImmutableObjectStorage[TrancheId] {
   private val kryoPool: KryoPool =
     KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
 
-  protected def configurableProxyExclusion(clazz: Class[_]): Boolean = false
+  protected def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = false
+
+  // NOTE: this is a potential danger area when an override is defined - returning
+  // true indicates that all uses of a proxied object can be performed via the supertype
+  // and / or interfaces. Obvious examples where this is not true would include a final
+  // class that doesn't extend an interface and only has 'AnyRef' as a superclass - how
+  // would client code do something useful with it? Scala case classes that are declared
+  // as final and form a union type hierarchy that pattern matching is performed on will
+  // also fail. The reason why this exists at all is to provide as an escape hatch for
+  // the multitude of Scala case classes declared as final that are actually used as part
+  // of an object-oriented interface hierarchy - the collection classes being the main
+  // offenders in that regard.
+  protected def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean = false
 
   protected val tranchesImplementationName: String
 
+  private def useReferences(clazz: Class[_]): Boolean =
+    !Util.isWrapperClass(clazz) &&
+      clazz != classOf[String]
+
   object proxySupport extends ProxySupport {
-    val isNotToBeProxiedCache: Cache[Class[_], Boolean] =
+    case class SuperClazzAndInterfaces(superClazz: Class[_],
+                                       interfaces: Seq[Class[_]])
+
+    val superClazzAndInterfacesCache
+      : Cache[Class[_], Option[SuperClazzAndInterfaces]] =
       caffeineBuilder().build()
 
-    def isNotToBeProxied(clazz: Class[_]): Boolean =
-      isNotToBeProxiedCache.get(
+    private def shouldNotBeProxiedAsItsOwnType(clazz: Class[_]): Boolean =
+      Modifier.isFinal(clazz.getModifiers) ||
+        clazz.isSynthetic ||
+        (try {
+          clazz.isAnonymousClass ||
+          clazz.isLocalClass
+        } catch {
+          case _: InternalError =>
+            // Workaround: https://github.com/scala/bug/issues/2034 - if it throws,
+            // it's probably an inner class of some kind.
+            true
+        })
+
+    def superClazzAndInterfacesToProxy(
+        clazz: Class[_]): Option[SuperClazzAndInterfaces] =
+      superClazzAndInterfacesCache.get(
         clazz, { clazz =>
           require(!isProxyClazz(clazz))
 
-          kryoClosureMarkerClazz.isAssignableFrom(clazz) ||
-          isClosureClazz(clazz) ||
-          classOf[Product].isAssignableFrom(clazz) ||
-          clazz.isSynthetic || /*(try {
-            clazz.isAnonymousClass ||
-            clazz.isLocalClass
-          } catch {
-            case _: InternalError =>
-              // Workaround: https://github.com/scala/bug/issues/2034 - if it throws,
-              // it's probably an inner class of some kind.
-              true
-          }) ||*/
-          configurableProxyExclusion(clazz) ||
-          Modifier.isFinal(clazz.getModifiers) ||
-          clazzesThatShouldNotBeProxied.exists(_.isAssignableFrom(clazz))
+          val clazzShouldNotBeProxiedAtAll = kryoClosureMarkerClazz.isAssignableFrom(
+            clazz) || !useReferences(clazz) || isExcludedFromBeingProxied(clazz)
+
+          if (!clazzShouldNotBeProxiedAtAll)
+            if (shouldNotBeProxiedAsItsOwnType(clazz))
+              if (canBeProxiedViaSuperTypes(clazz)) {
+                val superClazz = clazz.getSuperclass
+                if (shouldNotBeProxiedAsItsOwnType(superClazz))
+                  superClazzAndInterfacesToProxy(superClazz).map(
+                    superClazzAndInterfaces =>
+                      superClazzAndInterfaces.copy(
+                        interfaces = superClazzAndInterfaces.interfaces ++ clazz.getInterfaces))
+                else
+                  Some(
+                    SuperClazzAndInterfaces(clazz.getSuperclass,
+                                            clazz.getInterfaces))
+              } else None
+            else Some(SuperClazzAndInterfaces(clazz, Seq.empty))
+          else None
         }
       )
 
     private val proxySuffix =
       s"delayedLoadProxyFor${tranchesImplementationName}"
 
-    private def createProxyClass[X <: AnyRef](clazz: Class[X]): Class[X] = {
+    private def createProxyClass(
+        superClazzAndInterfaces: SuperClazzAndInterfaces): Class[_] = {
       // We should never end up having to make chains of delegating proxies!
-      require(!isProxyClazz(clazz))
+      require(!isProxyClazz(superClazzAndInterfaces.superClazz))
 
       byteBuddy
       /*        .`with`(new NamingStrategy.AbstractBase {
           override def name(superClass: TypeDescription): String =
             s"${superClass.getSimpleName}_$proxySuffix"
         })*/
-        .subclass(clazz, ConstructorStrategy.Default.NO_CONSTRUCTORS)
+        .subclass(superClazzAndInterfaces.superClazz,
+                  ConstructorStrategy.Default.NO_CONSTRUCTORS)
         .method(ElementMatchers.any().and(ElementMatchers.isPublic()))
         .intercept(
           MethodDelegation
             .withDefaultConfiguration()
             .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
             .to(proxyDelayedLoading))
+        .implement(superClazzAndInterfaces.interfaces: _*)
+        .method(ElementMatchers.any().and(ElementMatchers.isPublic()))
+        .intercept(MethodDelegation
+          .withDefaultConfiguration()
+          .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
+          .to(proxyDelayedLoading))
         .defineField("acquiredState", classOf[AcquiredState])
         .implement(stateAcquisitionClazz)
         .method(ElementMatchers.named("acquire"))
@@ -406,20 +434,21 @@ trait ImmutableObjectStorage[TrancheId] {
         .make
         .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
         .getLoaded
-        .asInstanceOf[Class[X]]
     }
 
     private val cachedProxyClassInstantiators
-      : MutableMap[Class[_ <: AnyRef], ObjectInstantiator[_ <: AnyRef]] =
+      : MutableMap[SuperClazzAndInterfaces, ObjectInstantiator[_]] =
       MutableMap.empty
 
-    def createProxy(clazz: Class[_ <: AnyRef],
+    def createProxy(superClazzAndInterfaces: SuperClazzAndInterfaces,
                     acquiredState: AcquiredState): AnyRef = {
       val proxyClassInstantiator =
         synchronized {
-          cachedProxyClassInstantiators.getOrElseUpdate(clazz, {
-            instantiatorStrategy.newInstantiatorOf(createProxyClass(clazz))
-          })
+          cachedProxyClassInstantiators.getOrElseUpdate(
+            superClazzAndInterfaces, {
+              instantiatorStrategy.newInstantiatorOf(
+                createProxyClass(superClazzAndInterfaces))
+            })
         }
 
       val proxy = proxyClassInstantiator
@@ -427,7 +456,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
       proxy.asInstanceOf[StateAcquisition].acquire(acquiredState)
 
-      proxy
+      proxy.asInstanceOf[AnyRef]
     }
   }
 
@@ -499,10 +528,6 @@ trait ImmutableObjectStorage[TrancheId] {
             .get
       }
 
-      private def useReferences(clazz: Class[_]): Boolean =
-        !Util.isWrapperClass(clazz) &&
-          clazz != classOf[String]
-
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
                              objectReferenceId: ObjectReferenceId): AnyRef =
         tranches
@@ -558,7 +583,9 @@ trait ImmutableObjectStorage[TrancheId] {
           val nonProxyClazz =
             proxySupport.nonProxyClazzFor(immutableObject.getClass)
 
-          (if (proxySupport.isNotToBeProxied(nonProxyClazz))
+          (if (proxySupport
+                 .superClazzAndInterfacesToProxy(nonProxyClazz)
+                 .isEmpty)
              Option(referenceIdToObjectMap.inverse().get(immutableObject))
            else
              tranches
@@ -578,7 +605,9 @@ trait ImmutableObjectStorage[TrancheId] {
           val nonProxyClazz =
             proxySupport.nonProxyClazzFor(immutableObject.getClass)
 
-          if (!proxySupport.isNotToBeProxied(nonProxyClazz)) {
+          if (proxySupport
+                .superClazzAndInterfacesToProxy(nonProxyClazz)
+                .isDefined) {
             tranches.noteReferenceId(immutableObject,
                                      nextObjectReferenceIdToAllocate)
           }
@@ -612,7 +641,9 @@ trait ImmutableObjectStorage[TrancheId] {
           val nonProxyClazz =
             proxySupport.nonProxyClazzFor(immutableObject.getClass)
 
-          if (!proxySupport.isNotToBeProxied(nonProxyClazz)) {
+          if (proxySupport
+                .superClazzAndInterfacesToProxy(nonProxyClazz)
+                .isDefined) {
             tranches.noteReferenceId(immutableObject, objectReferenceId)
           }
         }
@@ -641,11 +672,12 @@ trait ImmutableObjectStorage[TrancheId] {
             val nonProxyClazz =
               proxySupport.nonProxyClazzFor(clazz)
 
-            assert(!proxySupport.isNotToBeProxied(nonProxyClazz))
+            val Some(superClazzAndInterfaces) =
+              proxySupport.superClazzAndInterfacesToProxy(nonProxyClazz)
 
             val proxy =
               proxySupport.createProxy(
-                nonProxyClazz.asInstanceOf[Class[_ <: AnyRef]],
+                superClazzAndInterfaces,
                 new AcquiredState(trancheIdForExternalObjectReference,
                                   objectReferenceId))
 
@@ -660,7 +692,7 @@ trait ImmutableObjectStorage[TrancheId] {
         override def reset(): Unit = {}
 
         override def useReferences(clazz: Class[_]): Boolean =
-          thisSessionInterpreter.useReferences(clazz)
+          storage.useReferences(clazz)
       }
 
       def retrieveTrancheTopLevelObject[X](
