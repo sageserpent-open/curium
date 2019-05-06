@@ -34,6 +34,7 @@ import net.bytebuddy.{ByteBuddy, NamingStrategy}
 import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
+import scala.collection.mutable
 import scala.collection.mutable.{Map => MutableMap}
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
@@ -403,6 +404,12 @@ trait ImmutableObjectStorage[TrancheId] {
     private val proxySuffix =
       s"delayedLoadProxyFor${tranchesImplementationName}"
 
+    private implicit val superClazzBagConfiguration =
+      mutable.HashedBagConfiguration.compact[TypeDescription]
+
+    private val superClazzBag: mutable.HashBag[TypeDescription] =
+      mutable.HashBag.empty
+
     private def createProxyClass(
         superClazzAndInterfaces: SuperClazzAndInterfaces): Class[_] = {
       // We should never end up having to make chains of delegating proxies!
@@ -410,8 +417,10 @@ trait ImmutableObjectStorage[TrancheId] {
 
       byteBuddy
         .`with`(new NamingStrategy.AbstractBase {
-          override def name(superClass: TypeDescription): String =
-            s"${superClass.getSimpleName}_$proxySuffix"
+          override def name(superClass: TypeDescription): String = {
+            superClazzBag += superClass
+            s"${superClass.getSimpleName}_${superClazzBag(superClass).size}_$proxySuffix"
+          }
         })
         .subclass(superClazzAndInterfaces.superClazz,
                   ConstructorStrategy.Default.NO_CONSTRUCTORS)
