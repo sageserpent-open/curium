@@ -554,6 +554,10 @@ trait ImmutableObjectStorage[TrancheId] {
             val result = retrieveUnderlying(trancheIdForExternalObjectReference,
                                             objectReferenceId)
 
+            println(
+              s"Using tranche: $trancheIdForExternalObjectReference to bring in: ${System
+                .identityHashCode(result)} of type: ${result.getClass}")
+
             _underlying = Some(result)
 
             result
@@ -718,6 +722,9 @@ trait ImmutableObjectStorage[TrancheId] {
                                               trancheSpecificReferenceResolver,
                                               tranche.payload.length))
 
+            println(s"Loaded payload of size: ${tranche.payload.length} for top level object: ${System
+              .identityHashCode(deserialized)} of type: ${deserialized.getClass}")
+
             clazz.cast(deserialized)
           }.toEither
         } yield result
@@ -746,6 +753,10 @@ trait ImmutableObjectStorage[TrancheId] {
                   immutableObject,
                   trancheSpecificReferenceResolver,
                   serializedRepresentation.length))
+
+              println(
+                s"Stored payload of size: ${serializedRepresentation.length} for top level object: ${System
+                  .identityHashCode(immutableObject)} of type: ${immutableObject.getClass}")
 
               trancheId
             }
