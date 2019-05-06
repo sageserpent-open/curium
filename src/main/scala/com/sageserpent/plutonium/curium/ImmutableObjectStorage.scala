@@ -507,8 +507,16 @@ trait ImmutableObjectStorage[TrancheId] {
             proxySupport.nonProxyClazzFor(clazz)
 
           assert(
-            nonProxyClazz
-              .isInstance(result) || proxySupport.kryoClosureMarkerClazz
+            (proxySupport.superClazzAndInterfacesToProxy(nonProxyClazz) match {
+              case Some(
+                  proxySupport.SuperClazzAndInterfaces(superClazz,
+                                                       interfaces)) =>
+                superClazz.isInstance(result) && interfaces.forall(
+                  _.isInstance(result))
+              case None =>
+                nonProxyClazz
+                  .isInstance(result)
+            }) || proxySupport.kryoClosureMarkerClazz
               .isAssignableFrom(nonProxyClazz))
 
           result
