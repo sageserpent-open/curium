@@ -20,8 +20,7 @@ import com.twitter.chill.{
   KryoInstantiator,
   KryoPool
 }
-import de.sciss.fingertree.{FingerTree, RangedSeq}
-import net.bytebuddy.ByteBuddy
+import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
 import net.bytebuddy.implementation.bind.annotation.{
@@ -31,6 +30,7 @@ import net.bytebuddy.implementation.bind.annotation.{
 }
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
+import net.bytebuddy.{ByteBuddy, NamingStrategy}
 import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
@@ -409,18 +409,17 @@ trait ImmutableObjectStorage[TrancheId] {
       require(!isProxyClazz(superClazzAndInterfaces.superClazz))
 
       byteBuddy
-      /*        .`with`(new NamingStrategy.AbstractBase {
+        .`with`(new NamingStrategy.AbstractBase {
           override def name(superClass: TypeDescription): String =
             s"${superClass.getSimpleName}_$proxySuffix"
-        })*/
+        })
         .subclass(superClazzAndInterfaces.superClazz,
                   ConstructorStrategy.Default.NO_CONSTRUCTORS)
         .method(ElementMatchers.any().and(ElementMatchers.isPublic()))
-        .intercept(
-          MethodDelegation
-            .withDefaultConfiguration()
-            .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
-            .to(proxyDelayedLoading))
+        .intercept(MethodDelegation
+          .withDefaultConfiguration()
+          .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
+          .to(proxyDelayedLoading))
         .implement(superClazzAndInterfaces.interfaces: _*)
         .method(ElementMatchers.any().and(ElementMatchers.isPublic()))
         .intercept(MethodDelegation
