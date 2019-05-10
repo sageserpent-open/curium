@@ -98,6 +98,20 @@ object ImmutableObjectStorage {
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
       Option(objectToReferenceIdCacheBackedMap.get(immutableObject))
 
+    private val referenceIdToProxyCacheBackedMap
+      : JavaMap[ObjectReferenceId, AnyRef] = caffeineBuilder()
+      .weakValues()
+      .build[ObjectReferenceId, AnyRef]()
+      .asMap
+
+    def noteProxy(objectReferenceId: ObjectReferenceId,
+                  immutableObject: AnyRef): Unit = {
+      referenceIdToProxyCacheBackedMap.put(objectReferenceId, immutableObject)
+    }
+
+    def proxyFor(objectReferenceId: ObjectReferenceId) =
+      Option(referenceIdToProxyCacheBackedMap.get(objectReferenceId))
+
     val minimumExpiryTimeInNanoseconds = TimeUnit.SECONDS.toNanos(10L)
     val maximumExpiryTimeInNanoseconds = TimeUnit.MINUTES.toNanos(2L)
 
@@ -680,27 +694,29 @@ trait ImmutableObjectStorage[TrancheId] {
 
           if (objectReferenceId >= objectReferenceIdOffset)
             objectWithReferenceId(objectReferenceId).get
-          else {
-            val Right(trancheIdForExternalObjectReference) =
-              tranches
-                .retrieveTrancheId(objectReferenceId)
+          else
+            tranches.proxyFor(objectReferenceId).getOrElse {
+              val Right(trancheIdForExternalObjectReference) =
+                tranches
+                  .retrieveTrancheId(objectReferenceId)
 
-            val nonProxyClazz =
-              proxySupport.nonProxyClazzFor(clazz)
+              val nonProxyClazz =
+                proxySupport.nonProxyClazzFor(clazz)
 
-            val Some(superClazzAndInterfaces) =
-              proxySupport.superClazzAndInterfacesToProxy(nonProxyClazz)
+              val Some(superClazzAndInterfaces) =
+                proxySupport.superClazzAndInterfacesToProxy(nonProxyClazz)
 
-            val proxy =
-              proxySupport.createProxy(
-                superClazzAndInterfaces,
-                new AcquiredState(trancheIdForExternalObjectReference,
-                                  objectReferenceId))
+              val proxy =
+                proxySupport.createProxy(
+                  superClazzAndInterfaces,
+                  new AcquiredState(trancheIdForExternalObjectReference,
+                                    objectReferenceId))
 
-            tranches.noteReferenceId(proxy, objectReferenceId)
+              tranches.noteReferenceId(proxy, objectReferenceId)
+              tranches.noteProxy(objectReferenceId, proxy)
 
-            proxy
-          }
+              proxy
+            }
         }
 
         override def setKryo(kryo: Kryo): Unit = {}
