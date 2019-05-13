@@ -1,6 +1,6 @@
 package com.sageserpent.plutonium.curium
 
-import cats.effect.{IO, Resource}
+import cats.effect.IO
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
   ObjectReferenceId,
@@ -12,11 +12,8 @@ import scalikejdbc._
 import scala.util.Try
 
 object H2ViaScalikeJdbcTranches {
-  def dbResource(connectionPool: ConnectionPool): Resource[IO, DB] =
-    Resource.make(IO { DB(connectionPool.borrow()) })(db => IO { db.close })
-
   def setupDatabaseTables(connectionPool: ConnectionPool): IO[Unit] =
-    dbResource(connectionPool)
+    DBResource(connectionPool)
       .use(db =>
         IO {
           db localTx { implicit session: DBSession =>
@@ -40,7 +37,7 @@ object H2ViaScalikeJdbcTranches {
       })
 
   def dropDatabaseTables(connectionPool: ConnectionPool): IO[Unit] =
-    dbResource(connectionPool)
+    DBResource(connectionPool)
       .use(db =>
         IO {
           db localTx { implicit session: DBSession =>
@@ -53,15 +50,13 @@ object H2ViaScalikeJdbcTranches {
 
 class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     extends Tranches[Long] {
-  import H2ViaScalikeJdbcTranches.dbResource
-
   override def createTrancheInStorage(
       payload: Array[Byte],
       objectReferenceIdOffset: ObjectReferenceId,
       objectReferenceIds: Set[ObjectReferenceId])
     : EitherThrowableOr[TrancheId] =
     Try {
-      dbResource(connectionPool)
+      DBResource(connectionPool)
         .use(db =>
           IO {
             db localTx {
@@ -87,7 +82,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
   override def objectReferenceIdOffsetForNewTranche
     : EitherThrowableOr[ObjectReferenceId] =
     Try {
-      dbResource(connectionPool)
+      DBResource(connectionPool)
         .use(db =>
           IO {
             db localTx { implicit session: DBSession =>
@@ -106,7 +101,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
   override def retrieveTranche(
       trancheId: TrancheId): EitherThrowableOr[TrancheOfData] =
     Try {
-      dbResource(connectionPool)
+      DBResource(connectionPool)
         .use(db =>
           IO {
             db localTx {
@@ -128,7 +123,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
   override def retrieveTrancheId(
       objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] =
     Try {
-      dbResource(connectionPool)
+      DBResource(connectionPool)
         .use(db =>
           IO {
             db localTx { implicit session: DBSession =>
