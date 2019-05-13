@@ -18,20 +18,20 @@ object H2ViaScalikeJdbcTranches {
         IO {
           db localTx { implicit session: DBSession =>
             sql"""
-                             CREATE TABLE Tranche(
-                                trancheId	              IDENTITY  PRIMARY KEY,
-                                payload		              BLOB      NOT NULL,
-                                objectReferenceIdOffset INTEGER   NOT NULL
-                             )
+             CREATE TABLE Tranche(
+                trancheId	              IDENTITY  PRIMARY KEY,
+                payload		              BLOB      NOT NULL,
+                objectReferenceIdOffset INTEGER   NOT NULL
+             )
       """.update.apply()
             sql"""
-           CREATE TABLE ObjectReference(
-              objectReferenceId	INTEGER		PRIMARY KEY,
-           	  trancheId			    BIGINT  	REFERENCES Tranche(trancheId)
-           )
+             CREATE TABLE ObjectReference(
+                objectReferenceId	INTEGER		PRIMARY KEY,
+                trancheId			    BIGINT  	REFERENCES Tranche(trancheId)
+             )
          """.update.apply()
             sql"""
-         CREATE INDEX ObjectReferenceIdIndex ON ObjectReference(objectReferenceId)
+             CREATE INDEX ObjectReferenceIdIndex ON ObjectReference(objectReferenceId)
        """.update.apply()
           }
       })
@@ -42,7 +42,7 @@ object H2ViaScalikeJdbcTranches {
         IO {
           db localTx { implicit session: DBSession =>
             sql"""
-           DROP ALL OBJECTS
+             DROP ALL OBJECTS
          """.update.apply()
           }
       })

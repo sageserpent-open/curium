@@ -188,10 +188,11 @@ object H2ViaScalikeJdbcTranchesResource {
 }
 
 trait H2ViaScalikeJdbcTranchesResource
-    extends TranchesResource[H2ViaScalikeJdbcTranchesResource.TrancheId] {
+    extends TranchesResource[H2ViaScalikeJdbcTranchesResource.TrancheId]
+    with H2ViaScalikeJdbcDatabaseSetupResource {
   override val tranchesResource
     : Resource[IO, Tranches[H2ViaScalikeJdbcTranchesResource.TrancheId]] =
-    H2ViaScalikeJdbcResource.connectionPoolResource.map(
+    connectionPoolResource.map(
       connectionPool =>
         new H2ViaScalikeJdbcTranches(connectionPool)
         with TranchesContracts[H2ViaDoobieTranchesResource.TrancheId])
