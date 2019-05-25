@@ -188,7 +188,7 @@ object ImmutableObjectStorage {
         objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
         _ <- Try {
           for (objectReferenceId <- objectReferenceIds) {
-            require(objectReferenceIdOffsetForNewTranche <= objectReferenceId)
+            assert(objectReferenceIdOffsetForNewTranche <= objectReferenceId)
           }
         }.toEither
         id <- super.createTrancheInStorage(payload,
@@ -201,7 +201,7 @@ object ImmutableObjectStorage {
       for {
         objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
         _ <- Try {
-          require(objectReferenceIdOffsetForNewTranche > objectReferenceId)
+          assert(objectReferenceIdOffsetForNewTranche > objectReferenceId)
         }.toEither
         trancheId <- super.retrieveTrancheId(objectReferenceId)
       } yield trancheId
