@@ -558,6 +558,19 @@ trait ImmutableObjectStorage[TrancheId] {
             .get
       }
 
+      private case class AssociatedValueForAlias(immutableObject: AnyRef)
+          extends AnyRef
+
+      private def useReferences(clazz: Class[_]): Boolean =
+        !Util.isWrapperClass(clazz) &&
+          clazz != classOf[String]
+
+      def decodePlaceholder(placeholderOrActualObject: AnyRef): AnyRef =
+        placeholderOrActualObject match {
+          case AssociatedValueForAlias(immutableObject) => immutableObject
+          case immutableObject @ _                      => immutableObject
+        }
+
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
                              objectReferenceId: ObjectReferenceId): AnyRef =
         tranches
@@ -664,9 +677,18 @@ trait ImmutableObjectStorage[TrancheId] {
                                    immutableObject: AnyRef): Unit = {
           require(objectReferenceIdOffset <= objectReferenceId)
 
-          val _ @None = Option(
+          Option(
             referenceIdToObjectMap
-              .put(objectReferenceId, immutableObject))
+              .inverse()
+              .forcePut(immutableObject, objectReferenceId)) match {
+            case Some(aliasObjectReferenceId) =>
+              val associatedValueForAlias = AssociatedValueForAlias(
+                immutableObject)
+              val _ @None = Option(
+                referenceIdToObjectMap
+                  .put(aliasObjectReferenceId, associatedValueForAlias))
+            case None =>
+          }
 
           val nonProxyClazz =
             proxySupport.nonProxyClazzFor(immutableObject.getClass)
