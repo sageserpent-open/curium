@@ -5,5 +5,6 @@ import scalikejdbc.{ConnectionPool, DB}
 
 object DBResource {
   def apply(connectionPool: ConnectionPool): Resource[IO, DB] =
-    Resource.make(IO { DB(connectionPool.borrow()) })(db => IO { db.close })
+    Resource.make(IO { DB(connectionPool.borrow()) })(dbConnection =>
+      IO { dbConnection.close })
 }
