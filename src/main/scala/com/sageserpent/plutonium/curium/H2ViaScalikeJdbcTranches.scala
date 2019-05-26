@@ -63,8 +63,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
               implicit session: DBSession =>
                 val trancheId: TrancheId = sql"""
           INSERT INTO Tranche(payload, objectReferenceIdOffset) VALUES ($payload, $objectReferenceIdOffset)
-       """.map(_.long("trancheId"))
-                  .updateAndReturnGeneratedKey
+       """.updateAndReturnGeneratedKey("trancheId")
                   .apply()
 
                 val _ = sql"""
