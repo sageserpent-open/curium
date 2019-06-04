@@ -30,9 +30,6 @@ object H2ViaScalikeJdbcTranches {
                 trancheId			    BIGINT  	REFERENCES Tranche(trancheId)
              )
          """.update.apply()
-            sql"""
-             CREATE INDEX ObjectReferenceIdIndex ON ObjectReference(objectReferenceId)
-       """.update.apply()
           }
       })
 
