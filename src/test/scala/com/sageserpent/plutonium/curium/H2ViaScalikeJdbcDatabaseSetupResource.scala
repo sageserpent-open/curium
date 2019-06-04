@@ -6,7 +6,13 @@ import java.nio.file.{FileVisitResult, FileVisitor, Files, Path}
 import java.util.UUID
 
 import cats.effect.{IO, Resource}
-import scalikejdbc.{Commons2ConnectionPool, ConnectionPool}
+import com.zaxxer.hikari.HikariDataSource
+import javax.sql.DataSource
+import scalikejdbc.{
+  Commons2ConnectionPool,
+  ConnectionPool,
+  DataSourceConnectionPool
+}
 
 trait ConnectionPoolResource {
   def connectionPoolResource: Resource[IO, ConnectionPool] =
@@ -44,13 +50,16 @@ trait ConnectionPoolResource {
           )
       })
       databaseName <- Resource.liftF(IO { UUID.randomUUID().toString })
+      dataSource <- Resource.make(IO {
+        val result = new HikariDataSource()
+        result.setJdbcUrl(
+          s"jdbc:h2:file:${databaseDirectory.resolve(databaseName)}")
+        result.setUsername("automatedTestIdentity")
+        result
+      })(dataSource => IO { dataSource.close() })
       connectionPool <- Resource.make(IO {
-        Class.forName("org.h2.Driver")
-        new Commons2ConnectionPool(
-          url = s"jdbc:h2:file:${databaseDirectory.resolve(databaseName)}",
-          user = "automatedTestIdentity",
-          password = "")
-      })(connectionPool => IO { connectionPool.close })
+        new DataSourceConnectionPool(dataSource)
+      })(_ => IO {})
     } yield connectionPool
 }
 
