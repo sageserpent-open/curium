@@ -554,7 +554,6 @@ trait ImmutableObjectStorage[TrancheId] {
             objectReferenceId: ObjectReferenceId): AnyRef =
           trancheSpecificReferenceResolver
             .objectWithReferenceId(objectReferenceId)
-            .get
       }
 
       private case class AssociatedValueForAlias(immutableObject: AnyRef)
@@ -617,8 +616,10 @@ trait ImmutableObjectStorage[TrancheId] {
           (0 until numberOfAssociationsForTheRelevantTrancheOnly) map (objectReferenceIdOffset + _) toSet
 
         def objectWithReferenceId(
-            objectReferenceId: ObjectReferenceId): Option[AnyRef] =
+            objectReferenceId: ObjectReferenceId): AnyRef =
           Option(referenceIdToObjectMap.get(objectReferenceId))
+            .map(decodePlaceholder)
+            .get
 
         override def getWrittenId(
             immutableObject: AnyRef): ObjectReferenceId = {
@@ -714,7 +715,7 @@ trait ImmutableObjectStorage[TrancheId] {
           // belonging to another tranche, loading that tranche if necessary.
 
           if (objectReferenceId >= objectReferenceIdOffset)
-            objectWithReferenceId(objectReferenceId).get
+            objectWithReferenceId(objectReferenceId)
           else
             tranches.proxyFor(objectReferenceId).getOrElse {
               val Right(trancheIdForExternalObjectReference) =
