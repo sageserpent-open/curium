@@ -112,12 +112,12 @@ object ImmutableObjectStorage {
     def proxyFor(objectReferenceId: ObjectReferenceId) =
       Option(referenceIdToProxyCacheBackedMap.get(objectReferenceId))
 
-    val minimumExpiryTimeInNanoseconds = TimeUnit.SECONDS.toNanos(10L)
-    val maximumExpiryTimeInNanoseconds = TimeUnit.MINUTES.toNanos(2L)
+    val minimumExpiryTimeInNanoseconds = TimeUnit.SECONDS.toNanos(1L)
+    val maximumExpiryTimeInNanoseconds = TimeUnit.SECONDS.toNanos(5L)
 
     val expiry: Expiry[TrancheId, CompletedOperation] =
       new Expiry[TrancheId, CompletedOperation] {
-        private var minimumPayloadSize: Int = 1
+        private var minimumPayloadSize: Int = Int.MaxValue
         private var maximumPayloadSize: Int = 1
 
         private def expiryDuration(completedOperation: CompletedOperation) = {
@@ -152,7 +152,6 @@ object ImmutableObjectStorage {
     private val trancheIdToCompletedOperationCacheBackedMap
       : JavaMap[TrancheId, CompletedOperation] =
       caffeineBuilder()
-        .softValues()
         .expireAfter(expiry)
         .build[TrancheId, CompletedOperation]
         .asMap
