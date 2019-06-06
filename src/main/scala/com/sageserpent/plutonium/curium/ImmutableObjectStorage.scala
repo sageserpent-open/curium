@@ -1,7 +1,7 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
 import java.util.concurrent.TimeUnit
-import java.util.{HashMap => JavaHashMap, Map => JavaMap}
+import java.util.{HashMap => JavaHashMap}
 
 import cats.arrow.FunctionK
 import cats.free.FreeT
@@ -67,6 +67,8 @@ object ImmutableObjectStorage {
     def payloadSize: Int
   }
 
+  val tranchesCleaningCycle = 5000
+
   trait Tranches[TrancheIdImplementation] {
     type TrancheId = TrancheIdImplementation
 
@@ -83,88 +85,60 @@ object ImmutableObjectStorage {
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
 
-    private val objectToReferenceIdCacheBackedMap
-      : JavaMap[AnyRef, ObjectReferenceId] =
+    private val objectToReferenceIdCacheBackedCache
+      : Cache[AnyRef, ObjectReferenceId] =
       caffeineBuilder()
         .weakKeys()
         .build[AnyRef, ObjectReferenceId]()
-        .asMap
 
     def noteReferenceId(immutableObject: AnyRef,
                         objectReferenceId: ObjectReferenceId): Unit = {
-      objectToReferenceIdCacheBackedMap.put(immutableObject, objectReferenceId)
+      objectToReferenceIdCacheBackedCache.put(immutableObject,
+                                              objectReferenceId)
     }
 
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
-      Option(objectToReferenceIdCacheBackedMap.get(immutableObject))
+      Option(objectToReferenceIdCacheBackedCache.getIfPresent(immutableObject))
 
-    private val referenceIdToProxyCacheBackedMap
-      : JavaMap[ObjectReferenceId, AnyRef] = caffeineBuilder()
+    private val referenceIdToProxyCacheBackedCache
+      : Cache[ObjectReferenceId, AnyRef] = caffeineBuilder()
       .weakValues()
       .build[ObjectReferenceId, AnyRef]()
-      .asMap
 
     def noteProxy(objectReferenceId: ObjectReferenceId,
                   immutableObject: AnyRef): Unit = {
-      referenceIdToProxyCacheBackedMap.put(objectReferenceId, immutableObject)
+      referenceIdToProxyCacheBackedCache.put(objectReferenceId, immutableObject)
     }
 
     def proxyFor(objectReferenceId: ObjectReferenceId) =
-      Option(referenceIdToProxyCacheBackedMap.get(objectReferenceId))
+      Option(referenceIdToProxyCacheBackedCache.getIfPresent(objectReferenceId))
 
-    val minimumExpiryTimeInNanoseconds = TimeUnit.MILLISECONDS.toNanos(100L)
-    val maximumExpiryTimeInNanoseconds = TimeUnit.MILLISECONDS.toNanos(500L)
-
-    val expiry: Expiry[TrancheId, CompletedOperation] =
-      new Expiry[TrancheId, CompletedOperation] {
-        private var minimumPayloadSize: Int = Int.MaxValue
-        private var maximumPayloadSize: Int = 1
-
-        private def expiryDuration(completedOperation: CompletedOperation) = {
-          val payloadSize = completedOperation.payloadSize
-
-          minimumPayloadSize = minimumPayloadSize min payloadSize
-          maximumPayloadSize = maximumPayloadSize max payloadSize
-
-          ((payloadSize.toDouble - minimumPayloadSize) / (maximumPayloadSize - minimumPayloadSize) *
-            (maximumExpiryTimeInNanoseconds - minimumExpiryTimeInNanoseconds) +
-            minimumExpiryTimeInNanoseconds).toLong
-        }
-
-        override def expireAfterCreate(key: TrancheId,
-                                       value: CompletedOperation,
-                                       currentTime: Long): Long =
-          expiryDuration(value)
-
-        override def expireAfterUpdate(key: TrancheId,
-                                       value: CompletedOperation,
-                                       currentTime: Long,
-                                       currentDuration: Long): Long =
-          expiryDuration(value)
-
-        override def expireAfterRead(key: TrancheId,
-                                     value: CompletedOperation,
-                                     currentTime: Long,
-                                     currentDuration: Long): Long =
-          expiryDuration(value)
-      }
-
-    private val trancheIdToCompletedOperationCacheBackedMap
-      : JavaMap[TrancheId, CompletedOperation] =
+    private val trancheIdToCompletedOperationCacheBackedCache
+      : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
-        .expireAfter(expiry)
+        .maximumSize(100)
         .build[TrancheId, CompletedOperation]
-        .asMap
 
     def noteCompletedOperation(trancheId: TrancheId,
                                completedOperation: CompletedOperation): Unit = {
-      trancheIdToCompletedOperationCacheBackedMap.put(trancheId,
-                                                      completedOperation)
+      trancheIdToCompletedOperationCacheBackedCache.put(trancheId,
+                                                        completedOperation)
     }
 
     def completedOperationFor(
         trancheId: TrancheId): Option[CompletedOperation] =
-      Option(trancheIdToCompletedOperationCacheBackedMap.get(trancheId))
+      Option(
+        trancheIdToCompletedOperationCacheBackedCache.getIfPresent(trancheId))
+
+    var cleaningCount = 0
+
+    def springClean(): Unit = {
+      cleaningCount = (1 + cleaningCount) % tranchesCleaningCycle
+      if (0 == cleaningCount) {
+        referenceIdToProxyCacheBackedCache.cleanUp()
+        objectToReferenceIdCacheBackedCache.cleanUp()
+      }
+    }
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
@@ -483,6 +457,8 @@ trait ImmutableObjectStorage[TrancheId] {
 
   def unsafeRun[Result](session: Session[Result])(
       tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
+    tranches.springClean()
+
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
 
