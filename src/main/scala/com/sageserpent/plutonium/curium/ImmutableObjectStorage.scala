@@ -112,8 +112,8 @@ object ImmutableObjectStorage {
     def proxyFor(objectReferenceId: ObjectReferenceId) =
       Option(referenceIdToProxyCacheBackedMap.get(objectReferenceId))
 
-    val minimumExpiryTimeInNanoseconds = TimeUnit.SECONDS.toNanos(1L)
-    val maximumExpiryTimeInNanoseconds = TimeUnit.SECONDS.toNanos(5L)
+    val minimumExpiryTimeInNanoseconds = TimeUnit.MILLISECONDS.toNanos(100L)
+    val maximumExpiryTimeInNanoseconds = TimeUnit.MILLISECONDS.toNanos(500L)
 
     val expiry: Expiry[TrancheId, CompletedOperation] =
       new Expiry[TrancheId, CompletedOperation] {
