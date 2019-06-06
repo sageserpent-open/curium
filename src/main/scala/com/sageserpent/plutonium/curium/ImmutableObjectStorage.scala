@@ -67,8 +67,6 @@ object ImmutableObjectStorage {
     def payloadSize: Int
   }
 
-  val tranchesCleaningCycle = 5000
-
   trait Tranches[TrancheIdImplementation] {
     type TrancheId = TrancheIdImplementation
 
@@ -129,16 +127,6 @@ object ImmutableObjectStorage {
         trancheId: TrancheId): Option[CompletedOperation] =
       Option(
         trancheIdToCompletedOperationCacheBackedCache.getIfPresent(trancheId))
-
-    var cleaningCount = 0
-
-    def springClean(): Unit = {
-      cleaningCount = (1 + cleaningCount) % tranchesCleaningCycle
-      if (0 == cleaningCount) {
-        referenceIdToProxyCacheBackedCache.cleanUp()
-        objectToReferenceIdCacheBackedCache.cleanUp()
-      }
-    }
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
@@ -411,13 +399,13 @@ trait ImmutableObjectStorage[TrancheId] {
         })
         .subclass(superClazzAndInterfaces.superClazz,
                   ConstructorStrategy.Default.NO_CONSTRUCTORS)
-        .method(ElementMatchers.any().and(ElementMatchers.isPublic()))
+        .method(ElementMatchers.isPublic())
         .intercept(MethodDelegation
           .withDefaultConfiguration()
           .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
           .to(proxyDelayedLoading))
         .implement(superClazzAndInterfaces.interfaces: _*)
-        .method(ElementMatchers.any().and(ElementMatchers.isPublic()))
+        .method(ElementMatchers.isPublic())
         .intercept(MethodDelegation
           .withDefaultConfiguration()
           .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
@@ -457,8 +445,6 @@ trait ImmutableObjectStorage[TrancheId] {
 
   def unsafeRun[Result](session: Session[Result])(
       tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
-    tranches.springClean()
-
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
 
