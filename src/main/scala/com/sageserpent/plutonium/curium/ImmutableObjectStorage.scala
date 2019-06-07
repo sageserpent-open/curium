@@ -1,6 +1,5 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
-import java.util.concurrent.TimeUnit
 import java.util.{HashMap => JavaHashMap}
 
 import cats.arrow.FunctionK
@@ -9,8 +8,13 @@ import cats.implicits._
 import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
-import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Serializer}
-import com.github.benmanes.caffeine.cache.{Cache, Expiry}
+import com.esotericsoftware.kryo.{
+  Kryo,
+  ReferenceResolver,
+  Registration,
+  Serializer
+}
+import com.github.benmanes.caffeine.cache.Cache
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnReverseMappingOnly}
 import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
 import com.twitter.chill.{
@@ -35,7 +39,6 @@ import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
 import scala.collection.mutable
-import scala.collection.mutable.{Map => MutableMap}
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
 import scala.util.{DynamicVariable, Try}
@@ -198,11 +201,6 @@ object ImmutableObjectStorage {
     def isProxy(immutableObject: AnyRef): Boolean =
       stateAcquisitionClazz.isInstance(immutableObject)
 
-    def nonProxyClazzFor(clazz: Class[_]): Class[_] =
-      if (isProxyClazz(clazz))
-        clazz.getSuperclass
-      else clazz
-
     val instantiatorStrategy: StdInstantiatorStrategy =
       new StdInstantiatorStrategy
 
@@ -288,7 +286,19 @@ trait ImmutableObjectStorage[TrancheId] {
   private val kryoInstantiator: KryoInstantiator =
     new EmptyScalaKryoInstantiator {
       override def newKryo(): KryoBase = {
-        val result = super.newKryo()
+        // NASTY HACK: extracted from overridden method in superclass, had to to this as
+        // neither Kryo nor Chill's Kryobase allow customization of class registration
+        // once the instance has been constructed. Sheez...
+
+        val result = new KryoBase {
+          override def getRegistration(clazz: Class[_]): Registration =
+            super.getRegistration(proxySupport.nonProxyClazzFor(clazz))
+        }
+
+        result.setRegistrationRequired(false)
+        result.setInstantiatorStrategy(
+          new org.objenesis.strategy.StdInstantiatorStrategy)
+        // ... end of nasty hack.
 
         result.setReferenceResolver(referenceResolver)
 
@@ -419,19 +429,24 @@ trait ImmutableObjectStorage[TrancheId] {
         .getLoaded
     }
 
-    private val cachedProxyClassInstantiators
-      : MutableMap[SuperClazzAndInterfaces, ObjectInstantiator[_]] =
-      MutableMap.empty
+    val cachedProxyClassInstantiators
+      : Cache[SuperClazzAndInterfaces, ObjectInstantiator[_]] =
+      caffeineBuilder().build()
 
-    def createProxy(superClazzAndInterfaces: SuperClazzAndInterfaces,
-                    acquiredState: AcquiredState): AnyRef = {
+    val proxiedClazzCache: Cache[Class[_], Class[_]] = caffeineBuilder().build()
+
+    def createProxy(clazz: Class[_], acquiredState: AcquiredState): AnyRef = {
       val proxyClassInstantiator =
         synchronized {
-          cachedProxyClassInstantiators.getOrElseUpdate(
-            superClazzAndInterfaces, {
-              instantiatorStrategy.newInstantiatorOf(
-                createProxyClass(superClazzAndInterfaces))
-            })
+          cachedProxyClassInstantiators.get(
+            superClazzAndInterfacesCache.getIfPresent(clazz).get, {
+              superClazzAndInterfaces =>
+                val proxyClazz = createProxyClass(superClazzAndInterfaces)
+
+                proxiedClazzCache.put(proxyClazz, clazz)
+                instantiatorStrategy.newInstantiatorOf(proxyClazz)
+            }
+          )
         }
 
       val proxy = proxyClassInstantiator
@@ -441,6 +456,9 @@ trait ImmutableObjectStorage[TrancheId] {
 
       proxy.asInstanceOf[AnyRef]
     }
+
+    def nonProxyClazzFor(clazz: Class[_]): Class[_] =
+      Option(proxiedClazzCache.getIfPresent(clazz)).getOrElse(clazz)
   }
 
   def unsafeRun[Result](session: Session[Result])(
@@ -687,12 +705,9 @@ trait ImmutableObjectStorage[TrancheId] {
               val nonProxyClazz =
                 proxySupport.nonProxyClazzFor(clazz)
 
-              val Some(superClazzAndInterfaces) =
-                proxySupport.superClazzAndInterfacesToProxy(nonProxyClazz)
-
               val proxy =
                 proxySupport.createProxy(
-                  superClazzAndInterfaces,
+                  nonProxyClazz,
                   new AcquiredState(trancheIdForExternalObjectReference,
                                     objectReferenceId))
 
