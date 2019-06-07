@@ -32,17 +32,6 @@ object H2ViaScalikeJdbcTranches {
          """.update.apply()
           }
       })
-
-  def dropDatabaseTables(connectionPool: ConnectionPool): IO[Unit] =
-    DBResource(connectionPool)
-      .use(db =>
-        IO {
-          db localTx { implicit session: DBSession =>
-            sql"""
-             DROP ALL OBJECTS
-         """.update.apply()
-          }
-      })
 }
 
 class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
