@@ -1,5 +1,6 @@
 package com.sageserpent.plutonium.curium
 import java.lang.reflect.Modifier
+import java.util.concurrent.TimeUnit
 import java.util.{HashMap => JavaHashMap}
 
 import cats.arrow.FunctionK
@@ -14,7 +15,7 @@ import com.esotericsoftware.kryo.{
   Registration,
   Serializer
 }
-import com.github.benmanes.caffeine.cache.Cache
+import com.github.benmanes.caffeine.cache.{Cache, Expiry}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnReverseMappingOnly}
 import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
 import com.twitter.chill.{
@@ -57,6 +58,9 @@ object ImmutableObjectStorage {
           .sameElements(payload) && this.objectReferenceIdOffset == objectReferenceIdOffset
       case _ => false
     }
+
+    override def hashCode(): ObjectReferenceId =
+      (MurmurHash3.arrayHash(payload) -> objectReferenceIdOffset).hashCode()
 
     override def toString: String =
       s"TrancheOfData(payload hash: ${MurmurHash3.arrayHash(payload)}, object reference id offset: $objectReferenceIdOffset)"
@@ -114,10 +118,47 @@ object ImmutableObjectStorage {
     def proxyFor(objectReferenceId: ObjectReferenceId) =
       Option(referenceIdToProxyCacheBackedCache.getIfPresent(objectReferenceId))
 
+    val minimumExpiryTimeInNanoseconds = TimeUnit.MILLISECONDS.toNanos(100L)
+    val maximumExpiryTimeInNanoseconds = TimeUnit.SECONDS.toNanos(2L)
+
+    val expiry: Expiry[TrancheId, CompletedOperation] =
+      new Expiry[TrancheId, CompletedOperation] {
+        private var minimumPayloadSize: Int = Int.MaxValue
+        private var maximumPayloadSize: Int = 1
+
+        private def expiryDuration(completedOperation: CompletedOperation) = {
+          val payloadSize = completedOperation.payloadSize
+
+          minimumPayloadSize = minimumPayloadSize min payloadSize
+          maximumPayloadSize = maximumPayloadSize max payloadSize
+
+          ((payloadSize.toDouble - minimumPayloadSize) / (maximumPayloadSize - minimumPayloadSize) *
+            (maximumExpiryTimeInNanoseconds - minimumExpiryTimeInNanoseconds) +
+            minimumExpiryTimeInNanoseconds).toLong
+        }
+
+        override def expireAfterCreate(key: TrancheId,
+                                       value: CompletedOperation,
+                                       currentTime: Long): Long =
+          expiryDuration(value)
+
+        override def expireAfterUpdate(key: TrancheId,
+                                       value: CompletedOperation,
+                                       currentTime: Long,
+                                       currentDuration: Long): Long =
+          expiryDuration(value)
+
+        override def expireAfterRead(key: TrancheId,
+                                     value: CompletedOperation,
+                                     currentTime: Long,
+                                     currentDuration: Long): Long =
+          expiryDuration(value)
+      }
+
     private val trancheIdToCompletedOperationCacheBackedCache
       : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
-        .maximumSize(100)
+        .expireAfter(expiry)
         .build[TrancheId, CompletedOperation]
 
     def noteCompletedOperation(trancheId: TrancheId,
