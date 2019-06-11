@@ -36,19 +36,6 @@ object H2ViaScalikeJdbcTranches {
 
 class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     extends Tranches[Long] {
-  private val cycleCountBeforeAnalysis: Int = 1000
-
-  private var cycles: Int = 0
-
-  private def noteCycle(implicit session: DBSession = AutoSession): Unit = {
-    cycles = (cycles + 1) % cycleCountBeforeAnalysis
-
-    if (0 == cycles) {
-      { val _ = sql"""ANALYZE TABLE Tranche""".execute().apply() }
-      { val _ = sql"""ANALYZE TABLE ObjectReference""".execute().apply() }
-    }
-  }
-
   override def createTrancheInStorage(
       payload: Array[Byte],
       objectReferenceIdOffset: ObjectReferenceId,
@@ -60,8 +47,6 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
           IO {
             db localTx {
               implicit session: DBSession =>
-                noteCycle
-
                 val trancheId: TrancheId = sql"""
           INSERT INTO Tranche(payload, objectReferenceIdOffset) VALUES ($payload, $objectReferenceIdOffset)
        """.updateAndReturnGeneratedKey("trancheId")
@@ -86,8 +71,6 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
         .use(db =>
           IO {
             db localTx { implicit session: DBSession =>
-              noteCycle
-
               sql"""
           SELECT MAX(objectReferenceId) FROM ObjectReference
        """.map(_.intOpt(1)
@@ -108,8 +91,6 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
           IO {
             db localTx {
               implicit session: DBSession =>
-                noteCycle
-
                 sql"""
           SELECT payload, objectReferenceIdOffset FROM Tranche WHERE $trancheId = TrancheId
        """.map(resultSet =>
@@ -131,8 +112,6 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
         .use(db =>
           IO {
             db localTx { implicit session: DBSession =>
-              noteCycle
-
               sql"""
            SELECT trancheId FROM ObjectReference WHERE $objectReferenceId = objectReferenceId
          """.map(_.long("trancheId")).single().apply().get
