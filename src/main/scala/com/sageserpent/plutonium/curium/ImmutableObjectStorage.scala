@@ -507,23 +507,20 @@ trait ImmutableObjectStorage[TrancheId] {
         abstract override def getReadObject(
             clazz: Class[_],
             objectReferenceId: ObjectReferenceId): AnyRef = {
+          require(!proxySupport.isProxyClazz(clazz))
+
           val result = super.getReadObject(clazz, objectReferenceId)
 
-          val nonProxyClazz =
-            proxySupport.nonProxyClazzFor(clazz)
-
-          assert(
-            (proxySupport.superClazzAndInterfacesToProxy(nonProxyClazz) match {
-              case Some(
-                  proxySupport.SuperClazzAndInterfaces(superClazz,
-                                                       interfaces)) =>
-                superClazz.isInstance(result) && interfaces.forall(
-                  _.isInstance(result))
-              case None =>
-                nonProxyClazz
-                  .isInstance(result)
-            }) || proxySupport.kryoClosureMarkerClazz
-              .isAssignableFrom(nonProxyClazz))
+          assert((proxySupport.superClazzAndInterfacesToProxy(clazz) match {
+            case Some(
+                proxySupport.SuperClazzAndInterfaces(superClazz, interfaces)) =>
+              superClazz.isInstance(result) && interfaces.forall(
+                _.isInstance(result))
+            case None =>
+              clazz
+                .isInstance(result)
+          }) || proxySupport.kryoClosureMarkerClazz
+            .isAssignableFrom(clazz))
 
           result
         }
@@ -629,11 +626,8 @@ trait ImmutableObjectStorage[TrancheId] {
             referenceIdToObjectMap
               .put(nextObjectReferenceIdToAllocate, immutableObject))
 
-          val nonProxyClazz =
-            proxySupport.nonProxyClazzFor(immutableObject.getClass)
-
           if (proxySupport
-                .superClazzAndInterfacesToProxy(nonProxyClazz)
+                .superClazzAndInterfacesToProxy(immutableObject.getClass)
                 .isDefined) {
             tranches.noteReferenceId(immutableObject,
                                      nextObjectReferenceIdToAllocate)
@@ -674,11 +668,8 @@ trait ImmutableObjectStorage[TrancheId] {
             case None =>
           }
 
-          val nonProxyClazz =
-            proxySupport.nonProxyClazzFor(immutableObject.getClass)
-
           if (proxySupport
-                .superClazzAndInterfacesToProxy(nonProxyClazz)
+                .superClazzAndInterfacesToProxy(immutableObject.getClass)
                 .isDefined) {
             tranches.noteReferenceId(immutableObject, objectReferenceId)
           }
@@ -706,12 +697,9 @@ trait ImmutableObjectStorage[TrancheId] {
                 tranches
                   .retrieveTrancheId(objectReferenceId)
 
-              val nonProxyClazz =
-                proxySupport.nonProxyClazzFor(clazz)
-
               val proxy =
                 proxySupport.createProxy(
-                  nonProxyClazz,
+                  clazz,
                   new AcquiredState(trancheIdForExternalObjectReference,
                                     objectReferenceId))
 
