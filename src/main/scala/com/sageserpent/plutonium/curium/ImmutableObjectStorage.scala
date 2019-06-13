@@ -386,6 +386,9 @@ trait ImmutableObjectStorage[TrancheId] {
         }
       )
 
+    def canBeProxied[Result](immutableObject: AnyRef) =
+      superClazzAndInterfacesToProxy(immutableObject.getClass).isDefined
+
     private val proxySuffix =
       s"delayedLoadProxyFor${tranchesImplementationName}"
 
@@ -540,10 +543,6 @@ trait ImmutableObjectStorage[TrancheId] {
       private case class AssociatedValueForAlias(immutableObject: AnyRef)
           extends AnyRef
 
-      private def useReferences(clazz: Class[_]): Boolean =
-        !Util.isWrapperClass(clazz) &&
-          clazz != classOf[String]
-
       def decodePlaceholder(placeholderOrActualObject: AnyRef): AnyRef =
         placeholderOrActualObject match {
           case AssociatedValueForAlias(immutableObject) => immutableObject
@@ -604,16 +603,12 @@ trait ImmutableObjectStorage[TrancheId] {
 
         override def getWrittenId(
             immutableObject: AnyRef): ObjectReferenceId = {
-          val nonProxyClazz =
-            proxySupport.nonProxyClazzFor(immutableObject.getClass)
-
-          (if (proxySupport
-                 .superClazzAndInterfacesToProxy(nonProxyClazz)
-                 .isEmpty)
-             Option(referenceIdToObjectMap.inverse().get(immutableObject))
-           else
+          (if (proxySupport.isProxy(immutableObject) || proxySupport
+                 .canBeProxied(immutableObject))
              tranches
-               .referenceIdFor(immutableObject))
+               .referenceIdFor(immutableObject)
+           else
+             Option(referenceIdToObjectMap.inverse().get(immutableObject)))
             .getOrElse(-1)
         }
 
@@ -626,9 +621,7 @@ trait ImmutableObjectStorage[TrancheId] {
             referenceIdToObjectMap
               .put(nextObjectReferenceIdToAllocate, immutableObject))
 
-          if (proxySupport
-                .superClazzAndInterfacesToProxy(immutableObject.getClass)
-                .isDefined) {
+          if (proxySupport.canBeProxied(immutableObject)) {
             tranches.noteReferenceId(immutableObject,
                                      nextObjectReferenceIdToAllocate)
           }
@@ -668,9 +661,7 @@ trait ImmutableObjectStorage[TrancheId] {
             case None =>
           }
 
-          if (proxySupport
-                .superClazzAndInterfacesToProxy(immutableObject.getClass)
-                .isDefined) {
+          if (proxySupport.canBeProxied(immutableObject)) {
             tranches.noteReferenceId(immutableObject, objectReferenceId)
           }
         }
