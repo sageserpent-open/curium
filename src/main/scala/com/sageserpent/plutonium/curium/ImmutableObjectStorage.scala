@@ -439,7 +439,11 @@ trait ImmutableObjectStorage[TrancheId] {
       val proxyClassInstantiator =
         synchronized {
           cachedProxyClassInstantiators.get(
-            superClazzAndInterfacesCache.getIfPresent(clazz).get, {
+            // TODO: there should be a test that fails if we just consult 'superClazzAndInterfacesCache'
+            // rather than ensuring that it is populated as is being done here, or at least proves that it
+            // is populated beforehand elsewhere. Specifically, what happens when a tranche is loaded into
+            // a session where a proxy class has not already been created?
+            superClazzAndInterfacesToProxy(clazz).get, {
               superClazzAndInterfaces =>
                 val proxyClazz = createProxyClass(superClazzAndInterfaces)
 
