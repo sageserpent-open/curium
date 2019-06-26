@@ -128,10 +128,8 @@ object ImmutableObjectStorage {
 
     def completedOperationFor(
         trancheId: TrancheId): Option[CompletedOperation] =
-      Timer.timed(category = "completedOperationFor") {
-        Option(
-          trancheIdToCompletedOperationCacheBackedCache.getIfPresent(trancheId))
-      }
+      Option(
+        trancheIdToCompletedOperationCacheBackedCache.getIfPresent(trancheId))
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
@@ -146,35 +144,31 @@ object ImmutableObjectStorage {
         objectReferenceIdOffset: ObjectReferenceId,
         objectReferenceIds: Set[ObjectReferenceId])
       : EitherThrowableOr[TrancheId] =
-      Timer.timed(category = "createTrancheInStorage") {
-        for {
-          _ <- Try {
-            require(
-              objectReferenceIds.isEmpty || objectReferenceIdOffset <= objectReferenceIds.min)
-          }.toEither
-          objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
-          _ <- Try {
-            for (objectReferenceId <- objectReferenceIds) {
-              assert(objectReferenceIdOffsetForNewTranche <= objectReferenceId)
-            }
-          }.toEither
-          id <- super.createTrancheInStorage(payload,
-                                             objectReferenceIdOffset,
-                                             objectReferenceIds)
-        } yield id
-      }
+      for {
+        _ <- Try {
+          require(
+            objectReferenceIds.isEmpty || objectReferenceIdOffset <= objectReferenceIds.min)
+        }.toEither
+        objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
+        _ <- Try {
+          for (objectReferenceId <- objectReferenceIds) {
+            assert(objectReferenceIdOffsetForNewTranche <= objectReferenceId)
+          }
+        }.toEither
+        id <- super.createTrancheInStorage(payload,
+                                           objectReferenceIdOffset,
+                                           objectReferenceIds)
+      } yield id
 
     abstract override def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] =
-      Timer.timed(category = "retrieveTrancheId") {
-        for {
-          objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
-          _ <- Try {
-            assert(objectReferenceIdOffsetForNewTranche > objectReferenceId)
-          }.toEither
-          trancheId <- super.retrieveTrancheId(objectReferenceId)
-        } yield trancheId
-      }
+      for {
+        objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
+        _ <- Try {
+          assert(objectReferenceIdOffsetForNewTranche > objectReferenceId)
+        }.toEither
+        trancheId <- super.retrieveTrancheId(objectReferenceId)
+      } yield trancheId
   }
 
   trait Operation[Result]
@@ -217,13 +211,9 @@ object ImmutableObjectStorage {
       def apply(
           @Pipe pipeTo: PipeForwarding,
           @FieldValue("acquiredState") acquiredState: AcquiredState
-      ): Any = Timer.timed(category = "proxyDelayedLoading.apply") {
+      ): Any = {
         val underlying: AnyRef = acquiredState.underlying
 
-        doIt(pipeTo, underlying)
-      }
-
-      private def doIt(pipeTo: PipeForwarding, underlying: AnyRef): Any = {
         pipeTo(underlying)
       }
     }
@@ -448,32 +438,31 @@ trait ImmutableObjectStorage[TrancheId] {
 
     val proxiedClazzCache: Cache[Class[_], Class[_]] = caffeineBuilder().build()
 
-    def createProxy(clazz: Class[_], acquiredState: AcquiredState): AnyRef =
-      Timer.timed(category = "createProxy") {
-        val proxyClassInstantiator =
-          synchronized {
-            cachedProxyClassInstantiators.get(
-              // TODO: there should be a test that fails if we just consult 'superClazzAndInterfacesCache'
-              // rather than ensuring that it is populated as is being done here, or at least proves that it
-              // is populated beforehand elsewhere. Specifically, what happens when a tranche is loaded into
-              // a session where a proxy class has not already been created?
-              superClazzAndInterfacesToProxy(clazz).get, {
-                superClazzAndInterfaces =>
-                  val proxyClazz = createProxyClass(superClazzAndInterfaces)
+    def createProxy(clazz: Class[_], acquiredState: AcquiredState): AnyRef = {
+      val proxyClassInstantiator =
+        synchronized {
+          cachedProxyClassInstantiators.get(
+            // TODO: there should be a test that fails if we just consult 'superClazzAndInterfacesCache'
+            // rather than ensuring that it is populated as is being done here, or at least proves that it
+            // is populated beforehand elsewhere. Specifically, what happens when a tranche is loaded into
+            // a session where a proxy class has not already been created?
+            superClazzAndInterfacesToProxy(clazz).get, {
+              superClazzAndInterfaces =>
+                val proxyClazz = createProxyClass(superClazzAndInterfaces)
 
-                  proxiedClazzCache.put(proxyClazz, clazz)
-                  instantiatorStrategy.newInstantiatorOf(proxyClazz)
-              }
-            )
-          }
+                proxiedClazzCache.put(proxyClazz, clazz)
+                instantiatorStrategy.newInstantiatorOf(proxyClazz)
+            }
+          )
+        }
 
-        val proxy = proxyClassInstantiator
-          .newInstance()
+      val proxy = proxyClassInstantiator
+        .newInstance()
 
-        proxy.asInstanceOf[StateAcquisition].acquire(acquiredState)
+      proxy.asInstanceOf[StateAcquisition].acquire(acquiredState)
 
-        proxy.asInstanceOf[AnyRef]
-      }
+      proxy.asInstanceOf[AnyRef]
+    }
 
     def nonProxyClazzFor(clazz: Class[_]): Class[_] =
       Option(proxiedClazzCache.getIfPresent(clazz)).getOrElse(clazz)
@@ -567,42 +556,37 @@ trait ImmutableObjectStorage[TrancheId] {
 
         def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
                                objectReferenceId: ObjectReferenceId): AnyRef =
-          Timer.timed(category = "retrieveUnderlying") {
-            tranches
-              .completedOperationFor(trancheIdForExternalObjectReference)
-              .orElse {
-                val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
-                val Right(_) =
-                  retrieveTrancheTopLevelObject(
-                    trancheIdForExternalObjectReference,
-                    placeholderClazzForTopLevelTrancheObject)
+          tranches
+            .completedOperationFor(trancheIdForExternalObjectReference)
+            .orElse {
+              val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
+              val Right(_) =
+                retrieveTrancheTopLevelObject(
+                  trancheIdForExternalObjectReference,
+                  placeholderClazzForTopLevelTrancheObject)
 
-                tranches.completedOperationFor(
-                  trancheIdForExternalObjectReference)
-              }
-              .get
-              .objectWithReferenceId(objectReferenceId)
-          }
+              tranches.completedOperationFor(
+                trancheIdForExternalObjectReference)
+            }
+            .get
+            .objectWithReferenceId(objectReferenceId)
 
         class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
                             objectReferenceId: ObjectReferenceId)
             extends proxySupport.AcquiredState {
           private var _underlying: Option[AnyRef] = None
 
-          override def underlying: AnyRef =
-            Timer.timed(category = "AcquiredState.underlying") {
-              _underlying match {
-                case Some(result) => result
-                case None =>
-                  val result =
-                    retrieveUnderlying(trancheIdForExternalObjectReference,
-                                       objectReferenceId)
+          override def underlying: AnyRef = _underlying match {
+            case Some(result) => result
+            case None =>
+              val result =
+                retrieveUnderlying(trancheIdForExternalObjectReference,
+                                   objectReferenceId)
 
-                  _underlying = Some(result)
+              _underlying = Some(result)
 
-                  result
-              }
-            }
+              result
+          }
         }
 
         class TrancheSpecificReferenceResolver(
@@ -625,109 +609,104 @@ trait ImmutableObjectStorage[TrancheId] {
               .get
 
           override def getWrittenId(
-              immutableObject: AnyRef): ObjectReferenceId =
-            Timer.timed(category = "getWrittenId") {
-              (if (proxySupport.isProxy(immutableObject) || proxySupport
-                     .canBeProxied(immutableObject))
-                 tranches
-                   .referenceIdFor(immutableObject)
-               else
-                 Option(referenceIdToObjectMap.inverse().get(immutableObject)))
-                .getOrElse(-1)
-            }
+              immutableObject: AnyRef): ObjectReferenceId = {
+            (if (proxySupport.isProxy(immutableObject) || proxySupport
+                   .canBeProxied(immutableObject))
+               tranches
+                 .referenceIdFor(immutableObject)
+             else
+               Option(referenceIdToObjectMap.inverse().get(immutableObject)))
+              .getOrElse(-1)
+          }
 
           override def addWrittenObject(
-              immutableObject: AnyRef): ObjectReferenceId =
-            Timer.timed(category = "addWrittenObject") {
-              val nextObjectReferenceIdToAllocate = numberOfAssociationsForTheRelevantTrancheOnly + objectReferenceIdOffset
-              assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
+              immutableObject: AnyRef): ObjectReferenceId = {
+            val nextObjectReferenceIdToAllocate = numberOfAssociationsForTheRelevantTrancheOnly + objectReferenceIdOffset
+            assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
 
-              val _ @None = Option(
-                referenceIdToObjectMap
-                  .put(nextObjectReferenceIdToAllocate, immutableObject))
+            val _ @None = Option(
+              referenceIdToObjectMap
+                .put(nextObjectReferenceIdToAllocate, immutableObject))
 
-              if (proxySupport.canBeProxied(immutableObject)) {
-                tranches.noteReferenceId(immutableObject,
-                                         nextObjectReferenceIdToAllocate)
-              }
-
-              numberOfAssociationsForTheRelevantTrancheOnly += 1
-
-              assert(0 <= numberOfAssociationsForTheRelevantTrancheOnly) // No wrapping around.
-
-              nextObjectReferenceIdToAllocate
+            if (proxySupport.canBeProxied(immutableObject)) {
+              tranches.noteReferenceId(immutableObject,
+                                       nextObjectReferenceIdToAllocate)
             }
 
-          override def nextReadId(clazz: Class[_]): ObjectReferenceId =
-            Timer.timed(category = "nextReadId") {
-              val nextObjectReferenceIdToAllocate = numberOfAssociationsForTheRelevantTrancheOnly + objectReferenceIdOffset
-              assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
+            numberOfAssociationsForTheRelevantTrancheOnly += 1
 
-              numberOfAssociationsForTheRelevantTrancheOnly += 1
+            assert(0 <= numberOfAssociationsForTheRelevantTrancheOnly) // No wrapping around.
 
-              assert(0 <= numberOfAssociationsForTheRelevantTrancheOnly) // No wrapping around.
+            nextObjectReferenceIdToAllocate
+          }
 
-              nextObjectReferenceIdToAllocate
-            }
+          override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
+            val nextObjectReferenceIdToAllocate = numberOfAssociationsForTheRelevantTrancheOnly + objectReferenceIdOffset
+            assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
+
+            numberOfAssociationsForTheRelevantTrancheOnly += 1
+
+            assert(0 <= numberOfAssociationsForTheRelevantTrancheOnly) // No wrapping around.
+
+            nextObjectReferenceIdToAllocate
+          }
 
           override def setReadObject(objectReferenceId: ObjectReferenceId,
-                                     immutableObject: AnyRef): Unit =
-            Timer.timed(category = "setReadObject") {
-              require(objectReferenceIdOffset <= objectReferenceId)
+                                     immutableObject: AnyRef): Unit = {
+            require(objectReferenceIdOffset <= objectReferenceId)
 
-              Option(
-                referenceIdToObjectMap
-                  .inverse()
-                  .forcePut(immutableObject, objectReferenceId)) match {
-                case Some(aliasObjectReferenceId) =>
-                  val associatedValueForAlias =
-                    AssociatedValueForAlias(immutableObject)
-                  val _ @None = Option(
-                    referenceIdToObjectMap
-                      .put(aliasObjectReferenceId, associatedValueForAlias))
-                case None =>
-              }
-
-              if (proxySupport.canBeProxied(immutableObject)) {
-                tranches.noteReferenceId(immutableObject, objectReferenceId)
-              }
+            Option(
+              referenceIdToObjectMap
+                .inverse()
+                .forcePut(immutableObject, objectReferenceId)) match {
+              case Some(aliasObjectReferenceId) =>
+                val associatedValueForAlias =
+                  AssociatedValueForAlias(immutableObject)
+                val _ @None = Option(
+                  referenceIdToObjectMap
+                    .put(aliasObjectReferenceId, associatedValueForAlias))
+              case None =>
             }
+
+            if (proxySupport.canBeProxied(immutableObject)) {
+              tranches.noteReferenceId(immutableObject, objectReferenceId)
+            }
+          }
 
           override def getReadObject(
               clazz: Class[_],
-              objectReferenceId: ObjectReferenceId): AnyRef =
-            Timer.timed(category = "getReadObject") {
-              // PLAN: if 'objectReferenceId' is greater than or equal to 'objectReferenceIdOffset',
-              // we can resolve against the tranche associated with this reference resolver. Note that
-              // we don't have to check any upper limit (and we couldn't anyway because it won't have been
-              // defined yet - this call is *populating* the reference resolver), because the objects in a tranche
-              // can only refer to objects in *previous* tranches with lower object reference ids. Also
-              // note that we should never yield a proxy in that case.
+              objectReferenceId: ObjectReferenceId): AnyRef = {
+            // PLAN: if 'objectReferenceId' is greater than or equal to 'objectReferenceIdOffset',
+            // we can resolve against the tranche associated with this reference resolver. Note that
+            // we don't have to check any upper limit (and we couldn't anyway because it won't have been
+            // defined yet - this call is *populating* the reference resolver), because the objects in a tranche
+            // can only refer to objects in *previous* tranches with lower object reference ids. Also
+            // note that we should never yield a proxy in that case.
 
-              // Otherwise we have an inter-tranche resolution request - either yield a proxy (building it on the fly
-              // if one has not already been introduced to the reference resolver), or look up an existing object
-              // belonging to another tranche, loading that tranche if necessary.
+            // Otherwise we have an inter-tranche resolution request - either yield a proxy (building it on the fly
+            // if one has not already been introduced to the reference resolver), or look up an existing object
+            // belonging to another tranche, loading that tranche if necessary.
 
-              if (objectReferenceId >= objectReferenceIdOffset)
-                objectWithReferenceId(objectReferenceId)
-              else
-                tranches.proxyFor(objectReferenceId).getOrElse {
-                  val Right(trancheIdForExternalObjectReference) =
-                    tranches
-                      .retrieveTrancheId(objectReferenceId)
+            if (objectReferenceId >= objectReferenceIdOffset)
+              objectWithReferenceId(objectReferenceId)
+            else
+              tranches.proxyFor(objectReferenceId).getOrElse {
+                val Right(trancheIdForExternalObjectReference) =
+                  tranches
+                    .retrieveTrancheId(objectReferenceId)
 
-                  val proxy =
-                    proxySupport.createProxy(
-                      clazz,
-                      new AcquiredState(trancheIdForExternalObjectReference,
-                                        objectReferenceId))
+                val proxy =
+                  proxySupport.createProxy(
+                    clazz,
+                    new AcquiredState(trancheIdForExternalObjectReference,
+                                      objectReferenceId))
 
-                  tranches.noteReferenceId(proxy, objectReferenceId)
-                  tranches.noteProxy(objectReferenceId, proxy)
+                tranches.noteReferenceId(proxy, objectReferenceId)
+                tranches.noteProxy(objectReferenceId, proxy)
 
-                  proxy
-                }
-            }
+                proxy
+              }
+          }
 
           override def setKryo(kryo: Kryo): Unit = {}
 
@@ -740,34 +719,31 @@ trait ImmutableObjectStorage[TrancheId] {
         def retrieveTrancheTopLevelObject[X](
             trancheId: TrancheId,
             clazz: Class[X]): EitherThrowableOr[X] =
-          Timer.timed(
-            category = "ImmutableObjectStorage.retrieveTrancheTopLevelObject") {
-            for {
-              tranche <- tranches.retrieveTranche(trancheId)
-              result <- Try {
-                val objectReferenceIdOffset =
-                  tranche.objectReferenceIdOffset
-                val trancheSpecificReferenceResolver =
-                  new TrancheSpecificReferenceResolver(objectReferenceIdOffset)
-                  with ReferenceResolverContracts
+          for {
+            tranche <- tranches.retrieveTranche(trancheId)
+            result <- Try {
+              val objectReferenceIdOffset =
+                tranche.objectReferenceIdOffset
+              val trancheSpecificReferenceResolver =
+                new TrancheSpecificReferenceResolver(objectReferenceIdOffset)
+                with ReferenceResolverContracts
 
-                val deserialized =
-                  sessionReferenceResolver.withValue(
-                    Some(trancheSpecificReferenceResolver)) {
-                    kryoPool.fromBytes(tranche.payload)
-                  }
+              val deserialized =
+                sessionReferenceResolver.withValue(
+                  Some(trancheSpecificReferenceResolver)) {
+                  kryoPool.fromBytes(tranche.payload)
+                }
 
-                tranches.noteCompletedOperation(
-                  trancheId,
-                  new CompleteOperationImplementation(
-                    deserialized,
-                    trancheSpecificReferenceResolver,
-                    tranche.payload.length))
+              tranches.noteCompletedOperation(
+                trancheId,
+                new CompleteOperationImplementation(
+                  deserialized,
+                  trancheSpecificReferenceResolver,
+                  tranche.payload.length))
 
-                clazz.cast(deserialized)
-              }.toEither
-            } yield result
-          }
+              clazz.cast(deserialized)
+            }.toEither
+          } yield result
 
         override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
           operation match {
