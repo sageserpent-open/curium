@@ -16,7 +16,7 @@ import com.esotericsoftware.kryo.{
 }
 import com.github.benmanes.caffeine.cache.Cache
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnReverseMappingOnly}
-import com.sageserpent.plutonium.{Timer, caffeineBuilder, classFromType}
+import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
 import com.twitter.chill.{
   CleaningSerializer,
   EmptyScalaKryoInstantiator,
@@ -469,329 +469,317 @@ trait ImmutableObjectStorage[TrancheId] {
   }
 
   def unsafeRun[Result](session: Session[Result])(
-      tranches: Tranches[TrancheId]): EitherThrowableOr[Result] =
-    Timer.timed(category = "ImmutableObjectStorage.unsafeRun") {
-      object sessionInterpreter
-          extends FunctionK[Operation, EitherThrowableOr] {
-        thisSessionInterpreter =>
+      tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
+    object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
+      thisSessionInterpreter =>
 
-        trait ReferenceResolverContracts extends ReferenceResolver {
+      trait ReferenceResolverContracts extends ReferenceResolver {
 
-          abstract override def getWrittenId(
-              immutableObject: AnyRef): ObjectReferenceId = {
-            val result = super.getWrittenId(immutableObject)
+        abstract override def getWrittenId(
+            immutableObject: AnyRef): ObjectReferenceId = {
+          val result = super.getWrittenId(immutableObject)
 
-            if (-1 == result) {
-              assert(!proxySupport.isProxy(immutableObject))
-            }
-
-            result
+          if (-1 == result) {
+            assert(!proxySupport.isProxy(immutableObject))
           }
 
-          abstract override def addWrittenObject(
-              immutableObject: AnyRef): ObjectReferenceId = {
-            require(!proxySupport.isProxy(immutableObject))
-
-            super.addWrittenObject(immutableObject)
-          }
-
-          abstract override def nextReadId(
-              clazz: Class[_]): ObjectReferenceId = {
-            require(!proxySupport.isProxyClazz(clazz))
-
-            super.nextReadId(clazz)
-          }
-
-          abstract override def setReadObject(
-              objectReferenceId: ObjectReferenceId,
-              immutableObject: AnyRef): Unit = {
-            require(!proxySupport.isProxy(immutableObject))
-
-            super.setReadObject(objectReferenceId, immutableObject)
-          }
-
-          abstract override def getReadObject(
-              clazz: Class[_],
-              objectReferenceId: ObjectReferenceId): AnyRef = {
-            require(!proxySupport.isProxyClazz(clazz))
-
-            val result = super.getReadObject(clazz, objectReferenceId)
-
-            assert(
-              (proxySupport.superClazzAndInterfacesToProxy(clazz) match {
-                case Some(
-                    proxySupport.SuperClazzAndInterfaces(superClazz,
-                                                         interfaces)) =>
-                  superClazz.isInstance(result) && interfaces.forall(
-                    _.isInstance(result))
-                case None =>
-                  clazz
-                    .isInstance(result)
-              }) || proxySupport.kryoClosureMarkerClazz
-                .isAssignableFrom(clazz))
-
-            result
-          }
+          result
         }
 
-        class CompleteOperationImplementation(
-            override val topLevelObject: Any,
-            trancheSpecificReferenceResolver: TrancheSpecificReferenceResolver,
-            override val payloadSize: Int)
-            extends CompletedOperation {
-          override def objectWithReferenceId(
-              objectReferenceId: ObjectReferenceId): AnyRef =
-            trancheSpecificReferenceResolver
-              .objectWithReferenceId(objectReferenceId)
+        abstract override def addWrittenObject(
+            immutableObject: AnyRef): ObjectReferenceId = {
+          require(!proxySupport.isProxy(immutableObject))
+
+          super.addWrittenObject(immutableObject)
         }
 
-        private case class AssociatedValueForAlias(immutableObject: AnyRef)
-            extends AnyRef
+        abstract override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
+          require(!proxySupport.isProxyClazz(clazz))
 
-        def decodePlaceholder(placeholderOrActualObject: AnyRef): AnyRef =
-          placeholderOrActualObject match {
-            case AssociatedValueForAlias(immutableObject) => immutableObject
-            case immutableObject @ _                      => immutableObject
-          }
+          super.nextReadId(clazz)
+        }
 
-        def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
-                               objectReferenceId: ObjectReferenceId): AnyRef =
-          tranches
-            .completedOperationFor(trancheIdForExternalObjectReference)
-            .orElse {
-              val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
-              val Right(_) =
-                retrieveTrancheTopLevelObject(
-                  trancheIdForExternalObjectReference,
-                  placeholderClazzForTopLevelTrancheObject)
+        abstract override def setReadObject(
+            objectReferenceId: ObjectReferenceId,
+            immutableObject: AnyRef): Unit = {
+          require(!proxySupport.isProxy(immutableObject))
 
-              tranches.completedOperationFor(
-                trancheIdForExternalObjectReference)
-            }
-            .get
-            .objectWithReferenceId(objectReferenceId)
+          super.setReadObject(objectReferenceId, immutableObject)
+        }
 
-        class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
-                            objectReferenceId: ObjectReferenceId)
-            extends proxySupport.AcquiredState {
-          private var _underlying: Option[AnyRef] = None
+        abstract override def getReadObject(
+            clazz: Class[_],
+            objectReferenceId: ObjectReferenceId): AnyRef = {
+          require(!proxySupport.isProxyClazz(clazz))
 
-          override def underlying: AnyRef = _underlying match {
-            case Some(result) => result
+          val result = super.getReadObject(clazz, objectReferenceId)
+
+          assert((proxySupport.superClazzAndInterfacesToProxy(clazz) match {
+            case Some(
+                proxySupport.SuperClazzAndInterfaces(superClazz, interfaces)) =>
+              superClazz.isInstance(result) && interfaces.forall(
+                _.isInstance(result))
             case None =>
-              val result =
-                retrieveUnderlying(trancheIdForExternalObjectReference,
-                                   objectReferenceId)
+              clazz
+                .isInstance(result)
+          }) || proxySupport.kryoClosureMarkerClazz
+            .isAssignableFrom(clazz))
 
-              _underlying = Some(result)
+          result
+        }
+      }
 
-              result
+      class CompleteOperationImplementation(
+          override val topLevelObject: Any,
+          trancheSpecificReferenceResolver: TrancheSpecificReferenceResolver,
+          override val payloadSize: Int)
+          extends CompletedOperation {
+        override def objectWithReferenceId(
+            objectReferenceId: ObjectReferenceId): AnyRef =
+          trancheSpecificReferenceResolver
+            .objectWithReferenceId(objectReferenceId)
+      }
+
+      private case class AssociatedValueForAlias(immutableObject: AnyRef)
+          extends AnyRef
+
+      def decodePlaceholder(placeholderOrActualObject: AnyRef): AnyRef =
+        placeholderOrActualObject match {
+          case AssociatedValueForAlias(immutableObject) => immutableObject
+          case immutableObject @ _                      => immutableObject
+        }
+
+      def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
+                             objectReferenceId: ObjectReferenceId): AnyRef =
+        tranches
+          .completedOperationFor(trancheIdForExternalObjectReference)
+          .orElse {
+            val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
+            val Right(_) =
+              retrieveTrancheTopLevelObject(
+                trancheIdForExternalObjectReference,
+                placeholderClazzForTopLevelTrancheObject)
+
+            tranches.completedOperationFor(trancheIdForExternalObjectReference)
+          }
+          .get
+          .objectWithReferenceId(objectReferenceId)
+
+      class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
+                          objectReferenceId: ObjectReferenceId)
+          extends proxySupport.AcquiredState {
+        private var _underlying: Option[AnyRef] = None
+
+        override def underlying: AnyRef = _underlying match {
+          case Some(result) => result
+          case None =>
+            val result =
+              retrieveUnderlying(trancheIdForExternalObjectReference,
+                                 objectReferenceId)
+
+            _underlying = Some(result)
+
+            result
+        }
+      }
+
+      class TrancheSpecificReferenceResolver(
+          objectReferenceIdOffset: ObjectReferenceId)
+          extends ReferenceResolver {
+        private var numberOfAssociationsForTheRelevantTrancheOnly
+          : ObjectReferenceId = 0
+
+        private val referenceIdToObjectMap: BiMap[ObjectReferenceId, AnyRef] =
+          BiMapUsingIdentityOnReverseMappingOnly.fromForwardMap(
+            new JavaHashMap())
+
+        def writtenObjectReferenceIds: Set[ObjectReferenceId] =
+          (0 until numberOfAssociationsForTheRelevantTrancheOnly) map (objectReferenceIdOffset + _) toSet
+
+        def objectWithReferenceId(
+            objectReferenceId: ObjectReferenceId): AnyRef =
+          Option(referenceIdToObjectMap.get(objectReferenceId))
+            .map(decodePlaceholder)
+            .get
+
+        override def getWrittenId(
+            immutableObject: AnyRef): ObjectReferenceId = {
+          (if (proxySupport.isProxy(immutableObject) || proxySupport
+                 .canBeProxied(immutableObject))
+             tranches
+               .referenceIdFor(immutableObject)
+           else
+             Option(referenceIdToObjectMap.inverse().get(immutableObject)))
+            .getOrElse(-1)
+        }
+
+        override def addWrittenObject(
+            immutableObject: AnyRef): ObjectReferenceId = {
+          val nextObjectReferenceIdToAllocate = numberOfAssociationsForTheRelevantTrancheOnly + objectReferenceIdOffset
+          assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
+
+          val _ @None = Option(
+            referenceIdToObjectMap
+              .put(nextObjectReferenceIdToAllocate, immutableObject))
+
+          if (proxySupport.canBeProxied(immutableObject)) {
+            tranches.noteReferenceId(immutableObject,
+                                     nextObjectReferenceIdToAllocate)
+          }
+
+          numberOfAssociationsForTheRelevantTrancheOnly += 1
+
+          assert(0 <= numberOfAssociationsForTheRelevantTrancheOnly) // No wrapping around.
+
+          nextObjectReferenceIdToAllocate
+        }
+
+        override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
+          val nextObjectReferenceIdToAllocate = numberOfAssociationsForTheRelevantTrancheOnly + objectReferenceIdOffset
+          assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
+
+          numberOfAssociationsForTheRelevantTrancheOnly += 1
+
+          assert(0 <= numberOfAssociationsForTheRelevantTrancheOnly) // No wrapping around.
+
+          nextObjectReferenceIdToAllocate
+        }
+
+        override def setReadObject(objectReferenceId: ObjectReferenceId,
+                                   immutableObject: AnyRef): Unit = {
+          require(objectReferenceIdOffset <= objectReferenceId)
+
+          Option(
+            referenceIdToObjectMap
+              .inverse()
+              .forcePut(immutableObject, objectReferenceId)) match {
+            case Some(aliasObjectReferenceId) =>
+              val associatedValueForAlias =
+                AssociatedValueForAlias(immutableObject)
+              val _ @None = Option(
+                referenceIdToObjectMap
+                  .put(aliasObjectReferenceId, associatedValueForAlias))
+            case None =>
+          }
+
+          if (proxySupport.canBeProxied(immutableObject)) {
+            tranches.noteReferenceId(immutableObject, objectReferenceId)
           }
         }
 
-        class TrancheSpecificReferenceResolver(
-            objectReferenceIdOffset: ObjectReferenceId)
-            extends ReferenceResolver {
-          private var numberOfAssociationsForTheRelevantTrancheOnly
-            : ObjectReferenceId = 0
+        override def getReadObject(
+            clazz: Class[_],
+            objectReferenceId: ObjectReferenceId): AnyRef = {
+          // PLAN: if 'objectReferenceId' is greater than or equal to 'objectReferenceIdOffset',
+          // we can resolve against the tranche associated with this reference resolver. Note that
+          // we don't have to check any upper limit (and we couldn't anyway because it won't have been
+          // defined yet - this call is *populating* the reference resolver), because the objects in a tranche
+          // can only refer to objects in *previous* tranches with lower object reference ids. Also
+          // note that we should never yield a proxy in that case.
 
-          private val referenceIdToObjectMap: BiMap[ObjectReferenceId, AnyRef] =
-            BiMapUsingIdentityOnReverseMappingOnly.fromForwardMap(
-              new JavaHashMap())
+          // Otherwise we have an inter-tranche resolution request - either yield a proxy (building it on the fly
+          // if one has not already been introduced to the reference resolver), or look up an existing object
+          // belonging to another tranche, loading that tranche if necessary.
 
-          def writtenObjectReferenceIds: Set[ObjectReferenceId] =
-            (0 until numberOfAssociationsForTheRelevantTrancheOnly) map (objectReferenceIdOffset + _) toSet
+          if (objectReferenceId >= objectReferenceIdOffset)
+            objectWithReferenceId(objectReferenceId)
+          else
+            tranches.proxyFor(objectReferenceId).getOrElse {
+              val Right(trancheIdForExternalObjectReference) =
+                tranches
+                  .retrieveTrancheId(objectReferenceId)
 
-          def objectWithReferenceId(
-              objectReferenceId: ObjectReferenceId): AnyRef =
-            Option(referenceIdToObjectMap.get(objectReferenceId))
-              .map(decodePlaceholder)
-              .get
+              val proxy =
+                proxySupport.createProxy(
+                  clazz,
+                  new AcquiredState(trancheIdForExternalObjectReference,
+                                    objectReferenceId))
 
-          override def getWrittenId(
-              immutableObject: AnyRef): ObjectReferenceId = {
-            (if (proxySupport.isProxy(immutableObject) || proxySupport
-                   .canBeProxied(immutableObject))
-               tranches
-                 .referenceIdFor(immutableObject)
-             else
-               Option(referenceIdToObjectMap.inverse().get(immutableObject)))
-              .getOrElse(-1)
-          }
+              tranches.noteReferenceId(proxy, objectReferenceId)
+              tranches.noteProxy(objectReferenceId, proxy)
 
-          override def addWrittenObject(
-              immutableObject: AnyRef): ObjectReferenceId = {
-            val nextObjectReferenceIdToAllocate = numberOfAssociationsForTheRelevantTrancheOnly + objectReferenceIdOffset
-            assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
-
-            val _ @None = Option(
-              referenceIdToObjectMap
-                .put(nextObjectReferenceIdToAllocate, immutableObject))
-
-            if (proxySupport.canBeProxied(immutableObject)) {
-              tranches.noteReferenceId(immutableObject,
-                                       nextObjectReferenceIdToAllocate)
+              proxy
             }
+        }
 
-            numberOfAssociationsForTheRelevantTrancheOnly += 1
+        override def setKryo(kryo: Kryo): Unit = {}
 
-            assert(0 <= numberOfAssociationsForTheRelevantTrancheOnly) // No wrapping around.
+        override def reset(): Unit = {}
 
-            nextObjectReferenceIdToAllocate
-          }
+        override def useReferences(clazz: Class[_]): Boolean =
+          storage.useReferences(clazz)
+      }
 
-          override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
-            val nextObjectReferenceIdToAllocate = numberOfAssociationsForTheRelevantTrancheOnly + objectReferenceIdOffset
-            assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
+      def retrieveTrancheTopLevelObject[X](
+          trancheId: TrancheId,
+          clazz: Class[X]): EitherThrowableOr[X] =
+        for {
+          tranche <- tranches.retrieveTranche(trancheId)
+          result <- Try {
+            val objectReferenceIdOffset =
+              tranche.objectReferenceIdOffset
+            val trancheSpecificReferenceResolver =
+              new TrancheSpecificReferenceResolver(objectReferenceIdOffset)
+              with ReferenceResolverContracts
 
-            numberOfAssociationsForTheRelevantTrancheOnly += 1
-
-            assert(0 <= numberOfAssociationsForTheRelevantTrancheOnly) // No wrapping around.
-
-            nextObjectReferenceIdToAllocate
-          }
-
-          override def setReadObject(objectReferenceId: ObjectReferenceId,
-                                     immutableObject: AnyRef): Unit = {
-            require(objectReferenceIdOffset <= objectReferenceId)
-
-            Option(
-              referenceIdToObjectMap
-                .inverse()
-                .forcePut(immutableObject, objectReferenceId)) match {
-              case Some(aliasObjectReferenceId) =>
-                val associatedValueForAlias =
-                  AssociatedValueForAlias(immutableObject)
-                val _ @None = Option(
-                  referenceIdToObjectMap
-                    .put(aliasObjectReferenceId, associatedValueForAlias))
-              case None =>
-            }
-
-            if (proxySupport.canBeProxied(immutableObject)) {
-              tranches.noteReferenceId(immutableObject, objectReferenceId)
-            }
-          }
-
-          override def getReadObject(
-              clazz: Class[_],
-              objectReferenceId: ObjectReferenceId): AnyRef = {
-            // PLAN: if 'objectReferenceId' is greater than or equal to 'objectReferenceIdOffset',
-            // we can resolve against the tranche associated with this reference resolver. Note that
-            // we don't have to check any upper limit (and we couldn't anyway because it won't have been
-            // defined yet - this call is *populating* the reference resolver), because the objects in a tranche
-            // can only refer to objects in *previous* tranches with lower object reference ids. Also
-            // note that we should never yield a proxy in that case.
-
-            // Otherwise we have an inter-tranche resolution request - either yield a proxy (building it on the fly
-            // if one has not already been introduced to the reference resolver), or look up an existing object
-            // belonging to another tranche, loading that tranche if necessary.
-
-            if (objectReferenceId >= objectReferenceIdOffset)
-              objectWithReferenceId(objectReferenceId)
-            else
-              tranches.proxyFor(objectReferenceId).getOrElse {
-                val Right(trancheIdForExternalObjectReference) =
-                  tranches
-                    .retrieveTrancheId(objectReferenceId)
-
-                val proxy =
-                  proxySupport.createProxy(
-                    clazz,
-                    new AcquiredState(trancheIdForExternalObjectReference,
-                                      objectReferenceId))
-
-                tranches.noteReferenceId(proxy, objectReferenceId)
-                tranches.noteProxy(objectReferenceId, proxy)
-
-                proxy
+            val deserialized =
+              sessionReferenceResolver.withValue(
+                Some(trancheSpecificReferenceResolver)) {
+                kryoPool.fromBytes(tranche.payload)
               }
-          }
 
-          override def setKryo(kryo: Kryo): Unit = {}
+            tranches.noteCompletedOperation(trancheId,
+                                            new CompleteOperationImplementation(
+                                              deserialized,
+                                              trancheSpecificReferenceResolver,
+                                              tranche.payload.length))
 
-          override def reset(): Unit = {}
+            clazz.cast(deserialized)
+          }.toEither
+        } yield result
 
-          override def useReferences(clazz: Class[_]): Boolean =
-            storage.useReferences(clazz)
-        }
-
-        def retrieveTrancheTopLevelObject[X](
-            trancheId: TrancheId,
-            clazz: Class[X]): EitherThrowableOr[X] =
-          for {
-            tranche <- tranches.retrieveTranche(trancheId)
-            result <- Try {
-              val objectReferenceIdOffset =
-                tranche.objectReferenceIdOffset
-              val trancheSpecificReferenceResolver =
-                new TrancheSpecificReferenceResolver(objectReferenceIdOffset)
-                with ReferenceResolverContracts
-
-              val deserialized =
-                sessionReferenceResolver.withValue(
-                  Some(trancheSpecificReferenceResolver)) {
-                  kryoPool.fromBytes(tranche.payload)
+      override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
+        operation match {
+          case Store(immutableObject) =>
+            for {
+              objectReferenceIdOffsetForNewTranche <- tranches.objectReferenceIdOffsetForNewTranche
+              trancheSpecificReferenceResolver = new TrancheSpecificReferenceResolver(
+                objectReferenceIdOffsetForNewTranche)
+              with ReferenceResolverContracts
+              serializedRepresentation: Array[Byte] = sessionReferenceResolver
+                .withValue(Some(trancheSpecificReferenceResolver)) {
+                  kryoPool.toBytesWithClass(immutableObject)
                 }
-
+              trancheId <- tranches
+                .createTrancheInStorage(
+                  serializedRepresentation,
+                  objectReferenceIdOffsetForNewTranche,
+                  trancheSpecificReferenceResolver.writtenObjectReferenceIds)
+            } yield {
               tranches.noteCompletedOperation(
                 trancheId,
                 new CompleteOperationImplementation(
-                  deserialized,
+                  immutableObject,
                   trancheSpecificReferenceResolver,
-                  tranche.payload.length))
+                  serializedRepresentation.length))
 
-              clazz.cast(deserialized)
-            }.toEither
-          } yield result
+              trancheId
+            }
 
-        override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
-          operation match {
-            case Store(immutableObject) =>
-              Timer.timed(category = "ImmutableObjectStorage.Store") {
+          case retrieve @ Retrieve(trancheId, clazz) =>
+            tranches
+              .completedOperationFor(trancheId)
+              .map(_.topLevelObject)
+              .fold {
                 for {
-                  objectReferenceIdOffsetForNewTranche <- tranches.objectReferenceIdOffsetForNewTranche
-                  trancheSpecificReferenceResolver = new TrancheSpecificReferenceResolver(
-                    objectReferenceIdOffsetForNewTranche)
-                  with ReferenceResolverContracts
-                  serializedRepresentation: Array[Byte] = sessionReferenceResolver
-                    .withValue(Some(trancheSpecificReferenceResolver)) {
-                      kryoPool.toBytesWithClass(immutableObject)
-                    }
-                  trancheId <- tranches
-                    .createTrancheInStorage(
-                      serializedRepresentation,
-                      objectReferenceIdOffsetForNewTranche,
-                      trancheSpecificReferenceResolver.writtenObjectReferenceIds)
-                } yield {
-                  tranches.noteCompletedOperation(
-                    trancheId,
-                    new CompleteOperationImplementation(
-                      immutableObject,
-                      trancheSpecificReferenceResolver,
-                      serializedRepresentation.length))
+                  topLevelObject <- retrieveTrancheTopLevelObject[X](trancheId,
+                                                                     clazz)
+                } yield topLevelObject
 
-                  trancheId
-                }
-              }
-
-            case retrieve @ Retrieve(trancheId, clazz) =>
-              Timer.timed(category = "ImmutableObjectStorage.Retrieve") {
-                tranches
-                  .completedOperationFor(trancheId)
-                  .map(_.topLevelObject)
-                  .fold {
-                    for {
-                      topLevelObject <- retrieveTrancheTopLevelObject[X](
-                        trancheId,
-                        clazz)
-                    } yield topLevelObject
-
-                  }(_.asInstanceOf[X].pure[EitherThrowableOr])
-              }
-          }
-      }
-
-      session.foldMap(sessionInterpreter)
+              }(_.asInstanceOf[X].pure[EitherThrowableOr])
+        }
     }
+
+    session.foldMap(sessionInterpreter)
+  }
 }
