@@ -1,7 +1,10 @@
 package com.sageserpent.plutonium.curium
 
+import java.util.concurrent.ConcurrentMap
+
 import alleycats.std.all._
 import cats.effect.IO
+import com.google.common.collect.MapMaker
 import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
   ObjectReferenceId,
@@ -11,9 +14,10 @@ import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
 import doobie._
 import doobie.implicits._
 
+import scala.concurrent.duration._
 import scala.util.Try
 
-object H2Tranches {
+object H2ViaDoobieTranches {
   type Transactor = doobie.util.transactor.Transactor[IO]
 
   val trancheCreation: ConnectionIO[Int] = sql"""
@@ -32,11 +36,17 @@ object H2Tranches {
            )
          """.update.run
 
+  val objectReferenceIdIndexCreation: ConnectionIO[Int] =
+    sql"""
+         CREATE INDEX ObjectReferenceIdIndex ON ObjectReference(objectReferenceId)
+       """.update.run
+
   def setupDatabaseTables(transactor: Transactor): IO[Unit] = {
 
     val setup: ConnectionIO[Unit] = for {
       _ <- trancheCreation
       _ <- objectReferenceIdCreation
+      _ <- objectReferenceIdIndexCreation
     } yield {}
 
     setup.transact(transactor)
@@ -62,8 +72,9 @@ object H2Tranches {
       .map(_.fold(0)(100 + _)) // TODO - switch back to an offset of 1.
 }
 
-class H2Tranches(transactor: H2Tranches.Transactor) extends Tranches[Long] {
-  import H2Tranches.objectReferenceIdOffsetForNewTrancheQuery
+class H2ViaDoobieTranches(transactor: H2ViaDoobieTranches.Transactor)
+    extends Tranches[Long] {
+  import H2ViaDoobieTranches.objectReferenceIdOffsetForNewTrancheQuery
 
   override def createTrancheInStorage(
       payload: Array[Byte],
@@ -74,7 +85,7 @@ class H2Tranches(transactor: H2Tranches.Transactor) extends Tranches[Long] {
       trancheId <- sql"""
           INSERT INTO Tranche(payload, objectReferenceIdOffset) VALUES ($payload, $objectReferenceIdOffset)
        """.update
-        .withUniqueGeneratedKeys[Long]("trancheId", "objectReferenceIdOffset")
+        .withUniqueGeneratedKeys[Long]("trancheId")
 
       _ <- Update[(ObjectReferenceId, TrancheId)](
         """
