@@ -86,35 +86,39 @@ object ImmutableObjectStorage {
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
 
-    private val objectToReferenceIdCacheBackedCache
-      : Cache[AnyRef, ObjectReferenceId] =
+    def clearCaches(): Unit = {
+      objectToReferenceIdCache.invalidateAll()
+      referenceIdToProxyCache.invalidateAll()
+      trancheIdToCompletedOperationCache.invalidateAll()
+    }
+
+    val objectToReferenceIdCache: Cache[AnyRef, ObjectReferenceId] =
       caffeineBuilder()
         .weakKeys()
         .build[AnyRef, ObjectReferenceId]()
 
     def noteReferenceId(immutableObject: AnyRef,
                         objectReferenceId: ObjectReferenceId): Unit = {
-      objectToReferenceIdCacheBackedCache.put(immutableObject,
-                                              objectReferenceId)
+      objectToReferenceIdCache.put(immutableObject, objectReferenceId)
     }
 
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
-      Option(objectToReferenceIdCacheBackedCache.getIfPresent(immutableObject))
+      Option(objectToReferenceIdCache.getIfPresent(immutableObject))
 
-    private val referenceIdToProxyCacheBackedCache
-      : Cache[ObjectReferenceId, AnyRef] = caffeineBuilder()
-      .weakValues()
-      .build[ObjectReferenceId, AnyRef]()
+    val referenceIdToProxyCache: Cache[ObjectReferenceId, AnyRef] =
+      caffeineBuilder()
+        .weakValues()
+        .build[ObjectReferenceId, AnyRef]()
 
     def noteProxy(objectReferenceId: ObjectReferenceId,
                   immutableObject: AnyRef): Unit = {
-      referenceIdToProxyCacheBackedCache.put(objectReferenceId, immutableObject)
+      referenceIdToProxyCache.put(objectReferenceId, immutableObject)
     }
 
     def proxyFor(objectReferenceId: ObjectReferenceId) =
-      Option(referenceIdToProxyCacheBackedCache.getIfPresent(objectReferenceId))
+      Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
-    private val trancheIdToCompletedOperationCacheBackedCache
+    val trancheIdToCompletedOperationCache
       : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
         .maximumSize(100)
@@ -122,14 +126,12 @@ object ImmutableObjectStorage {
 
     def noteCompletedOperation(trancheId: TrancheId,
                                completedOperation: CompletedOperation): Unit = {
-      trancheIdToCompletedOperationCacheBackedCache.put(trancheId,
-                                                        completedOperation)
+      trancheIdToCompletedOperationCache.put(trancheId, completedOperation)
     }
 
     def completedOperationFor(
         trancheId: TrancheId): Option[CompletedOperation] =
-      Option(
-        trancheIdToCompletedOperationCacheBackedCache.getIfPresent(trancheId))
+      Option(trancheIdToCompletedOperationCache.getIfPresent(trancheId))
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
