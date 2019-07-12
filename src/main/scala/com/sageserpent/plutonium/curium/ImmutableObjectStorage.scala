@@ -121,7 +121,7 @@ object ImmutableObjectStorage {
       CacheBuilder
         .newBuilder()
         .asInstanceOf[CacheBuilder[TrancheId, CompletedOperation]]
-        .maximumSize(100)
+        .weakValues()
         .build()
 
     def noteCompletedOperation(trancheId: TrancheId,
