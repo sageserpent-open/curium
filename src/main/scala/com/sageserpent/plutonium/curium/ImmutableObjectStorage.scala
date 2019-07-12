@@ -14,7 +14,7 @@ import com.esotericsoftware.kryo.{
   Registration,
   Serializer
 }
-import com.github.benmanes.caffeine.cache.Cache
+import com.google.common.cache.{Cache, CacheBuilder}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnReverseMappingOnly}
 import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
 import com.twitter.chill.{
@@ -86,16 +86,12 @@ object ImmutableObjectStorage {
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
 
-    def clearCaches(): Unit = {
-      objectToReferenceIdCache.invalidateAll()
-      referenceIdToProxyCache.invalidateAll()
-      trancheIdToCompletedOperationCache.invalidateAll()
-    }
-
     val objectToReferenceIdCache: Cache[AnyRef, ObjectReferenceId] =
-      caffeineBuilder()
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[AnyRef, ObjectReferenceId]]
         .weakKeys()
-        .build[AnyRef, ObjectReferenceId]()
+        .build()
 
     def noteReferenceId(immutableObject: AnyRef,
                         objectReferenceId: ObjectReferenceId): Unit = {
@@ -106,9 +102,11 @@ object ImmutableObjectStorage {
       Option(objectToReferenceIdCache.getIfPresent(immutableObject))
 
     val referenceIdToProxyCache: Cache[ObjectReferenceId, AnyRef] =
-      caffeineBuilder()
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[ObjectReferenceId, AnyRef]]
         .weakValues()
-        .build[ObjectReferenceId, AnyRef]()
+        .build()
 
     def noteProxy(objectReferenceId: ObjectReferenceId,
                   immutableObject: AnyRef): Unit = {
@@ -120,9 +118,11 @@ object ImmutableObjectStorage {
 
     val trancheIdToCompletedOperationCache
       : Cache[TrancheId, CompletedOperation] =
-      caffeineBuilder()
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[TrancheId, CompletedOperation]]
         .maximumSize(100)
-        .build[TrancheId, CompletedOperation]
+        .build()
 
     def noteCompletedOperation(trancheId: TrancheId,
                                completedOperation: CompletedOperation): Unit = {
@@ -345,7 +345,10 @@ trait ImmutableObjectStorage[TrancheId] {
 
     val superClazzAndInterfacesCache
       : Cache[Class[_], Option[SuperClazzAndInterfaces]] =
-      caffeineBuilder().build()
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[Class[_], Option[SuperClazzAndInterfaces]]]
+        .build()
 
     private def shouldNotBeProxiedAsItsOwnType(clazz: Class[_]): Boolean =
       Modifier.isFinal(clazz.getModifiers) ||
@@ -363,7 +366,7 @@ trait ImmutableObjectStorage[TrancheId] {
     def superClazzAndInterfacesToProxy(
         clazz: Class[_]): Option[SuperClazzAndInterfaces] =
       superClazzAndInterfacesCache.get(
-        clazz, { clazz =>
+        clazz, { () =>
           require(!isProxyClazz(clazz))
 
           val clazzShouldNotBeProxiedAtAll = kryoClosureMarkerClazz.isAssignableFrom(
@@ -436,24 +439,33 @@ trait ImmutableObjectStorage[TrancheId] {
 
     val cachedProxyClassInstantiators
       : Cache[SuperClazzAndInterfaces, ObjectInstantiator[_]] =
-      caffeineBuilder().build()
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[SuperClazzAndInterfaces,
+                                   ObjectInstantiator[_]]]
+        .build()
 
-    val proxiedClazzCache: Cache[Class[_], Class[_]] = caffeineBuilder().build()
+    val proxiedClazzCache: Cache[Class[_], Class[_]] =
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[Class[_], Class[_]]]
+        .build()
 
     def createProxy(clazz: Class[_], acquiredState: AcquiredState): AnyRef = {
       val proxyClassInstantiator =
         synchronized {
+          val superClazzAndInterfaces =
+            superClazzAndInterfacesToProxy(clazz).get
           cachedProxyClassInstantiators.get(
             // TODO: there should be a test that fails if we just consult 'superClazzAndInterfacesCache'
             // rather than ensuring that it is populated as is being done here, or at least proves that it
             // is populated beforehand elsewhere. Specifically, what happens when a tranche is loaded into
             // a session where a proxy class has not already been created?
-            superClazzAndInterfacesToProxy(clazz).get, {
-              superClazzAndInterfaces =>
-                val proxyClazz = createProxyClass(superClazzAndInterfaces)
+            superClazzAndInterfaces, { () =>
+              val proxyClazz = createProxyClass(superClazzAndInterfaces)
 
-                proxiedClazzCache.put(proxyClazz, clazz)
-                instantiatorStrategy.newInstantiatorOf(proxyClazz)
+              proxiedClazzCache.put(proxyClazz, clazz)
+              instantiatorStrategy.newInstantiatorOf(proxyClazz)
             }
           )
         }
