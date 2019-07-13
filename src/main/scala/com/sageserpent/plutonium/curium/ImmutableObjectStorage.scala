@@ -771,7 +771,7 @@ trait ImmutableObjectStorage[TrancheId] {
                   trancheSpecificReferenceResolver.writtenObjectReferenceIds)
             } yield trancheId
 
-          case retrieve @ Retrieve(trancheId, clazz) =>
+          case Retrieve(trancheId, clazz) =>
             tranches
               .completedOperationFor(trancheId)
               .map(_.topLevelObject)
@@ -781,7 +781,7 @@ trait ImmutableObjectStorage[TrancheId] {
                                                                      clazz)
                 } yield topLevelObject
 
-              }(_.asInstanceOf[X].pure[EitherThrowableOr])
+              }(topLevelObject => Try { clazz.cast(topLevelObject) }.toEither)
         }
     }
 
