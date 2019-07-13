@@ -769,16 +769,7 @@ trait ImmutableObjectStorage[TrancheId] {
                   serializedRepresentation,
                   objectReferenceIdOffsetForNewTranche,
                   trancheSpecificReferenceResolver.writtenObjectReferenceIds)
-            } yield {
-              tranches.noteCompletedOperation(
-                trancheId,
-                new CompleteOperationImplementation(
-                  immutableObject,
-                  trancheSpecificReferenceResolver,
-                  serializedRepresentation.length))
-
-              trancheId
-            }
+            } yield trancheId
 
           case retrieve @ Retrieve(trancheId, clazz) =>
             tranches
