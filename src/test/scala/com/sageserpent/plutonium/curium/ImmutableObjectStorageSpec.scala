@@ -346,7 +346,7 @@ class ImmutableObjectStorageSpec
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = true),
-    MinSuccessful(100)) { (partGrowth) =>
+    MinSuccessful(100)) { partGrowth =>
     val intersessionState = new IntersessionState[TrancheId]
 
     val tranches = new FakeTranches with TranchesContracts[TrancheId]
@@ -440,7 +440,7 @@ class ImmutableObjectStorageSpec
       intersessionState)(tranches) shouldBe a[Left[_, _]]
   }
 
-  ignore should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
+  it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     MinSuccessful(100)) { partGrowth =>
     val intersessionState = new IntersessionState[TrancheId]
@@ -474,7 +474,7 @@ class ImmutableObjectStorageSpec
       intersessionState)(tranches) shouldBe a[Left[_, _]]
   }
 
-  ignore should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
+  it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     MinSuccessful(100)) { partGrowth =>
     val intersessionState = new IntersessionState[TrancheId]
@@ -503,7 +503,7 @@ class ImmutableObjectStorageSpec
       intersessionState)(tranches) shouldBe a[Left[_, _]]
   }
 
-  ignore should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
+  it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
     partGrowthLeadingToRootForkGenerator(allowDuplicates = false),
     MinSuccessful(100)) { partGrowth =>
     val intersessionState = new IntersessionState[TrancheId]
