@@ -469,9 +469,11 @@ class ImmutableObjectStorageSpec
         FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
+    val freshIntersessionState = new IntersessionState[TrancheId]
+
     immutableObjectStorage.runForEffectsOnly(
       samplingSessionWithCorruptedTranche,
-      intersessionState)(tranches) shouldBe a[Left[_, _]]
+      freshIntersessionState)(tranches) shouldBe a[Left[_, _]]
   }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in forAll(
@@ -498,9 +500,11 @@ class ImmutableObjectStorageSpec
         FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
+    val freshIntersessionState = new IntersessionState[TrancheId]
+
     immutableObjectStorage.runForEffectsOnly(
       samplingSessionWithMissingTranche,
-      intersessionState)(tranches) shouldBe a[Left[_, _]]
+      freshIntersessionState)(tranches) shouldBe a[Left[_, _]]
   }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in forAll(
@@ -532,9 +536,11 @@ class ImmutableObjectStorageSpec
         FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
+    val freshIntersessionState = new IntersessionState[TrancheId]
+
     immutableObjectStorage.runForEffectsOnly(
       samplingSessionWithTrancheForIncompatibleType,
-      intersessionState)(tranches) shouldBe a[Left[_, _]]
+      freshIntersessionState)(tranches) shouldBe a[Left[_, _]]
   }
 
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in forAll(
