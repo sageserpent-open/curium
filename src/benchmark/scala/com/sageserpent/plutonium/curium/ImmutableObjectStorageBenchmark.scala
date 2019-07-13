@@ -42,18 +42,21 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
   }
 
   def activity(partGrowth: PartGrowth): Unit = {
-    storeAndRetrieve(partGrowth, new FakeTranches)
+    storeAndRetrieve(partGrowth, new IntersessionState, new FakeTranches)
   }
 
-  def storeAndRetrieve(partGrowth: PartGrowth, tranches: FakeTranches): Unit = {
+  def storeAndRetrieve(partGrowth: PartGrowth,
+                       intersessionState: IntersessionState[TrancheId],
+                       tranches: FakeTranches): Unit = {
     val trancheIds: Vector[TrancheId] =
-      partGrowth.storeViaMultipleSessions(tranches)
+      partGrowth.storeViaMultipleSessions(intersessionState, tranches)
 
     val retrievalSession: Session[Unit] =
       for (_ <- trancheIds.traverse(immutableObjectStorage.retrieve[Part]))
         yield ()
 
     val Right(()) =
-      immutableObjectStorage.runForEffectsOnly(retrievalSession)(tranches)
+      immutableObjectStorage.runForEffectsOnly(retrievalSession,
+                                               intersessionState)(tranches)
   }
 }
