@@ -16,7 +16,7 @@ import com.esotericsoftware.kryo.{
 }
 import com.google.common.cache.{Cache, CacheBuilder}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnReverseMappingOnly}
-import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
+import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{
   CleaningSerializer,
   EmptyScalaKryoInstantiator,
@@ -44,6 +44,8 @@ import scala.util.hashing.MurmurHash3
 import scala.util.{DynamicVariable, Try}
 
 object ImmutableObjectStorage {
+  var cumulativeTrancheLoadSize: Long = 0L
+
   type ObjectReferenceId = Int
 
   case class TrancheOfData(payload: Array[Byte],
@@ -174,6 +176,15 @@ object ImmutableObjectStorage {
         }.toEither
         trancheId <- super.retrieveTrancheId(objectReferenceId)
       } yield trancheId
+
+    abstract override def retrieveTranche(
+        trancheId: TranchesContracts.this.TrancheId)
+      : EitherThrowableOr[TrancheOfData] = {
+      super.retrieveTranche(trancheId).map { tranche =>
+        cumulativeTrancheLoadSize += tranche.payload.size
+        tranche
+      }
+    }
   }
 
   trait Operation[Result]
