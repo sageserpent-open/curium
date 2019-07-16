@@ -44,12 +44,6 @@ import scala.util.hashing.MurmurHash3
 import scala.util.{DynamicVariable, Try}
 
 object ImmutableObjectStorage {
-  var maximumTrancheSizeForProxy: Long = 0L
-
-  var cumulativeTrancheLoadSize: Long = 0L
-
-  var cumulativeTrancheLoads: Long = 0L
-
   type ObjectReferenceId = Int
 
   case class TrancheOfData(payload: Array[Byte],
@@ -183,13 +177,7 @@ object ImmutableObjectStorage {
 
     abstract override def retrieveTranche(
         trancheId: TranchesContracts.this.TrancheId)
-      : EitherThrowableOr[TrancheOfData] = {
-      super.retrieveTranche(trancheId).map { tranche =>
-        cumulativeTrancheLoadSize += tranche.payload.size
-        cumulativeTrancheLoads += 1
-        tranche
-      }
-    }
+      : EitherThrowableOr[TrancheOfData] = super.retrieveTranche(trancheId)
   }
 
   trait Operation[Result]
@@ -595,8 +583,7 @@ trait ImmutableObjectStorage[TrancheId] {
             val Right(_) =
               retrieveTrancheTopLevelObject(
                 trancheIdForExternalObjectReference,
-                placeholderClazzForTopLevelTrancheObject,
-                onBehalfOfProxy = Some(objectReferenceId))
+                placeholderClazzForTopLevelTrancheObject)
 
             intersessionState.completedOperationFor(
               trancheIdForExternalObjectReference)
@@ -752,8 +739,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
       def retrieveTrancheTopLevelObject[X](
           trancheId: TrancheId,
-          clazz: Class[X],
-          onBehalfOfProxy: Option[ObjectReferenceId]): EitherThrowableOr[X] =
+          clazz: Class[X]): EitherThrowableOr[X] =
         for {
           tranche <- tranches.retrieveTranche(trancheId)
           result <- Try {
@@ -778,21 +764,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
             clazz.cast(deserialized)
           }.toEither
-        } yield {
-          onBehalfOfProxy.foreach { objectReferenceId =>
-            val trancheSize = tranche.payload.size
-            if (trancheSize > maximumTrancheSizeForProxy) {
-              /*              println(
-                s"Tranche of size: $trancheSize for id: $trancheId on behalf of: ${intersessionState
-                  .proxyFor(objectReferenceId)
-                  .get
-                  .getClass}")*/
-
-              maximumTrancheSizeForProxy = trancheSize
-            }
-          }
-          result
-        }
+        } yield result
 
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
@@ -819,10 +791,8 @@ trait ImmutableObjectStorage[TrancheId] {
               .map(_.topLevelObject)
               .fold {
                 for {
-                  topLevelObject <- retrieveTrancheTopLevelObject[X](
-                    trancheId,
-                    clazz,
-                    onBehalfOfProxy = None)
+                  topLevelObject <- retrieveTrancheTopLevelObject[X](trancheId,
+                                                                     clazz)
                 } yield topLevelObject
 
               }(topLevelObject => Try { clazz.cast(topLevelObject) }.toEither)

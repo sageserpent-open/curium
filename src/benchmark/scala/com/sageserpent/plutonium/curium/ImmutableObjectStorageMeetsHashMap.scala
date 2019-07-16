@@ -54,7 +54,7 @@ object ImmutableObjectStorageMeetsHashMap
               val duration = currentTime - startTime
 
               println(
-                s"Step: $step, duration: ${duration.toMillis} milliseconds, cumulative tranche loads: ${ImmutableObjectStorage.cumulativeTrancheLoads}, cumulative tranche load size; ${ImmutableObjectStorage.cumulativeTrancheLoadSize}, maximum tranche size for proxy: ${ImmutableObjectStorage.maximumTrancheSizeForProxy}")
+                s"Step: $step, duration: ${duration.toMillis} milliseconds.")
             }
           }
       })
