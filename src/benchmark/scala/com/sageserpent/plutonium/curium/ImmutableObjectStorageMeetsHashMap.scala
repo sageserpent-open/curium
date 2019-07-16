@@ -39,7 +39,7 @@ object ImmutableObjectStorageMeetsHashMap
             val session: Session[TrancheId] = for {
               map <- immutableObjectStorage.retrieve[HashMap[Int, String]](
                 trancheId)
-              mutatedHashMap = map + (step -> step.toString)
+              mutatedHashMap = (if (0 == step % 2) map - (step / 2) else map) + (step -> step.toString)
               newTrancheId <- immutableObjectStorage.store(mutatedHashMap)
             } yield newTrancheId
 
