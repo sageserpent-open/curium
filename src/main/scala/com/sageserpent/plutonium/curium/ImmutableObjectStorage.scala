@@ -14,9 +14,9 @@ import com.esotericsoftware.kryo.{
   Registration,
   Serializer
 }
-import com.github.benmanes.caffeine.cache.Cache
+import com.google.common.cache.{Cache, CacheBuilder}
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnReverseMappingOnly}
-import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
+import com.sageserpent.plutonium.classFromType
 import com.twitter.chill.{
   CleaningSerializer,
   EmptyScalaKryoInstantiator,
@@ -70,6 +70,55 @@ object ImmutableObjectStorage {
     def payloadSize: Int
   }
 
+  class IntersessionState[TrancheId] {
+    val objectToReferenceIdCache: Cache[AnyRef, ObjectReferenceId] =
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[AnyRef, ObjectReferenceId]]
+        .weakKeys()
+        .build()
+
+    def noteReferenceId(immutableObject: AnyRef,
+                        objectReferenceId: ObjectReferenceId): Unit = {
+      objectToReferenceIdCache.put(immutableObject, objectReferenceId)
+    }
+
+    def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
+      Option(objectToReferenceIdCache.getIfPresent(immutableObject))
+
+    val referenceIdToProxyCache: Cache[ObjectReferenceId, AnyRef] =
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[ObjectReferenceId, AnyRef]]
+        .weakValues()
+        .build()
+
+    def noteProxy(objectReferenceId: ObjectReferenceId,
+                  immutableObject: AnyRef): Unit = {
+      referenceIdToProxyCache.put(objectReferenceId, immutableObject)
+    }
+
+    def proxyFor(objectReferenceId: ObjectReferenceId) =
+      Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
+
+    val trancheIdToCompletedOperationCache
+      : Cache[TrancheId, CompletedOperation] =
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[TrancheId, CompletedOperation]]
+        .weakValues()
+        .build()
+
+    def noteCompletedOperation(trancheId: TrancheId,
+                               completedOperation: CompletedOperation): Unit = {
+      trancheIdToCompletedOperationCache.put(trancheId, completedOperation)
+    }
+
+    def completedOperationFor(
+        trancheId: TrancheId): Option[CompletedOperation] =
+      Option(trancheIdToCompletedOperationCache.getIfPresent(trancheId))
+  }
+
   trait Tranches[TrancheIdImplementation] {
     type TrancheId = TrancheIdImplementation
 
@@ -86,50 +135,6 @@ object ImmutableObjectStorage {
     def retrieveTrancheId(
         objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId]
 
-    private val objectToReferenceIdCacheBackedCache
-      : Cache[AnyRef, ObjectReferenceId] =
-      caffeineBuilder()
-        .weakKeys()
-        .build[AnyRef, ObjectReferenceId]()
-
-    def noteReferenceId(immutableObject: AnyRef,
-                        objectReferenceId: ObjectReferenceId): Unit = {
-      objectToReferenceIdCacheBackedCache.put(immutableObject,
-                                              objectReferenceId)
-    }
-
-    def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
-      Option(objectToReferenceIdCacheBackedCache.getIfPresent(immutableObject))
-
-    private val referenceIdToProxyCacheBackedCache
-      : Cache[ObjectReferenceId, AnyRef] = caffeineBuilder()
-      .weakValues()
-      .build[ObjectReferenceId, AnyRef]()
-
-    def noteProxy(objectReferenceId: ObjectReferenceId,
-                  immutableObject: AnyRef): Unit = {
-      referenceIdToProxyCacheBackedCache.put(objectReferenceId, immutableObject)
-    }
-
-    def proxyFor(objectReferenceId: ObjectReferenceId) =
-      Option(referenceIdToProxyCacheBackedCache.getIfPresent(objectReferenceId))
-
-    private val trancheIdToCompletedOperationCacheBackedCache
-      : Cache[TrancheId, CompletedOperation] =
-      caffeineBuilder()
-        .maximumSize(100)
-        .build[TrancheId, CompletedOperation]
-
-    def noteCompletedOperation(trancheId: TrancheId,
-                               completedOperation: CompletedOperation): Unit = {
-      trancheIdToCompletedOperationCacheBackedCache.put(trancheId,
-                                                        completedOperation)
-    }
-
-    def completedOperationFor(
-        trancheId: TrancheId): Option[CompletedOperation] =
-      Option(
-        trancheIdToCompletedOperationCacheBackedCache.getIfPresent(trancheId))
   }
 
   trait TranchesContracts[TrancheId] extends Tranches[TrancheId] {
@@ -169,6 +174,10 @@ object ImmutableObjectStorage {
         }.toEither
         trancheId <- super.retrieveTrancheId(objectReferenceId)
       } yield trancheId
+
+    abstract override def retrieveTranche(
+        trancheId: TranchesContracts.this.TrancheId)
+      : EitherThrowableOr[TrancheOfData] = super.retrieveTranche(trancheId)
   }
 
   trait Operation[Result]
@@ -237,17 +246,20 @@ trait ImmutableObjectStorage[TrancheId] {
     FreeT.liftF[Operation, EitherThrowableOr, X](
       Retrieve(id, classFromType(typeOf[X])))
 
-  def runToYieldTrancheIds(session: Session[Vector[TrancheId]])
+  def runToYieldTrancheIds(session: Session[Vector[TrancheId]],
+                           intersessionState: IntersessionState[TrancheId])
     : Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
-    unsafeRun(session)
+    unsafeRun(session, intersessionState)
 
-  def runToYieldTrancheId(session: Session[TrancheId])
+  def runToYieldTrancheId(session: Session[TrancheId],
+                          intersessionState: IntersessionState[TrancheId])
     : Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
-    unsafeRun(session)
+    unsafeRun(session, intersessionState)
 
-  def runForEffectsOnly(
-      session: Session[Unit]): Tranches[TrancheId] => EitherThrowableOr[Unit] =
-    unsafeRun(session)
+  def runForEffectsOnly(session: Session[Unit],
+                        intersessionState: IntersessionState[TrancheId])
+    : Tranches[TrancheId] => EitherThrowableOr[Unit] =
+    unsafeRun(session, intersessionState)
 
   private val sessionReferenceResolver
     : DynamicVariable[Option[ReferenceResolver]] =
@@ -343,7 +355,10 @@ trait ImmutableObjectStorage[TrancheId] {
 
     val superClazzAndInterfacesCache
       : Cache[Class[_], Option[SuperClazzAndInterfaces]] =
-      caffeineBuilder().build()
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[Class[_], Option[SuperClazzAndInterfaces]]]
+        .build()
 
     private def shouldNotBeProxiedAsItsOwnType(clazz: Class[_]): Boolean =
       Modifier.isFinal(clazz.getModifiers) ||
@@ -361,7 +376,7 @@ trait ImmutableObjectStorage[TrancheId] {
     def superClazzAndInterfacesToProxy(
         clazz: Class[_]): Option[SuperClazzAndInterfaces] =
       superClazzAndInterfacesCache.get(
-        clazz, { clazz =>
+        clazz, { () =>
           require(!isProxyClazz(clazz))
 
           val clazzShouldNotBeProxiedAtAll = kryoClosureMarkerClazz.isAssignableFrom(
@@ -434,24 +449,33 @@ trait ImmutableObjectStorage[TrancheId] {
 
     val cachedProxyClassInstantiators
       : Cache[SuperClazzAndInterfaces, ObjectInstantiator[_]] =
-      caffeineBuilder().build()
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[SuperClazzAndInterfaces,
+                                   ObjectInstantiator[_]]]
+        .build()
 
-    val proxiedClazzCache: Cache[Class[_], Class[_]] = caffeineBuilder().build()
+    val proxiedClazzCache: Cache[Class[_], Class[_]] =
+      CacheBuilder
+        .newBuilder()
+        .asInstanceOf[CacheBuilder[Class[_], Class[_]]]
+        .build()
 
     def createProxy(clazz: Class[_], acquiredState: AcquiredState): AnyRef = {
       val proxyClassInstantiator =
         synchronized {
+          val superClazzAndInterfaces =
+            superClazzAndInterfacesToProxy(clazz).get
           cachedProxyClassInstantiators.get(
             // TODO: there should be a test that fails if we just consult 'superClazzAndInterfacesCache'
             // rather than ensuring that it is populated as is being done here, or at least proves that it
             // is populated beforehand elsewhere. Specifically, what happens when a tranche is loaded into
             // a session where a proxy class has not already been created?
-            superClazzAndInterfacesToProxy(clazz).get, {
-              superClazzAndInterfaces =>
-                val proxyClazz = createProxyClass(superClazzAndInterfaces)
+            superClazzAndInterfaces, { () =>
+              val proxyClazz = createProxyClass(superClazzAndInterfaces)
 
-                proxiedClazzCache.put(proxyClazz, clazz)
-                instantiatorStrategy.newInstantiatorOf(proxyClazz)
+              proxiedClazzCache.put(proxyClazz, clazz)
+              instantiatorStrategy.newInstantiatorOf(proxyClazz)
             }
           )
         }
@@ -468,7 +492,8 @@ trait ImmutableObjectStorage[TrancheId] {
       Option(proxiedClazzCache.getIfPresent(clazz)).getOrElse(clazz)
   }
 
-  def unsafeRun[Result](session: Session[Result])(
+  def unsafeRun[Result](session: Session[Result],
+                        intersessionState: IntersessionState[TrancheId])(
       tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
@@ -551,7 +576,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
                              objectReferenceId: ObjectReferenceId): AnyRef =
-        tranches
+        intersessionState
           .completedOperationFor(trancheIdForExternalObjectReference)
           .orElse {
             val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
@@ -560,7 +585,8 @@ trait ImmutableObjectStorage[TrancheId] {
                 trancheIdForExternalObjectReference,
                 placeholderClazzForTopLevelTrancheObject)
 
-            tranches.completedOperationFor(trancheIdForExternalObjectReference)
+            intersessionState.completedOperationFor(
+              trancheIdForExternalObjectReference)
           }
           .get
           .objectWithReferenceId(objectReferenceId)
@@ -606,7 +632,7 @@ trait ImmutableObjectStorage[TrancheId] {
             immutableObject: AnyRef): ObjectReferenceId = {
           (if (proxySupport.isProxy(immutableObject) || proxySupport
                  .canBeProxied(immutableObject))
-             tranches
+             intersessionState
                .referenceIdFor(immutableObject)
            else
              Option(referenceIdToObjectMap.inverse().get(immutableObject)))
@@ -623,8 +649,8 @@ trait ImmutableObjectStorage[TrancheId] {
               .put(nextObjectReferenceIdToAllocate, immutableObject))
 
           if (proxySupport.canBeProxied(immutableObject)) {
-            tranches.noteReferenceId(immutableObject,
-                                     nextObjectReferenceIdToAllocate)
+            intersessionState.noteReferenceId(immutableObject,
+                                              nextObjectReferenceIdToAllocate)
           }
 
           numberOfAssociationsForTheRelevantTrancheOnly += 1
@@ -663,7 +689,8 @@ trait ImmutableObjectStorage[TrancheId] {
           }
 
           if (proxySupport.canBeProxied(immutableObject)) {
-            tranches.noteReferenceId(immutableObject, objectReferenceId)
+            intersessionState.noteReferenceId(immutableObject,
+                                              objectReferenceId)
           }
         }
 
@@ -684,7 +711,7 @@ trait ImmutableObjectStorage[TrancheId] {
           if (objectReferenceId >= objectReferenceIdOffset)
             objectWithReferenceId(objectReferenceId)
           else
-            tranches.proxyFor(objectReferenceId).getOrElse {
+            intersessionState.proxyFor(objectReferenceId).getOrElse {
               val Right(trancheIdForExternalObjectReference) =
                 tranches
                   .retrieveTrancheId(objectReferenceId)
@@ -695,8 +722,8 @@ trait ImmutableObjectStorage[TrancheId] {
                   new AcquiredState(trancheIdForExternalObjectReference,
                                     objectReferenceId))
 
-              tranches.noteReferenceId(proxy, objectReferenceId)
-              tranches.noteProxy(objectReferenceId, proxy)
+              intersessionState.noteReferenceId(proxy, objectReferenceId)
+              intersessionState.noteProxy(objectReferenceId, proxy)
 
               proxy
             }
@@ -728,11 +755,12 @@ trait ImmutableObjectStorage[TrancheId] {
                 kryoPool.fromBytes(tranche.payload)
               }
 
-            tranches.noteCompletedOperation(trancheId,
-                                            new CompleteOperationImplementation(
-                                              deserialized,
-                                              trancheSpecificReferenceResolver,
-                                              tranche.payload.length))
+            intersessionState.noteCompletedOperation(
+              trancheId,
+              new CompleteOperationImplementation(
+                deserialized,
+                trancheSpecificReferenceResolver,
+                tranche.payload.length))
 
             clazz.cast(deserialized)
           }.toEither
@@ -755,19 +783,10 @@ trait ImmutableObjectStorage[TrancheId] {
                   serializedRepresentation,
                   objectReferenceIdOffsetForNewTranche,
                   trancheSpecificReferenceResolver.writtenObjectReferenceIds)
-            } yield {
-              tranches.noteCompletedOperation(
-                trancheId,
-                new CompleteOperationImplementation(
-                  immutableObject,
-                  trancheSpecificReferenceResolver,
-                  serializedRepresentation.length))
+            } yield trancheId
 
-              trancheId
-            }
-
-          case retrieve @ Retrieve(trancheId, clazz) =>
-            tranches
+          case Retrieve(trancheId, clazz) =>
+            intersessionState
               .completedOperationFor(trancheId)
               .map(_.topLevelObject)
               .fold {
@@ -776,7 +795,7 @@ trait ImmutableObjectStorage[TrancheId] {
                                                                      clazz)
                 } yield topLevelObject
 
-              }(_.asInstanceOf[X].pure[EitherThrowableOr])
+              }(topLevelObject => Try { clazz.cast(topLevelObject) }.toEither)
         }
     }
 
