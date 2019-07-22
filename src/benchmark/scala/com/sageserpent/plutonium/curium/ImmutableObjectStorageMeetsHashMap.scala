@@ -54,7 +54,7 @@ object ImmutableObjectStorageMeetsHashMap
               val duration = currentTime - startTime
 
               println(
-                s"Step: $step, duration: ${duration.toMillis} milliseconds.")
+                s"Step: $step, duration: ${duration.toMillis} milliseconds, referenceIdToProxyCache: ${intersessionState.referenceIdToProxyCache.estimatedSize}, objectToReferenceIdCache: ${intersessionState.objectToReferenceIdCache.estimatedSize}")
             }
           }
       })
