@@ -20,7 +20,7 @@ object H2ViaScalikeJdbcTranches {
             sql"""
              CREATE TABLE Tranche(
                 trancheId	              IDENTITY  PRIMARY KEY,
-                payload		              BLOB      NOT NULL,
+                payload		              BINARY    NOT NULL,
                 objectReferenceIdOffset INTEGER   NOT NULL
              )
       """.update.apply()
