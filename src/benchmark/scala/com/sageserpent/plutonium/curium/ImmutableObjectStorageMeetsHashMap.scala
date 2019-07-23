@@ -35,7 +35,7 @@ object ImmutableObjectStorageMeetsHashMap
 
           val startTime = Deadline.now
 
-          for (step <- 0 until 1000000) {
+          for (step <- 0 until 3000000) {
             val session: Session[TrancheId] = for {
               map <- immutableObjectStorage.retrieve[HashMap[Int, String]](
                 trancheId)
