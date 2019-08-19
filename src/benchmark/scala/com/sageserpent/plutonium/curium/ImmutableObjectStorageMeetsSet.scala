@@ -12,8 +12,7 @@ import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
 import scala.collection.immutable.HashMap
 import scala.concurrent.duration.Deadline
 
-object ImmutableObjectStorageMeetsHashMap
-    extends H2ViaScalikeJdbcTranchesResource {
+object ImmutableObjectStorageMeetsSet extends H2ViaScalikeJdbcTranchesResource {
   def main(args: Array[String]): Unit = {
     tranchesResource
       .use(tranches =>
@@ -25,7 +24,7 @@ object ImmutableObjectStorageMeetsHashMap
 
           val Right(initialTrancheId: TrancheId) = {
             val session: Session[TrancheId] =
-              immutableObjectStorage.store(HashMap.empty[Int, String])
+              immutableObjectStorage.store(Set.empty[Int])
 
             immutableObjectStorage
               .runToYieldTrancheId(session, intersessionState)(tranches)
@@ -35,12 +34,11 @@ object ImmutableObjectStorageMeetsHashMap
 
           val startTime = Deadline.now
 
-          for (step <- 0 until 1000000) {
+          for (step <- 0 until 6000000) {
             val session: Session[TrancheId] = for {
-              map <- immutableObjectStorage.retrieve[HashMap[Int, String]](
-                trancheId)
-              mutatedHashMap = (if (0 == step % 2) map - (step / 2) else map) + (step -> step.toString)
-              newTrancheId <- immutableObjectStorage.store(mutatedHashMap)
+              set <- immutableObjectStorage.retrieve[Set[Int]](trancheId)
+              mutatedSet = (if (0 == step % 2) set - (step / 2) else set) + step
+              newTrancheId <- immutableObjectStorage.store(mutatedSet)
             } yield newTrancheId
 
             trancheId = immutableObjectStorage
@@ -54,7 +52,7 @@ object ImmutableObjectStorageMeetsHashMap
               val duration = currentTime - startTime
 
               println(
-                s"Step: $step, duration: ${duration.toMillis} milliseconds.")
+                s"Step: $step, duration: ${duration.toMillis} milliseconds, referenceIdToProxyCache: ${intersessionState.referenceIdToProxyCache.estimatedSize}, objectToReferenceIdCache: ${intersessionState.objectToReferenceIdCache.estimatedSize}")
             }
           }
       })
