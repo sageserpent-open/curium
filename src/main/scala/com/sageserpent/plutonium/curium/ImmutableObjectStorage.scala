@@ -71,7 +71,7 @@ object ImmutableObjectStorage {
   }
 
   class IntersessionState[TrancheId] {
-    val objectToReferenceIdCache: Cache[AnyRef, ObjectReferenceId] =
+    private val objectToReferenceIdCache: Cache[AnyRef, ObjectReferenceId] =
       caffeineBuilder()
         .executor(_.run())
         .weakKeys()
@@ -85,7 +85,7 @@ object ImmutableObjectStorage {
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
       Option(objectToReferenceIdCache.getIfPresent(immutableObject))
 
-    val referenceIdToProxyCache: Cache[ObjectReferenceId, AnyRef] =
+    private val referenceIdToProxyCache: Cache[ObjectReferenceId, AnyRef] =
       caffeineBuilder()
         .executor(_.run())
         .weakValues()
@@ -99,7 +99,7 @@ object ImmutableObjectStorage {
     def proxyFor(objectReferenceId: ObjectReferenceId) =
       Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
-    val trancheIdToCompletedOperationCache
+    private val trancheIdToCompletedOperationCache
       : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
         .executor(_.run())
