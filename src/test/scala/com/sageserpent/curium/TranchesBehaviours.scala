@@ -1,4 +1,4 @@
-package com.sageserpent.plutonium.curium
+package com.sageserpent.curium
 
 import ImmutableObjectStorage.{
   ObjectReferenceId,
@@ -7,7 +7,7 @@ import ImmutableObjectStorage.{
   TranchesContracts
 }
 import cats.effect.{Resource, IO}
-import com.sageserpent.plutonium.curium.ImmutableObjectStorageSpec.FakeTranches
+import com.sageserpent.curium.ImmutableObjectStorageSpec.FakeTranches
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Matchers}

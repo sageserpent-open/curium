@@ -1,10 +1,10 @@
-package com.sageserpent.plutonium.curium
+package com.sageserpent.curium
 
 import cats.effect.IO
 import cats.implicits._
 import com.sageserpent.plutonium.WorldH2StorageImplementation
-import com.sageserpent.plutonium.curium.H2ViaScalikeJdbcTranchesResource.TrancheId
-import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
+import com.sageserpent.curium.H2ViaScalikeJdbcTranchesResource.TrancheId
+import com.sageserpent.curium.ImmutableObjectStorage.{
   IntersessionState,
   Session
 }

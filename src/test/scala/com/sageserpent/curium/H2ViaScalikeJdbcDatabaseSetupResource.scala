@@ -1,4 +1,4 @@
-package com.sageserpent.plutonium.curium
+package com.sageserpent.curium
 
 import java.io.IOException
 import java.nio.file.attribute.BasicFileAttributes

@@ -1,7 +1,7 @@
-package com.sageserpent.plutonium.curium
+package com.sageserpent.curium
 
 import cats.effect.IO
-import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
+import com.sageserpent.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
   ObjectReferenceId,
   TrancheOfData,

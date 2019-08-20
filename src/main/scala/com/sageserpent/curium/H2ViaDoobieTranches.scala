@@ -1,11 +1,11 @@
-package com.sageserpent.plutonium.curium
+package com.sageserpent.curium
 
 import java.util.concurrent.ConcurrentMap
 
 import alleycats.std.all._
 import cats.effect.IO
 import com.google.common.collect.MapMaker
-import com.sageserpent.plutonium.curium.ImmutableObjectStorage.{
+import com.sageserpent.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
   ObjectReferenceId,
   TrancheOfData,

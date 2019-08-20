@@ -1,4 +1,4 @@
-package com.sageserpent.plutonium.curium
+package com.sageserpent.curium
 
 import cats.implicits._
 import org.scalameter.api.{Bench, Gen, exec}

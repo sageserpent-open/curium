@@ -1,11 +1,11 @@
-package com.sageserpent.plutonium.curium
+package com.sageserpent.curium
 
 import java.util.UUID
 
 import cats.free.FreeT
 import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
-import com.sageserpent.plutonium.curium.ImmutableObjectStorage._
+import com.sageserpent.curium.ImmutableObjectStorage._
 import org.scalacheck.{Arbitrary, Gen, Shrink}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Inspectors, Matchers}

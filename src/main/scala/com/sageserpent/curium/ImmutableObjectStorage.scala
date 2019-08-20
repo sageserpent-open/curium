@@ -1,4 +1,4 @@
-package com.sageserpent.plutonium.curium
+package com.sageserpent.curium
 import java.lang.reflect.Modifier
 import java.util.{HashMap => JavaHashMap}
 
