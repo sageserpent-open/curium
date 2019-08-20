@@ -17,7 +17,7 @@ import com.esotericsoftware.kryo.{
 }
 import com.github.benmanes.caffeine.cache.Cache
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnReverseMappingOnly}
-import com.sageserpent.plutonium.{caffeineBuilder, classFromType}
+import com.sageserpent.curium.classFromType
 import com.twitter.chill.{
   CleaningSerializer,
   EmptyScalaKryoInstantiator,
