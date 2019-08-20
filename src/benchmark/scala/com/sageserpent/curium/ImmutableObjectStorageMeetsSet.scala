@@ -2,14 +2,13 @@ package com.sageserpent.curium
 
 import cats.effect.IO
 import cats.implicits._
-import com.sageserpent.plutonium.WorldH2StorageImplementation
 import com.sageserpent.curium.H2ViaScalikeJdbcTranchesResource.TrancheId
 import com.sageserpent.curium.ImmutableObjectStorage.{
   IntersessionState,
   Session
 }
+import com.sageserpent.plutonium.WorldH2StorageImplementation
 
-import scala.collection.immutable.HashMap
 import scala.concurrent.duration.Deadline
 
 object ImmutableObjectStorageMeetsSet extends H2ViaScalikeJdbcTranchesResource {

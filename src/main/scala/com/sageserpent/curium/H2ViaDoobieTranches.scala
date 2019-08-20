@@ -1,10 +1,7 @@
 package com.sageserpent.curium
 
-import java.util.concurrent.ConcurrentMap
-
 import alleycats.std.all._
 import cats.effect.IO
-import com.google.common.collect.MapMaker
 import com.sageserpent.curium.ImmutableObjectStorage.{
   EitherThrowableOr,
   ObjectReferenceId,
@@ -14,7 +11,6 @@ import com.sageserpent.curium.ImmutableObjectStorage.{
 import doobie._
 import doobie.implicits._
 
-import scala.concurrent.duration._
 import scala.util.Try
 
 object H2ViaDoobieTranches {
@@ -23,7 +19,7 @@ object H2ViaDoobieTranches {
   val trancheCreation: ConnectionIO[Int] = sql"""
                              CREATE TABLE Tranche(
                                 trancheId	              IDENTITY  PRIMARY KEY,
-                                payload		              BLOB      NOT NULL,
+                                payload		              BINARY      NOT NULL,
                                 objectReferenceIdOffset INTEGER   NOT NULL
                              )
       """.update.run
