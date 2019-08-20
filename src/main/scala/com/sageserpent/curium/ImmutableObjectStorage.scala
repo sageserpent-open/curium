@@ -71,7 +71,7 @@ object ImmutableObjectStorage {
     def payloadSize: Int
   }
 
-  class IntersessionState[TrancheId] {
+  class IntersessionState[TrancheId](trancheIdCacheMaximumSize: Int = 100) {
     private val objectToReferenceIdCache: Cache[AnyRef, ObjectReferenceId] =
       caffeineBuilder()
         .executor(_.run())
@@ -104,7 +104,7 @@ object ImmutableObjectStorage {
       : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
         .executor(_.run())
-        .maximumSize(100)
+        .maximumSize(trancheIdCacheMaximumSize)
         .build[TrancheId, CompletedOperation]
 
     def noteCompletedOperation(trancheId: TrancheId,
