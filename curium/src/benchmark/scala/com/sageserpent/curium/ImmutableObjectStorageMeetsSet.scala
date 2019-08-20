@@ -49,7 +49,7 @@ object ImmutableObjectStorageMeetsSet extends H2ViaScalikeJdbcTranchesResource {
 
           val startTime = Deadline.now
 
-          for (step <- 0 until 6000000) {
+          for (step <- 0 until 10000000) {
             val session: Session[TrancheId] = for {
               set <- immutableObjectStorage.retrieve[Set[Int]](trancheId)
               mutatedSet = (if (0 == step % 2) set - (step / 2) else set) + step
