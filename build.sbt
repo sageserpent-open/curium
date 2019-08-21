@@ -42,7 +42,10 @@ lazy val settings = Seq(
   testFrameworks in Benchmark += new TestFramework(
     "org.scalameter.ScalaMeterFramework"
   ),
-  publishMavenStyle := true
+  publishMavenStyle := true,
+  bintrayReleaseOnPublish in ThisBuild := false,
+  licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
+  bintrayVcsUrl := Some("git@github.com:sageserpent-open/curium.git")
 )
 
 lazy val curium = (project in file("."))
