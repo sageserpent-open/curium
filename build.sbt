@@ -12,7 +12,6 @@ resolvers in ThisBuild += "Sonatype OSS Snapshots" at
 lazy val settings = Seq(
   organization := "com.sageserpent",
   name := "curium",
-  version := "0.1.0-SNAPSHOT",
   scalaVersion := "2.12.8",
   scalacOptions ++= Seq(
     "-Xexperimental",
@@ -42,7 +41,8 @@ lazy val settings = Seq(
   libraryDependencies += "com.storm-enroute" %% "scalameter" % "0.8.2" % "benchmark",
   testFrameworks in Benchmark += new TestFramework(
     "org.scalameter.ScalaMeterFramework"
-  )
+  ),
+  publishMavenStyle := true
 )
 
 lazy val curium = (project in file("."))
