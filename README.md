@@ -140,5 +140,13 @@ tranchesResource
   .unsafeRunSync()
 ```
 
+## Storage Backends ##
 
+There are two tranches implementations as of version 0.1.0 - both use an H2 database to store tranche data, one via Doobie and the other via ScalikeJDBC, although neither technology is visible from the point of view of the tranches API used by Curium.
+
+The ScalikeJDBC implementation is currently the recommended one to use - class `H2ViaScalikeJdbcTranches`. Take a look at `H2ViaScalikeJdbcSetupResource` to see how to configure an instance of it.
+
+There is also a test double implementation, `FakeTranches`, that is used by `ImmutableObjectStorageSpec` and which serves as a reference implementation.
+
+You are encouraged to provide your own tranches implementation to suit whatever storage technology fits your needs best. Do please use the tranches tests (see `TranchesBehaviours`) to test your implementations, and when they pass, please feel free to raise a pull request if you want to get them added to Curium. 
 
