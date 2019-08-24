@@ -150,3 +150,8 @@ There is also a test double implementation, `FakeTranches`, that is used by `Imm
 
 You are encouraged to provide your own tranches implementation to suit whatever storage technology fits your needs best. Do please use the tranches tests (see `TranchesBehaviours`) to test your implementations, and when they pass, please feel free to raise a pull request if you want to get them added to Curium. 
 
+## Who uses this already? ##
+
+This was broken out of the [Plutonium](https://github.com/sageserpent-open/plutonium) project as a standalone library, as I felt it could be useful in general - this why there is quite a bit of commit history prior to the initial 0.1.0 release; it has been extracted from the Plutonium commit history.
+
+Plutonium drives Curium quite hard, in that it has some fairly gnarly data structures of its own to store, in addition to its use of third party data structures such as the usual lists, tree sets, hash sets, tree maps, hash maps, vectors, the not so usual immutable multiset and finger trees, as well as Quiver.
