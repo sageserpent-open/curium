@@ -9,7 +9,7 @@ Ok, so you look at Hibernate etc, but realise that the Hibernate approach is to 
 
 How about using Java serialization or Kryo or some such like? While Java serialization is slow, Kryo performs well, so problem solved ... except that each serialization of the cosmic application object is going to store an application's worth of data. So if you have a map of one million key-value pairs, creating a new map with one updated or new key-value pair and serializing it will write all of the other pairs to storage again. That won't scale.
 
-Perhaps a database is the way to go - we have ScalikeJDBC, Slick, Quill, Doobie etc. All good, but the onus is on you to go through your application state and unpick into pieces that will fit nicely into a relational database.
+Perhaps a database is the way to go - we have ScalikeJDBC, Slick, Quill, Doobie etc. All good, but the onus is on you to go through your application state and unpick it into pieces that will fit nicely into a relational database.
 
 Have you tried doing this for a finger tree data structure, for instance? Perhaps the Quiver graph data structure? Better yet, both of them embedded deep within some other data structure that is your application state.
 
@@ -150,8 +150,42 @@ There is also a test double implementation, `FakeTranches`, that is used by `Imm
 
 You are encouraged to provide your own tranches implementation to suit whatever storage technology fits your needs best. Do please use the tranches tests (see `TranchesBehaviours`) to test your implementations, and when they pass, please feel free to raise a pull request if you want to get them added to Curium. 
 
-## Who uses this already? ##
+## Rhetorical Questions ##
 
-This was broken out of the [Plutonium](https://github.com/sageserpent-open/plutonium) project as a standalone library, as I felt it could be useful in general - this why there is quite a bit of commit history prior to the initial 0.1.0 release; it has been extracted from the Plutonium commit history.
+### How did this come about? ###
 
-Plutonium drives Curium quite hard, in that it has some fairly gnarly data structures of its own to store, in addition to its use of third party data structures such as the usual lists, tree sets, hash sets, tree maps, hash maps, vectors, the not so usual immutable multiset and finger trees, as well as Quiver.
+This was broken out of the [Plutonium](https://github.com/sageserpent-open/plutonium) project as a standalone library, as I felt it could be useful in general - this is why there is quite a bit of commit history prior to the initial 0.1.0 release; it has been extracted from the Plutonium commit history.
+
+### Does this really work with real code? ###
+
+Plutonium drives Curium quite hard, in that it has some fairly gnarly data structures of its own to store, in addition to its use of third party data structures such as the usual lists, tree sets, hash sets, tree maps, hash maps, vectors, the not so usual immutable multiset and finger trees, as well as the Quiver immutable graph data structure. Several obscure bugs in the Curium code were unearthed by running Plutonium's exhaustive Scalacheck tests; Curium's own tests have been bolstered retrospectively to reproduce these bugs, which are fixed in version 0.1.0.
+
+As usual, _caveat emptor_ - but the expectation is that any bugs you encounter should be quite obscure. Please contribute a bug report with a bug reproduction test if you encounter one.
+
+### What happens when my data structures evolve? ###
+
+Curium 0.1.0 uses Kryo 4.0.2 in its implementation, so the guarantees that Kryo makes regarding code change backward and forward compatibility are what you get with Curium. Please consult the Kryo documentation for this, there is some support.
+
+### Is this stable or work in progress? ###
+
+In terms of API stability, probably not as of version 0.1.0 - the intent is to solicit feedback and pull requests from potential consumers of this library.
+
+In so far as usage by Plutonium is concerned, then at some point the API may be extended to allow Kryo to be configured by client code using Curium; this would make a stronger case for forward and backward compatibility by allowing use of Kryo's tagged serializers, etc. 
+
+The tranche ids may evolve into a parameterised type to reflect the type of the corresponding stored object, perhaps?
+
+The API may change to allow more efficient use of Doobie - the current `H2ViaDoobieTranches` drives Doobie in a very clumsy way, which is why it is not the recommended implementation. This is not a reflection on Doobie itself, rather the tranches implementation using it.
+
+### Is there any code out there that *doesn't* work with Curium? ###
+
+Not as far as I know, but Curium builds proxies to allow lazy loading of parts of the application state across tranches; so if a class is say, final (`RedBlackTree`, I'm looking at you), it can't be proxied.
+
+Curium can be configured to build a proxy whose nominal type is that of an interface that a final class implements on a case-by-case basis - provided the code using instances of the final class only uses the interface, this will work nicely. An example of this can be seen in [WorldH2StorageImplementation](https://github.com/sageserpent-open/plutonium/blob/b648dac313d3288232ac2c973a8b8d75f5469452/src/main/scala/com/sageserpent/plutonium/WorldH2StorageImplementation.scala), look at the code in the standalone object `immutableObjectStorage`. Nevertheless, you are in the danger zone when you configure in proxies over interfaces.
+
+The default behaviour is simply to use a 'real' object, which in version 0.1.0 means that the object will be stored locally in the same tranche as whatever object references it - so no structure sharing in that particular case.
+
+### What about object identity? Will the object graph be the same when a tranche is retrieved to what is was when the tranche was stored? ###
+
+No, because in general, the two graphs will refer to different objects in different locations in memory, as often as not in different processes. Furthermore, the retrieved tranche object graph will contain lots of proxies that in turn delegate to the 'real' objects.
+
+The point is that due to the proxies delegating en-masse to the underlying objects and referential transparency, your pure functional code shouldn't be aware of the difference. Having said that, Curium will do its best to reproduce structure sharing for state either within the same tranche or across tranches, it has to do this to be a scalable storage solution. Hash maps and lists will work fine. Other things may need some special configuration, as mentioned above.
