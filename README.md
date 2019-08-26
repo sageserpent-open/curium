@@ -178,11 +178,11 @@ The API may change to allow more efficient use of Doobie - the current `H2ViaDoo
 
 ### Is there any code out there that *doesn't* work with Curium? ###
 
-Not as far as I know, but Curium builds proxies to allow lazy loading of parts of the application state across tranches; so if a class is say, final (`RedBlackTree`, I'm looking at you), it can't be proxied.
+Not as far as I know, but Curium builds proxies to allow lazy loading of parts of the application state across tranches; so if a class is say, final (`RedBlackTree`, I'm looking at you), its instances can't be proxied.
 
-Curium can be configured to build a proxy whose nominal type is that of an interface that a final class implements on a case-by-case basis - provided the code using instances of the final class only uses the interface, this will work nicely. An example of this can be seen in [WorldH2StorageImplementation](https://github.com/sageserpent-open/plutonium/blob/b648dac313d3288232ac2c973a8b8d75f5469452/src/main/scala/com/sageserpent/plutonium/WorldH2StorageImplementation.scala), look at the code in the standalone object `immutableObjectStorage`. Nevertheless, you are in the danger zone when you configure in proxies over interfaces.
+Curium can be configured to build proxies whose nominal type is that of an interface that a final class implements on a case-by-case basis - provided the code using instances of the final class only uses the interface, this will work nicely. An example of this can be seen in [WorldH2StorageImplementation](https://github.com/sageserpent-open/plutonium/blob/b648dac313d3288232ac2c973a8b8d75f5469452/src/main/scala/com/sageserpent/plutonium/WorldH2StorageImplementation.scala), look at the code in the standalone object `immutableObjectStorage`. Nevertheless, you are in the danger zone when you configure in proxies over interfaces.
 
-The default behaviour is simply to use a 'real' object, which in version 0.1.0 means that the object will be stored locally in the same tranche as whatever object references it - so no structure sharing in that particular case.
+The fallback behaviour when a object can't be proxied is to simply to use the object itself, which in version 0.1.0 means that the object will be stored locally in the same tranche as whatever object references it - so no structure sharing _across_ tranches in that particular case.
 
 ### What about object identity? Will the object graph be the same when a tranche is retrieved to what is was when the tranche was stored? ###
 
