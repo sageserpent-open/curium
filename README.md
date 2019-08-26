@@ -1,7 +1,7 @@
 # Curium - **_Storage for your immutable Scala objects_** [![Build Status](https://travis-ci.org/sageserpent-open/curium.svg?branch=master)](https://travis-ci.org/sageserpent-open/curium)
 
 ## Why ##
-You have written some beautiful Scala code that uses pure functional code to work on immutable Scala objects. You wrote tests, they passed first time (really?), the code was easy to refactor and extend thanks to referential transparency, lifting, types that guide your design, macros, Scalacheck, free monads, applicative functors, lenses and all those other shiny things that make Scala a joy to write code in.
+You have written some beautiful Scala that uses pure functional code to work on immutable Scala objects. You wrote tests, they passed first time (really?), the code was easy to refactor and extend thanks to referential transparency, lifting, types that guide your design, macros, Scalacheck, free monads, applicative functors, lenses and all those other shiny things that make Scala a joy to write code in.
 
 Except that when you move from running tests to actually providing an application or service that is going to be deployed, you suddenly remembered that you have to store your data somewhere. Real applications have to park their data on a hard drive or SSD or something; at the very least, they have to be restarted at some point and carry on from where they left off, even if they work on the model of keeping everything in memory to run as fast possible.
 
