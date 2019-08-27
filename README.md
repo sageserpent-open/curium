@@ -33,12 +33,12 @@ Interested?
 
 ## Where? ##
 
-It is published via Bintray. It is currently not available on JCenter.
+It is published to Bintray and is available via JCenter.
 
 #### SBT ####
 Add this to your _build.sbt_:
 
-    resolvers += Resolver.bintrayRepo("sageserpent-open", "maven")
+    resolvers += Resolver.jcenterRepo
     
     libraryDependencies += "com.sageserpent" %% "curium" % "0.1.0"
     
