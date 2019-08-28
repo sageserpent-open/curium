@@ -158,7 +158,7 @@ This was broken out of the [Plutonium](https://github.com/sageserpent-open/pluto
 
 ### Does this really work with real code? ###
 
-Plutonium drives Curium quite hard, in that it has some fairly gnarly data structures of its own to store, in addition to its use of third party data structures such as the usual lists, tree sets, hash sets, tree maps, hash maps, vectors, the not so usual immutable multiset and finger trees, as well as the Quiver immutable graph data structure. Several obscure bugs in the Curium code were unearthed by running Plutonium's exhaustive Scalacheck tests; Curium's own tests have been bolstered retrospectively to reproduce these bugs, which are fixed in version 0.1.0.
+Plutonium drives Curium quite hard, in that it has some fairly gnarly data structures of its own to store, in addition to its use of third party data structures such as the usual lists, tree sets, hash sets, tree maps, hash maps, vectors, the not so usual immutable multiset and finger trees, as well as the Quiver immutable graph data structure. Several obscure bugs in the Curium code were unearthed by running Plutonium's exhaustive Scalacheck tests; Curium's own Scalacheck tests have been bolstered retrospectively to reproduce these bugs, which are fixed in version 0.1.0.
 
 As usual, _caveat emptor_ - but the expectation is that any bugs you encounter should be quite obscure. Please contribute a bug report with a bug reproduction test if you encounter one.
 
