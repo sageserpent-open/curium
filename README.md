@@ -192,7 +192,7 @@ The point is that due to the proxies delegating en-masse to the underlying objec
 
 ### How does a tranches implementation relate to storage of tranche ids? ###
 
-It doesn't. The idea is that a tranches implementation stores the heavyweight tranche data for all of a process' stored tranches, making that data available again when the process restarts. Tranche ids on the other hand are lightweight tokens that tell the tranches implementation what tranche data to retrieve. Tranche ids are stored independently of the tranche data, and it is expected that completely different technologies would be used to do this; for example H2 or Phoenix / HBase for a tranches implementation, but A Kafka table for tranche ids. The latter allows a restarted process to quickly ascertain the tranche id of the last successfully stored tranche and to resurrect the application state based on that.
+It doesn't. The idea is that a tranches implementation stores the heavyweight tranche data for all of a process' stored tranches, making that data available again when the process restarts. Tranche ids on the other hand are lightweight tokens that tell the tranches implementation what tranche data to retrieve. Tranche ids are stored independently of the tranche data, and it is expected that completely different technologies would be used to do this; for example H2 or Phoenix / HBase for a tranches implementation, but a Kafka table for tranche ids. The latter allows a restarted process to quickly ascertain the tranche id of the last successfully stored tranche and to resurrect the application state based on that.
 
 ### What does a tranches implementation need to provide? ###
 
