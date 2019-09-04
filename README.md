@@ -46,9 +46,8 @@ Add this to your _build.sbt_:
 Add this to your _build.gradle_:
 
     repositories {
-	    maven {
-		    url  "https://dl.bintray.com/sageserpent-open/maven"
-	    }
+        jcenter()
+	// etc...
     }
 
     dependencies {
@@ -60,11 +59,21 @@ Add this to your _build.gradle_:
 ## Show me... ##
 
 ```scala
+// Support for resource management in this example, not mandatory for general use.
+import cats.effect.IO
+import cats.implicits._
+
+// Curium API and its intersession state memento.
+import com.sageserpent.curium.ImmutableObjectStorage
+import ImmutableObjectStorage.IntersessionState
+
 object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
   override protected val tranchesImplementationName: String =
     classOf[H2ViaScalikeJdbcTranches].getSimpleName
 }
+```
 
+```scala
 // Start by obtaining a tranches object that provides backend storage and retrieval of tranche data.
 // Use the one provided by the testing support - it spins up a temporary H2 database and uses that
 // for its implementation; the database is torn down when the resource is relinquished.
