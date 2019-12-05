@@ -2,12 +2,11 @@ package com.sageserpent.curium
 
 import cats.effect.IO
 import cats.implicits._
-import com.sageserpent.curium.ImmutableObjectStorage.{
-  IntersessionState,
-  Session
-}
+import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session}
+import com.sageserpent.americium.randomEnrichment._
 
 import scala.concurrent.duration.Deadline
+import scala.util.Random
 
 object ImmutableObjectStorageMeetsSet extends H2ViaScalikeJdbcTranchesResource {
   type TrancheId = H2ViaScalikeJdbcTranches#TrancheId
@@ -32,14 +31,19 @@ object ImmutableObjectStorageMeetsSet extends H2ViaScalikeJdbcTranchesResource {
                 .runToYieldTrancheId(session, intersessionState)(tranches)
             }
 
+            val randomBehaviour = new Random(53278953)
+
             var trancheId: TrancheId = initialTrancheId
 
             val startTime = Deadline.now
 
-            for (step <- 0 until 10000000) {
+            for (step <- 0 until 40000000) {
               val session: Session[TrancheId] = for {
                 set <- immutableObjectStorage.retrieve[Set[Int]](trancheId)
-                mutatedSet = (if (0 == step % 2) set - (step / 2) else set) + step
+                mutatedSet = (if (1 == step % 5) {
+                  val elementToRemove = randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(step)
+                  set - elementToRemove
+                } else set) + step
                 newTrancheId <- immutableObjectStorage.store(mutatedSet)
               } yield newTrancheId
 
@@ -48,7 +52,7 @@ object ImmutableObjectStorageMeetsSet extends H2ViaScalikeJdbcTranchesResource {
                 .right
                 .get
 
-              if (step % 50 == 0) {
+              if (step % 5000 == 0) {
                 val currentTime = Deadline.now
 
                 val duration = currentTime - startTime
@@ -58,7 +62,7 @@ object ImmutableObjectStorageMeetsSet extends H2ViaScalikeJdbcTranchesResource {
                 )
               }
             }
-        }
+          }
       )
       .unsafeRunSync()
   }
