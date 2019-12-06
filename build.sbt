@@ -31,6 +31,7 @@ lazy val settings = Seq(
   libraryDependencies += "org.tpolecat" %% "doobie-h2" % "0.7.0-M3",
   libraryDependencies += "org.scalikejdbc" %% "scalikejdbc" % "2.5.2",
   libraryDependencies += "com.h2database" % "h2" % "1.4.199",
+  libraryDependencies += "org.rocksdb" % "rocksdbjni" % "6.4.6",
   libraryDependencies += "com.zaxxer" % "HikariCP" % "3.3.1" % "test",
   libraryDependencies += "org.slf4j" % "slf4j-api" % "1.7.21" % "provided",
   libraryDependencies += "org.slf4j" % "slf4j-nop" % "1.7.21" % "test",

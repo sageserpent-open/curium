@@ -12,7 +12,9 @@ object H2ViaDoobieResource {
   implicit val cs = IO.contextShift(ExecutionContext.global)
 
   val transactorResource: Resource[IO, H2ViaDoobieTranches.Transactor] = for {
-    databaseName    <- Resource.liftF(IO { UUID.randomUUID().toString })
+    databaseName <- Resource.liftF(IO {
+      UUID.randomUUID().toString
+    })
     fixedThreadPool <- ExecutionContexts.fixedThreadPool[IO](32)
     cachedThreadPool <- ExecutionContexts
       .cachedThreadPool[IO]

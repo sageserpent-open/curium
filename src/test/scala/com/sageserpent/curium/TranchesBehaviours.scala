@@ -1,13 +1,9 @@
 package com.sageserpent.curium
 
-import ImmutableObjectStorage.{
-  ObjectReferenceId,
-  TrancheOfData,
-  Tranches,
-  TranchesContracts
-}
-import cats.effect.{Resource, IO}
+import cats.effect.{IO, Resource}
+import com.sageserpent.curium.ImmutableObjectStorage.{ObjectReferenceId, TrancheOfData, Tranches, TranchesContracts}
 import com.sageserpent.curium.ImmutableObjectStorageSpec.FakeTranches
+import com.sageserpent.curium.RocksDbTranchesResource.TranchesId
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Matchers}
@@ -26,12 +22,12 @@ object TranchesBehaviours {
     Gen.containerOf[Set, ObjectReferenceId](Gen.posNum[Int].map(_ - 1))
 
   val fakePayloadAndObjectReferenceIdOffsetsPairsGenerator
-    : Gen[(Array[Byte], Set[ObjectReferenceId])] =
+  : Gen[(Array[Byte], Set[ObjectReferenceId])] =
     Gen.zip(payloadGenerator, objectReferenceIdOffsetsGenerator)
 }
 
 trait TranchesBehaviours[TrancheId]
-    extends FlatSpec
+  extends FlatSpec
     with Matchers
     with GeneratorDrivenPropertyChecks {
   this: TranchesResource[TrancheId] =>
@@ -66,7 +62,7 @@ trait TranchesBehaviours[TrancheId]
               }
 
               trancheIds should have size numberOfPayloads
-          })
+            })
           .unsafeRunSync
     }
 
@@ -102,7 +98,7 @@ trait TranchesBehaviours[TrancheId]
                     retrievedTrancheId shouldBe trancheId
                   }
               }
-          })
+            })
           .unsafeRunSync
     }
 
@@ -137,7 +133,7 @@ trait TranchesBehaviours[TrancheId]
 
                   tranche shouldBe expectedTranche
               }
-          })
+            })
           .unsafeRunSync
     }
   }
@@ -148,17 +144,17 @@ object FakeTranchesResource {
 }
 
 trait FakeTranchesResource
-    extends TranchesResource[FakeTranchesResource.TrancheId] {
+  extends TranchesResource[FakeTranchesResource.TrancheId] {
 
   override val tranchesResource
-    : Resource[IO, Tranches[FakeTranchesResource.TrancheId]] =
+  : Resource[IO, Tranches[FakeTranchesResource.TrancheId]] =
     Resource.liftF(IO {
       new FakeTranches with TranchesContracts[FakeTranchesResource.TrancheId]
     })
 }
 
 class FakeTranchesSpec
-    extends TranchesBehaviours[FakeTranchesResource.TrancheId]
+  extends TranchesBehaviours[FakeTranchesResource.TrancheId]
     with FakeTranchesResource {
   "Fake tranches" should behave like tranchesBehaviour
 }
@@ -168,17 +164,17 @@ object H2ViaDoobieTranchesResource {
 }
 
 trait H2ViaDoobieTranchesResource
-    extends TranchesResource[H2ViaDoobieTranchesResource.TrancheId] {
+  extends TranchesResource[H2ViaDoobieTranchesResource.TrancheId] {
   override val tranchesResource
-    : Resource[IO, Tranches[H2ViaDoobieTranchesResource.TrancheId]] =
+  : Resource[IO, Tranches[H2ViaDoobieTranchesResource.TrancheId]] =
     H2ViaDoobieResource.transactorResource.map(
       transactor =>
         new H2ViaDoobieTranches(transactor)
-        with TranchesContracts[H2ViaDoobieTranchesResource.TrancheId])
+          with TranchesContracts[H2ViaDoobieTranchesResource.TrancheId])
 }
 
 class H2ViaDoobieTranchesSpec
-    extends TranchesBehaviours[H2ViaDoobieTranchesResource.TrancheId]
+  extends TranchesBehaviours[H2ViaDoobieTranchesResource.TrancheId]
     with H2ViaDoobieTranchesResource {
   "H2 tranches" should behave like tranchesBehaviour
 }
@@ -188,18 +184,32 @@ object H2ViaScalikeJdbcTranchesResource {
 }
 
 trait H2ViaScalikeJdbcTranchesResource
-    extends TranchesResource[H2ViaScalikeJdbcTranchesResource.TrancheId]
+  extends TranchesResource[H2ViaScalikeJdbcTranchesResource.TrancheId]
     with H2ViaScalikeJdbcDatabaseSetupResource {
   override val tranchesResource
-    : Resource[IO, Tranches[H2ViaScalikeJdbcTranchesResource.TrancheId]] =
+  : Resource[IO, Tranches[H2ViaScalikeJdbcTranchesResource.TrancheId]] =
     connectionPoolResource.map(
       connectionPool =>
         new H2ViaScalikeJdbcTranches(connectionPool)
-        with TranchesContracts[H2ViaDoobieTranchesResource.TrancheId])
+          with TranchesContracts[H2ViaDoobieTranchesResource.TrancheId])
 }
 
 class H2ViaScalikeJdbcTranchesSpec
-    extends TranchesBehaviours[H2ViaScalikeJdbcTranchesResource.TrancheId]
+  extends TranchesBehaviours[H2ViaScalikeJdbcTranchesResource.TrancheId]
     with H2ViaScalikeJdbcTranchesResource {
   "H2 tranches" should behave like tranchesBehaviour
+}
+
+object RocksDbTranchesResource {
+  type TranchesId = RocksDbTranches#TrancheId
+}
+
+trait RocksDbTranchesResource extends TranchesResource[RocksDbTranchesResource.TranchesId] with RocksDbResource {
+  override val tranchesResource: Resource[IO, Tranches[TranchesId]] = for {
+    rocksDb <- rocksDbResource
+  } yield new RocksDbTranches(rocksDb)
+}
+
+class RocksDbTranchesSpec extends TranchesBehaviours[RocksDbTranchesResource.TranchesId] with RocksDbTranchesResource {
+  "RocksDB tranches" should behave like tranchesBehaviour
 }
