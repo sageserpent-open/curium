@@ -8,12 +8,12 @@ import com.sageserpent.americium.randomEnrichment._
 import scala.concurrent.duration.Deadline
 import scala.util.Random
 
-object ImmutableObjectStorageMeetsSet extends H2ViaScalikeJdbcTranchesResource {
-  type TrancheId = H2ViaScalikeJdbcTranches#TrancheId
+object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
+  type TrancheId = RocksDbTranches#TrancheId
 
   object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
     override protected val tranchesImplementationName: String =
-      classOf[H2ViaScalikeJdbcTranches].getSimpleName
+      classOf[RocksDbTranches].getSimpleName
   }
 
   def main(args: Array[String]): Unit = {

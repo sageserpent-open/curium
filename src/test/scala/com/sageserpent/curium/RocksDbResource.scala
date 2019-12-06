@@ -5,7 +5,7 @@ import org.rocksdb.{Options, RocksDB}
 
 trait RocksDbResource extends DirectoryResource {
   def rocksDbResource: Resource[IO, RocksDB] = for {
-    databaseDirectory <- directoryResource("rockDB")
+    databaseDirectory <- directoryResource("rocksDB")
     rocksDb <- Resource.fromAutoCloseable(IO {
       RocksDB.open(new Options().setCreateIfMissing(true), databaseDirectory.toAbsolutePath.toString)
     })
