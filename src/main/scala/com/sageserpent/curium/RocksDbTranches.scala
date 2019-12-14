@@ -4,7 +4,7 @@ import java.util.UUID
 
 import com.google.common.primitives.Ints
 import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, ObjectReferenceId, TrancheOfData, Tranches}
-import org.rocksdb.{ColumnFamilyDescriptor, RocksDB}
+import org.rocksdb.{ColumnFamilyDescriptor, ColumnFamilyOptions, CompressionType, RocksDB}
 
 import scala.util.Try
 
@@ -18,9 +18,14 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Array[Byte]] {
 
   import RocksDbTranches._
 
-  val trancheIdKeyPayloadValueColumnFamily = rocksDb.createColumnFamily(new ColumnFamilyDescriptor(trancheIdKeyPayloadValueColumnFamilyName.getBytes))
-  val trancheIdKeyObjectReferenceIdOffsetValueFamily = rocksDb.createColumnFamily(new ColumnFamilyDescriptor(trancheIdKeyObjectReferenceIdOffsetValueFamilyName.getBytes))
-  val objectReferenceIdKeyTrancheIdValueColumnFamily = rocksDb.createColumnFamily(new ColumnFamilyDescriptor(objectReferenceIdKeyTrancheIdValueColumnFamilyName.getBytes))
+  val sharedColumnFamilyOptions = new ColumnFamilyOptions().setCompressionType(CompressionType.LZ4_COMPRESSION).setBottommostCompressionType(CompressionType.ZSTD_COMPRESSION)
+
+  val trancheIdKeyPayloadValueColumnFamily =
+    rocksDb.createColumnFamily(new ColumnFamilyDescriptor(trancheIdKeyPayloadValueColumnFamilyName.getBytes, sharedColumnFamilyOptions))
+  val trancheIdKeyObjectReferenceIdOffsetValueFamily =
+    rocksDb.createColumnFamily(new ColumnFamilyDescriptor(trancheIdKeyObjectReferenceIdOffsetValueFamilyName.getBytes, sharedColumnFamilyOptions))
+  val objectReferenceIdKeyTrancheIdValueColumnFamily =
+    rocksDb.createColumnFamily(new ColumnFamilyDescriptor(objectReferenceIdKeyTrancheIdValueColumnFamilyName.getBytes, sharedColumnFamilyOptions))
 
   override def createTrancheInStorage(payload: Array[Byte], objectReferenceIdOffset: ObjectReferenceId, objectReferenceIds: Set[ObjectReferenceId]): EitherThrowableOr[TrancheId] =
     Try {
