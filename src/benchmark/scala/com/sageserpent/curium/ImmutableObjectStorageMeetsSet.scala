@@ -37,13 +37,15 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
 
             val startTime = Deadline.now
 
-            for (step <- 0 until 40000000) {
+            val batchSize = 100
+
+            for (step <- 0 until 40000000 by batchSize) {
               val session: Session[TrancheId] = for {
                 set <- immutableObjectStorage.retrieve[Set[Int]](trancheId)
-                mutatedSet = (if (1 == step % 5) {
-                  val elementToRemove = randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(step)
-                  set - elementToRemove
-                } else set) + step
+                mutatedSet = (set /: (step until (batchSize + step)))((set2: Set[Int], step2: Int) => (if (1 == step2 % 5) {
+                  val elementToRemove = randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(step2)
+                  set2 - elementToRemove
+                } else set2) + step2)
                 newTrancheId <- immutableObjectStorage.store(mutatedSet)
               } yield newTrancheId
 
