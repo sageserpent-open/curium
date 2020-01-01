@@ -2,7 +2,7 @@ package com.sageserpent.curium
 
 import java.util.UUID
 
-import com.google.common.primitives.Ints
+import com.google.common.primitives.{Ints, Longs}
 import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, ObjectReferenceId, TrancheOfData, Tranches}
 import org.rocksdb.{ColumnFamilyDescriptor, ColumnFamilyOptions, CompressionType, RocksDB}
 
@@ -14,7 +14,7 @@ object RocksDbTranches {
   val objectReferenceIdKeyTrancheIdValueColumnFamilyName = "ObjectReferenceIdKeyTrancheIdValue"
 }
 
-class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Array[Byte]] {
+class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
 
   import RocksDbTranches._
 
@@ -29,14 +29,20 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Array[Byte]] {
 
   override def createTrancheInStorage(payload: Array[Byte], objectReferenceIdOffset: ObjectReferenceId, objectReferenceIds: Set[ObjectReferenceId]): EitherThrowableOr[TrancheId] =
     Try {
-      val trancheId = UUID.randomUUID().toString.getBytes
+      val trancheId = {
+        val iterator = rocksDb.newIterator(trancheIdKeyPayloadValueColumnFamily)
+        iterator.seekToLast()
+        if (iterator.isValid) 1L + Longs.fromByteArray(iterator.key()) else 0L
+      }
 
-      rocksDb.put(trancheIdKeyPayloadValueColumnFamily, trancheId, payload)
+      val trancheIdKey = Longs.toByteArray(trancheId)
 
-      rocksDb.put(trancheIdKeyObjectReferenceIdOffsetValueFamily, trancheId, Ints.toByteArray(objectReferenceIdOffset))
+      rocksDb.put(trancheIdKeyPayloadValueColumnFamily, trancheIdKey, payload)
+
+      rocksDb.put(trancheIdKeyObjectReferenceIdOffsetValueFamily, trancheIdKey, Ints.toByteArray(objectReferenceIdOffset))
 
       for (objectReferenceId <- objectReferenceIds) {
-        rocksDb.put(objectReferenceIdKeyTrancheIdValueColumnFamily, Ints.toByteArray(objectReferenceId), trancheId)
+        rocksDb.put(objectReferenceIdKeyTrancheIdValueColumnFamily, Ints.toByteArray(objectReferenceId), trancheIdKey)
       }
 
       trancheId
@@ -49,12 +55,13 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Array[Byte]] {
   } toEither
 
   override def retrieveTranche(trancheId: TrancheId): EitherThrowableOr[ImmutableObjectStorage.TrancheOfData] = Try {
-    val payload = rocksDb.get(trancheIdKeyPayloadValueColumnFamily, trancheId)
-    val objectReferenceIdOffset = Ints.fromByteArray(rocksDb.get(trancheIdKeyObjectReferenceIdOffsetValueFamily, trancheId))
+    val trancheIdKey = Longs.toByteArray(trancheId)
+    val payload = rocksDb.get(trancheIdKeyPayloadValueColumnFamily, trancheIdKey)
+    val objectReferenceIdOffset = Ints.fromByteArray(rocksDb.get(trancheIdKeyObjectReferenceIdOffsetValueFamily, trancheIdKey))
     TrancheOfData(payload, objectReferenceIdOffset)
   } toEither
 
   override def retrieveTrancheId(objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] = Try {
-    rocksDb.get(objectReferenceIdKeyTrancheIdValueColumnFamily, Ints.toByteArray(objectReferenceId))
+    Longs.fromByteArray(rocksDb.get(objectReferenceIdKeyTrancheIdValueColumnFamily, Ints.toByteArray(objectReferenceId)))
   } toEither
 }
