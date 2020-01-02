@@ -9,29 +9,14 @@ import cats.implicits._
 import com.esotericsoftware.kryo.serializers.ClosureSerializer
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.Util
-import com.esotericsoftware.kryo.{
-  Kryo,
-  ReferenceResolver,
-  Registration,
-  Serializer
-}
+import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Registration, Serializer}
 import com.github.benmanes.caffeine.cache.Cache
 import com.google.common.collect.{BiMap, BiMapUsingIdentityOnReverseMappingOnly}
-import com.twitter.chill.{
-  CleaningSerializer,
-  EmptyScalaKryoInstantiator,
-  KryoBase,
-  KryoInstantiator,
-  KryoPool
-}
+import com.twitter.chill.{CleaningSerializer, EmptyScalaKryoInstantiator, KryoBase, KryoInstantiator, KryoPool}
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
-import net.bytebuddy.implementation.bind.annotation.{
-  FieldValue,
-  Pipe,
-  RuntimeType
-}
+import net.bytebuddy.implementation.bind.annotation.{FieldValue, Pipe, RuntimeType}
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
@@ -39,6 +24,7 @@ import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
 import scala.collection.mutable
+import scala.ref.WeakReference
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
 import scala.util.{DynamicVariable, Try}
@@ -579,16 +565,16 @@ trait ImmutableObjectStorage[TrancheId] {
       class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
                           objectReferenceId: ObjectReferenceId)
           extends proxySupport.AcquiredState {
-        private var _underlying: Option[AnyRef] = None
+        private var _underlying: Option[WeakReference[AnyRef]] = None
 
         override def underlying: AnyRef = _underlying match {
-          case Some(result) => result
-          case None =>
+          case Some(WeakReference(result)) => result
+          case _ =>
             val result =
               retrieveUnderlying(trancheIdForExternalObjectReference,
                                  objectReferenceId)
 
-            _underlying = Some(result)
+            _underlying = Some(WeakReference(result))
 
             result
         }
