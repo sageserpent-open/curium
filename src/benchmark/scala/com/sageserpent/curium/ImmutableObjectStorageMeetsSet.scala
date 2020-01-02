@@ -21,7 +21,7 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
       .use(
         tranches =>
           IO {
-            val intersessionState = new IntersessionState[TrancheId](trancheIdCacheMaximumSize = 100)
+            val intersessionState = new IntersessionState[TrancheId](trancheIdCacheMaximumSize = 150)
 
             val Right(initialTrancheId: TrancheId) = {
               val session: Session[TrancheId] =
