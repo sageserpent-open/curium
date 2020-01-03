@@ -602,7 +602,7 @@ trait ImmutableObjectStorage[TrancheId] {
         override def getWrittenId(
             immutableObject: AnyRef): ObjectReferenceId = {
           (if (proxySupport.isProxy(immutableObject) || proxySupport
-                 .canBeProxied(immutableObject))
+                 .canBeProxied(immutableObject) || immutableObject.getClass.isArray)
              intersessionState
                .referenceIdFor(immutableObject)
            else
@@ -619,7 +619,7 @@ trait ImmutableObjectStorage[TrancheId] {
             referenceIdToObjectMap
               .put(nextObjectReferenceIdToAllocate, immutableObject))
 
-          if (proxySupport.canBeProxied(immutableObject)) {
+          if (proxySupport.canBeProxied(immutableObject) || immutableObject.getClass.isArray) {
             intersessionState.noteReferenceId(immutableObject,
                                               nextObjectReferenceIdToAllocate)
           }
@@ -659,7 +659,7 @@ trait ImmutableObjectStorage[TrancheId] {
             case None =>
           }
 
-          if (proxySupport.canBeProxied(immutableObject)) {
+          if (proxySupport.canBeProxied(immutableObject) || immutableObject.getClass.isArray) {
             intersessionState.noteReferenceId(immutableObject,
                                               objectReferenceId)
           }
@@ -688,10 +688,14 @@ trait ImmutableObjectStorage[TrancheId] {
                   .retrieveTrancheId(objectReferenceId)
 
               val proxy =
-                proxySupport.createProxy(
-                  clazz,
-                  new AcquiredState(trancheIdForExternalObjectReference,
-                                    objectReferenceId))
+                if (!clazz.isArray) {
+                  proxySupport.createProxy(
+                    clazz,
+                    new AcquiredState(trancheIdForExternalObjectReference,
+                      objectReferenceId))
+                } else {
+                  retrieveUnderlying(trancheIdForExternalObjectReference, objectReferenceId)
+                }
 
               intersessionState.noteReferenceId(proxy, objectReferenceId)
               intersessionState.noteProxy(objectReferenceId, proxy)
