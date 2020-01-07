@@ -94,12 +94,13 @@ object ImmutableObjectStorage {
       caffeineBuilder()
         .recordStats()
         .executor(_.run())
-        .maximumSize(trancheIdCacheMaximumSize)
+        .softValues()
         .build[TrancheId, CompletedOperation]
 
     def noteCompletedOperation(trancheId: TrancheId,
                                completedOperation: CompletedOperation): Unit = Timer.timed(category = "noteCompletedOperation") {
       trancheIdToCompletedOperationCache.put(trancheId, completedOperation)
+      if (completedOperation.payloadSize > maximumPayloadSize) maximumPayloadSize = completedOperation.payloadSize
     }
 
     def completedOperationFor(
@@ -112,7 +113,10 @@ object ImmutableObjectStorage {
       println(s"objectToReferenceIdCache: ${objectToReferenceIdCache.stats()}")
       println(s"referenceIdToProxyCache: ${referenceIdToProxyCache.stats()}")
       println(s"trancheIdToCompletedOperationCache: ${trancheIdToCompletedOperationCache.stats()}")
+      println(s"maximumPayloadSize: $maximumPayloadSize")
     }
+
+    var maximumPayloadSize = 0L
   }
 
   trait Tranches[TrancheIdImplementation] {
