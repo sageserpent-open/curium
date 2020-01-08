@@ -94,7 +94,8 @@ object ImmutableObjectStorage {
       caffeineBuilder()
         .recordStats()
         .executor(_.run())
-        .softValues()
+        .maximumSize(trancheIdCacheMaximumSize)
+        .removalListener((trancheId, completedOperation, _) => secondChanceTrancheIdToCompletedOperationCache.put(trancheId, completedOperation))
         .build[TrancheId, CompletedOperation]
 
     def noteCompletedOperation(trancheId: TrancheId,
@@ -103,10 +104,19 @@ object ImmutableObjectStorage {
       if (completedOperation.payloadSize > maximumPayloadSize) maximumPayloadSize = completedOperation.payloadSize
     }
 
+    private val secondChanceTrancheIdToCompletedOperationCache
+    : Cache[TrancheId, CompletedOperation] =
+      caffeineBuilder()
+        .recordStats()
+        .executor(_.run())
+        .softValues()
+        .build[TrancheId, CompletedOperation]
+
     def completedOperationFor(
                                trancheId: TrancheId): Option[CompletedOperation] =
       Timer.timed(category = "completedOperationFor") {
         Option(trancheIdToCompletedOperationCache.getIfPresent(trancheId))
+          .orElse(Option(secondChanceTrancheIdToCompletedOperationCache.getIfPresent(trancheId)))
       }
 
     def dumpStatistics() = {

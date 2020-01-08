@@ -44,7 +44,7 @@ lazy val settings = Seq(
     "org.scalameter.ScalaMeterFramework"
   ),
   fork in Benchmark := true,
-  javaOptions in Benchmark += "-Xmx8G",
+  javaOptions in Benchmark += "-Xmx5G",
   parallelExecution in Test := false,
   publishMavenStyle := true,
   bintrayReleaseOnPublish in ThisBuild := false,

@@ -20,7 +20,9 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
       .use(
         tranches =>
           IO {
-            val intersessionState = new IntersessionState[TrancheId](trancheIdCacheMaximumSize = 20000)
+            val batchSize = 100
+
+            val intersessionState = new IntersessionState[TrancheId](trancheIdCacheMaximumSize = 100 * batchSize)
 
             val Right(initialTrancheId: TrancheId) = {
               val session: Session[TrancheId] =
@@ -33,8 +35,6 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
             val randomBehaviour = new Random(53278953)
 
             var trancheId: TrancheId = initialTrancheId
-
-            val batchSize = 100
 
             for (step <- 0 until 40000000 by batchSize) {
               val session: Session[TrancheId] = for {
