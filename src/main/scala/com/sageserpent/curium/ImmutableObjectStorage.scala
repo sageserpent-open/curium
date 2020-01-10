@@ -62,73 +62,56 @@ object ImmutableObjectStorage {
   class IntersessionState[TrancheId](trancheIdCacheMaximumSize: Int = 100) {
     private val objectToReferenceIdCache: Cache[AnyRef, ObjectReferenceId] =
       caffeineBuilder()
-        .recordStats()
         .executor(_.run())
         .weakKeys()
         .build[AnyRef, ObjectReferenceId]()
 
     def noteReferenceId(immutableObject: AnyRef,
-                        objectReferenceId: ObjectReferenceId): Unit = Timer.timed("noteReferenceId") {
+                        objectReferenceId: ObjectReferenceId): Unit = {
       objectToReferenceIdCache.put(immutableObject, objectReferenceId)
     }
 
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
-      Timer.timed("referenceIdFor")(Option(objectToReferenceIdCache.getIfPresent(immutableObject)))
+      Option(objectToReferenceIdCache.getIfPresent(immutableObject))
 
     private val referenceIdToProxyCache: Cache[ObjectReferenceId, AnyRef] =
       caffeineBuilder()
-        .recordStats()
         .executor(_.run())
         .weakValues()
         .build[ObjectReferenceId, AnyRef]()
 
     def noteProxy(objectReferenceId: ObjectReferenceId,
                   immutableObject: AnyRef): Unit = {
-      Timer.timed("noteProxy")(referenceIdToProxyCache.put(objectReferenceId, immutableObject))
+      referenceIdToProxyCache.put(objectReferenceId, immutableObject)
     }
 
     def proxyFor(objectReferenceId: ObjectReferenceId) =
-      Timer.timed("proxyFor")(Option(referenceIdToProxyCache.getIfPresent(objectReferenceId)))
+      Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
     private val trancheIdToCompletedOperationCache
     : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
-        .recordStats()
         .executor(_.run())
         .maximumSize(trancheIdCacheMaximumSize)
         .removalListener((trancheId, completedOperation, _) => secondChanceTrancheIdToCompletedOperationCache.put(trancheId, completedOperation))
         .build[TrancheId, CompletedOperation]
 
     def noteCompletedOperation(trancheId: TrancheId,
-                               completedOperation: CompletedOperation): Unit = Timer.timed(category = "noteCompletedOperation") {
+                               completedOperation: CompletedOperation): Unit = {
       trancheIdToCompletedOperationCache.put(trancheId, completedOperation)
-      if (completedOperation.payloadSize > maximumPayloadSize) maximumPayloadSize = completedOperation.payloadSize
     }
 
     private val secondChanceTrancheIdToCompletedOperationCache
     : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
-        .recordStats()
         .executor(_.run())
         .expireAfterAccess(1L, TimeUnit.MINUTES)
         .build[TrancheId, CompletedOperation]
 
     def completedOperationFor(
                                trancheId: TrancheId): Option[CompletedOperation] =
-      Timer.timed(category = "completedOperationFor") {
-        Option(trancheIdToCompletedOperationCache.getIfPresent(trancheId))
-          .orElse(Option(secondChanceTrancheIdToCompletedOperationCache.getIfPresent(trancheId)))
-      }
-
-    def dumpStatistics() = {
-      println(s"objectToReferenceIdCache: ${objectToReferenceIdCache.stats()}")
-      println(s"referenceIdToProxyCache: ${referenceIdToProxyCache.stats()}")
-      println(s"trancheIdToCompletedOperationCache: ${trancheIdToCompletedOperationCache.stats()}")
-      println(s"secondChanceTrancheIdToCompletedOperationCache: ${secondChanceTrancheIdToCompletedOperationCache.stats()}")
-      println(s"maximumPayloadSize: $maximumPayloadSize")
-    }
-
-    var maximumPayloadSize = 0L
+      Option(trancheIdToCompletedOperationCache.getIfPresent(trancheId))
+        .orElse(Option(secondChanceTrancheIdToCompletedOperationCache.getIfPresent(trancheId)))
   }
 
   trait Tranches[TrancheIdImplementation] {
@@ -527,7 +510,7 @@ trait ImmutableObjectStorage[TrancheId] {
           super.addWrittenObject(immutableObject)
         }
 
-        abstract override def nextReadId(clazz: Class[_]): ObjectReferenceId = Timer.timed(category = "nextReadId (Contract)") {
+        abstract override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
           require(!proxySupport.isProxyClazz(clazz))
 
           super.nextReadId(clazz)
@@ -535,7 +518,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
         abstract override def setReadObject(
                                              objectReferenceId: ObjectReferenceId,
-                                             immutableObject: AnyRef): Unit = Timer.timed(category = "setReadObject (Contract)") {
+                                             immutableObject: AnyRef): Unit = {
           require(!proxySupport.isProxy(immutableObject))
 
           super.setReadObject(objectReferenceId, immutableObject)
@@ -543,7 +526,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
         abstract override def getReadObject(
                                              clazz: Class[_],
-                                             objectReferenceId: ObjectReferenceId): AnyRef = Timer.timed(category = "getReadObject (Contract)") {
+                                             objectReferenceId: ObjectReferenceId): AnyRef = {
           require(!proxySupport.isProxyClazz(clazz))
 
           val result = super.getReadObject(clazz, objectReferenceId)
@@ -570,10 +553,8 @@ trait ImmutableObjectStorage[TrancheId] {
         extends CompletedOperation {
         override def objectWithReferenceId(
                                             objectReferenceId: ObjectReferenceId): AnyRef =
-          Timer.timed(category = "objectWithReferenceId") {
-            trancheSpecificReferenceResolver
-              .objectWithReferenceId(objectReferenceId)
-          }
+          trancheSpecificReferenceResolver
+            .objectWithReferenceId(objectReferenceId)
       }
 
       private case class AssociatedValueForAlias(immutableObject: AnyRef)
@@ -587,22 +568,20 @@ trait ImmutableObjectStorage[TrancheId] {
 
       def retrieveUnderlying(trancheIdForExternalObjectReference: TrancheId,
                              objectReferenceId: ObjectReferenceId): AnyRef =
-        Timer.timed(category = "retrieveUnderlying") {
-          Timer.timed(category = "first try")(intersessionState
-            .completedOperationFor(trancheIdForExternalObjectReference))
-            .orElse(Timer.timed(category = "loading tranche and deserializing") {
-              val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
-              val Right(_) =
-                retrieveTrancheTopLevelObject(
-                  trancheIdForExternalObjectReference,
-                  placeholderClazzForTopLevelTrancheObject)
+        intersessionState
+          .completedOperationFor(trancheIdForExternalObjectReference)
+          .orElse {
+            val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
+            val Right(_) =
+              retrieveTrancheTopLevelObject(
+                trancheIdForExternalObjectReference,
+                placeholderClazzForTopLevelTrancheObject)
 
-              Timer.timed(category = "second try")(intersessionState.completedOperationFor(
-                trancheIdForExternalObjectReference))
-            })
-            .get
-            .objectWithReferenceId(objectReferenceId)
-        }
+            intersessionState.completedOperationFor(
+              trancheIdForExternalObjectReference)
+          }
+          .get
+          .objectWithReferenceId(objectReferenceId)
 
       class AcquiredState(trancheIdForExternalObjectReference: TrancheId,
                           objectReferenceId: ObjectReferenceId)
@@ -673,7 +652,7 @@ trait ImmutableObjectStorage[TrancheId] {
           nextObjectReferenceIdToAllocate
         }
 
-        override def nextReadId(clazz: Class[_]): ObjectReferenceId = Timer.timed(category = "nextReadId") {
+        override def nextReadId(clazz: Class[_]): ObjectReferenceId = {
           val nextObjectReferenceIdToAllocate = numberOfAssociationsForTheRelevantTrancheOnly + objectReferenceIdOffset
           assert(nextObjectReferenceIdToAllocate >= objectReferenceIdOffset) // No wrapping around.
 
@@ -685,7 +664,7 @@ trait ImmutableObjectStorage[TrancheId] {
         }
 
         override def setReadObject(objectReferenceId: ObjectReferenceId,
-                                   immutableObject: AnyRef): Unit = Timer.timed(category = "setReadObject") {
+                                   immutableObject: AnyRef): Unit = {
           require(objectReferenceIdOffset <= objectReferenceId)
 
           Option(
@@ -709,7 +688,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
         override def getReadObject(
                                     clazz: Class[_],
-                                    objectReferenceId: ObjectReferenceId): AnyRef = Timer.timed(category = "getReadObject") {
+                                    objectReferenceId: ObjectReferenceId): AnyRef = {
           // PLAN: if 'objectReferenceId' is greater than or equal to 'objectReferenceIdOffset',
           // we can resolve against the tranche associated with this reference resolver. Note that
           // we don't have to check any upper limit (and we couldn't anyway because it won't have been
@@ -753,76 +732,64 @@ trait ImmutableObjectStorage[TrancheId] {
       def retrieveTrancheTopLevelObject[X](
                                             trancheId: TrancheId,
                                             clazz: Class[X]): EitherThrowableOr[X] =
-        Timer.timed(category = "retrieveTrancheTopLevelObject") {
-          for {
-            tranche <- Timer.timed(category = "retrieving the tranche") {
-              tranches.retrieveTranche(trancheId)
-            }
-            result <- Try {
-              val objectReferenceIdOffset =
-                tranche.objectReferenceIdOffset
-              val trancheSpecificReferenceResolver =
-                new TrancheSpecificReferenceResolver(objectReferenceIdOffset)
-                  with ReferenceResolverContracts
+        for {
+          tranche <- tranches.retrieveTranche(trancheId)
+          result <- Try {
+            val objectReferenceIdOffset =
+              tranche.objectReferenceIdOffset
+            val trancheSpecificReferenceResolver =
+              new TrancheSpecificReferenceResolver(objectReferenceIdOffset)
+                with ReferenceResolverContracts
 
-              val deserialized =
-                Timer.timed(category = "deserializing") {
-                  sessionReferenceResolver.withValue(
-                    Some(trancheSpecificReferenceResolver)) {
-                    kryoPool.fromBytes(tranche.payload)
-                  }
-                }
-
-              Timer.timed(category = "caching the tranche") {
-                intersessionState.noteCompletedOperation(
-                  trancheId,
-                  new CompleteOperationImplementation(
-                    deserialized,
-                    trancheSpecificReferenceResolver,
-                    tranche.payload.length))
+            val deserialized =
+              sessionReferenceResolver.withValue(
+                Some(trancheSpecificReferenceResolver)) {
+                kryoPool.fromBytes(tranche.payload)
               }
 
-              clazz.cast(deserialized)
-            }.toEither
-          } yield result
-        }
+            intersessionState.noteCompletedOperation(
+              trancheId,
+              new CompleteOperationImplementation(
+                deserialized,
+                trancheSpecificReferenceResolver,
+                tranche.payload.length))
+
+            clazz.cast(deserialized)
+          }.toEither
+        } yield result
 
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
           case Store(immutableObject) =>
-            Timer.timed(category = "ImmutableObjectStorage.Store") {
-              for {
-                objectReferenceIdOffsetForNewTranche <- tranches.objectReferenceIdOffsetForNewTranche
-                trancheSpecificReferenceResolver = new TrancheSpecificReferenceResolver(
-                  objectReferenceIdOffsetForNewTranche)
-                  with ReferenceResolverContracts
-                serializedRepresentation: Array[Byte] = sessionReferenceResolver
-                  .withValue(Some(trancheSpecificReferenceResolver)) {
-                    kryoPool.toBytesWithClass(immutableObject)
-                  }
-                trancheId <- tranches
-                  .createTrancheInStorage(
-                    serializedRepresentation,
-                    objectReferenceIdOffsetForNewTranche,
-                    trancheSpecificReferenceResolver.writtenObjectReferenceIds)
-              } yield trancheId
-            }
+            for {
+              objectReferenceIdOffsetForNewTranche <- tranches.objectReferenceIdOffsetForNewTranche
+              trancheSpecificReferenceResolver = new TrancheSpecificReferenceResolver(
+                objectReferenceIdOffsetForNewTranche)
+                with ReferenceResolverContracts
+              serializedRepresentation: Array[Byte] = sessionReferenceResolver
+                .withValue(Some(trancheSpecificReferenceResolver)) {
+                  kryoPool.toBytesWithClass(immutableObject)
+                }
+              trancheId <- tranches
+                .createTrancheInStorage(
+                  serializedRepresentation,
+                  objectReferenceIdOffsetForNewTranche,
+                  trancheSpecificReferenceResolver.writtenObjectReferenceIds)
+            } yield trancheId
 
           case Retrieve(trancheId, clazz) =>
-            Timer.timed(category = "ImmutableObjectStorage.Retrieve") {
-              intersessionState
-                .completedOperationFor(trancheId)
-                .map(_.topLevelObject)
-                .fold {
-                  for {
-                    topLevelObject <- retrieveTrancheTopLevelObject[X](trancheId,
-                      clazz)
-                  } yield topLevelObject
+            intersessionState
+              .completedOperationFor(trancheId)
+              .map(_.topLevelObject)
+              .fold {
+                for {
+                  topLevelObject <- retrieveTrancheTopLevelObject[X](trancheId,
+                    clazz)
+                } yield topLevelObject
 
-                }(topLevelObject => Try {
-                  clazz.cast(topLevelObject)
-                }.toEither)
-            }
+              }(topLevelObject => Try {
+                clazz.cast(topLevelObject)
+              }.toEither)
         }
     }
 
