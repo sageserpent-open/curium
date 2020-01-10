@@ -1,6 +1,7 @@
 package com.sageserpent.curium
 
 import java.lang.reflect.Modifier
+import java.util.concurrent.TimeUnit
 import java.util.{HashMap => JavaHashMap}
 
 import cats.arrow.FunctionK
@@ -109,7 +110,7 @@ object ImmutableObjectStorage {
       caffeineBuilder()
         .recordStats()
         .executor(_.run())
-        .softValues()
+        .expireAfterAccess(1L, TimeUnit.MINUTES)
         .build[TrancheId, CompletedOperation]
 
     def completedOperationFor(
@@ -123,6 +124,7 @@ object ImmutableObjectStorage {
       println(s"objectToReferenceIdCache: ${objectToReferenceIdCache.stats()}")
       println(s"referenceIdToProxyCache: ${referenceIdToProxyCache.stats()}")
       println(s"trancheIdToCompletedOperationCache: ${trancheIdToCompletedOperationCache.stats()}")
+      println(s"secondChanceTrancheIdToCompletedOperationCache: ${secondChanceTrancheIdToCompletedOperationCache.stats()}")
       println(s"maximumPayloadSize: $maximumPayloadSize")
     }
 
@@ -753,7 +755,9 @@ trait ImmutableObjectStorage[TrancheId] {
                                             clazz: Class[X]): EitherThrowableOr[X] =
         Timer.timed(category = "retrieveTrancheTopLevelObject") {
           for {
-            tranche <- tranches.retrieveTranche(trancheId)
+            tranche <- Timer.timed(category = "retrieving the tranche") {
+              tranches.retrieveTranche(trancheId)
+            }
             result <- Try {
               val objectReferenceIdOffset =
                 tranche.objectReferenceIdOffset
