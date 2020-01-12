@@ -25,6 +25,8 @@ import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
 import scala.collection.mutable
+import scala.concurrent.duration
+import scala.concurrent.duration.Duration
 import scala.ref.WeakReference
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
@@ -59,7 +61,7 @@ object ImmutableObjectStorage {
     def payloadSize: Int
   }
 
-  class IntersessionState[TrancheId](trancheIdCacheMaximumSize: Int = 100) {
+  class IntersessionState[TrancheId](trancheIdCacheMaximumSize: Int = 100, secondaryTrancheIdCacheExpiry: Duration = Duration.create(1L, duration.MINUTES)) {
     private val objectToReferenceIdCache: Cache[AnyRef, ObjectReferenceId] =
       caffeineBuilder()
         .executor(_.run())
@@ -105,7 +107,7 @@ object ImmutableObjectStorage {
     : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
         .executor(_.run())
-        .expireAfterAccess(1L, TimeUnit.MINUTES)
+        .expireAfterAccess(secondaryTrancheIdCacheExpiry.toMillis, TimeUnit.MILLISECONDS)
         .build[TrancheId, CompletedOperation]
 
     def completedOperationFor(
