@@ -95,7 +95,6 @@ object ImmutableObjectStorage {
       caffeineBuilder()
         .executor(_.run())
         .maximumSize(trancheIdCacheMaximumSize)
-        .removalListener((trancheId, completedOperation, _) => secondChanceTrancheIdToCompletedOperationCache.put(trancheId, completedOperation))
         .recordStats()
         .build[TrancheId, CompletedOperation]
 
@@ -104,18 +103,9 @@ object ImmutableObjectStorage {
       trancheIdToCompletedOperationCache.put(trancheId, completedOperation)
     }
 
-    val secondChanceTrancheIdToCompletedOperationCache
-    : Cache[TrancheId, CompletedOperation] =
-      caffeineBuilder()
-        .executor(_.run())
-        .expireAfterAccess(secondaryTrancheIdCacheExpiry.toMillis, TimeUnit.MILLISECONDS)
-        .recordStats()
-        .build[TrancheId, CompletedOperation]
-
     def completedOperationFor(
                                trancheId: TrancheId): Option[CompletedOperation] =
       Option(trancheIdToCompletedOperationCache.getIfPresent(trancheId))
-        .orElse(Option(secondChanceTrancheIdToCompletedOperationCache.getIfPresent(trancheId)))
   }
 
   trait Tranches[TrancheIdImplementation] {

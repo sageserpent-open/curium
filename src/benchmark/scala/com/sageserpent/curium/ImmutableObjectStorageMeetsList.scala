@@ -58,7 +58,6 @@ object ImmutableObjectStorageMeetsList extends RocksDbTranchesResource {
                   s"Step: $step, duration: ${duration.toMillis} milliseconds"
                 )
                 println(s"trancheIdToCompletedOperationCache: ${intersessionState.trancheIdToCompletedOperationCache.stats()}, ${intersessionState.trancheIdToCompletedOperationCache.estimatedSize()}")
-                println(s"secondChanceTrancheIdToCompletedOperationCache: ${intersessionState.secondChanceTrancheIdToCompletedOperationCache.stats()}, ${intersessionState.secondChanceTrancheIdToCompletedOperationCache.estimatedSize()}")
               }
             }
           }
