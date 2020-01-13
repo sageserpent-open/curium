@@ -90,12 +90,13 @@ object ImmutableObjectStorage {
     def proxyFor(objectReferenceId: ObjectReferenceId) =
       Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
-    private val trancheIdToCompletedOperationCache
+    val trancheIdToCompletedOperationCache
     : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
         .executor(_.run())
         .maximumSize(trancheIdCacheMaximumSize)
         .removalListener((trancheId, completedOperation, _) => secondChanceTrancheIdToCompletedOperationCache.put(trancheId, completedOperation))
+        .recordStats()
         .build[TrancheId, CompletedOperation]
 
     def noteCompletedOperation(trancheId: TrancheId,
@@ -103,11 +104,12 @@ object ImmutableObjectStorage {
       trancheIdToCompletedOperationCache.put(trancheId, completedOperation)
     }
 
-    private val secondChanceTrancheIdToCompletedOperationCache
+    val secondChanceTrancheIdToCompletedOperationCache
     : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
         .executor(_.run())
         .expireAfterAccess(secondaryTrancheIdCacheExpiry.toMillis, TimeUnit.MILLISECONDS)
+        .recordStats()
         .build[TrancheId, CompletedOperation]
 
     def completedOperationFor(

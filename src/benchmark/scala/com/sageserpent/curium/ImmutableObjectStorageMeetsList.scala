@@ -2,18 +2,20 @@ package com.sageserpent.curium
 
 import cats.effect.IO
 import cats.implicits._
-import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session}
 
 import scala.concurrent.duration.Deadline
-import scala.util.Random
 
-object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
+object ImmutableObjectStorageMeetsList extends RocksDbTranchesResource {
   type TrancheId = RocksDbTranches#TrancheId
 
   object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
     override protected val tranchesImplementationName: String =
       classOf[RocksDbTranches].getSimpleName
+
+    override protected def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
+      classOf[List[_]].isAssignableFrom(clazz) ||
+        super.canBeProxiedViaSuperTypes(clazz)
   }
 
   def main(args: Array[String]): Unit = {
@@ -25,13 +27,11 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
 
             val Right(initialTrancheId: TrancheId) = {
               val session: Session[TrancheId] =
-                immutableObjectStorage.store(Set.empty[Int])
+                immutableObjectStorage.store(List.empty[Int])
 
               immutableObjectStorage
                 .runToYieldTrancheId(session, intersessionState)(tranches)
             }
-
-            val randomBehaviour = new Random(53278953)
 
             var trancheId: TrancheId = initialTrancheId
 
@@ -39,11 +39,8 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
 
             for (step <- 0 until 40000000) {
               val session: Session[TrancheId] = for {
-                set <- immutableObjectStorage.retrieve[Set[Int]](trancheId)
-                mutatedSet = (if (1 == step % 5) {
-                  val elementToRemove = randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(step)
-                  set - elementToRemove
-                } else set) + step
+                list <- immutableObjectStorage.retrieve[List[Int]](trancheId)
+                mutatedSet = step :: (if (1 == step % 5) list.tail else list)
                 newTrancheId <- immutableObjectStorage.store(mutatedSet)
               } yield newTrancheId
 
@@ -60,6 +57,8 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
                 println(
                   s"Step: $step, duration: ${duration.toMillis} milliseconds"
                 )
+                println(s"trancheIdToCompletedOperationCache: ${intersessionState.trancheIdToCompletedOperationCache.stats()}, ${intersessionState.trancheIdToCompletedOperationCache.estimatedSize()}")
+                println(s"secondChanceTrancheIdToCompletedOperationCache: ${intersessionState.secondChanceTrancheIdToCompletedOperationCache.stats()}, ${intersessionState.secondChanceTrancheIdToCompletedOperationCache.estimatedSize()}")
               }
             }
           }
