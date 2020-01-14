@@ -90,12 +90,11 @@ object ImmutableObjectStorage {
     def proxyFor(objectReferenceId: ObjectReferenceId) =
       Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
-    val trancheIdToCompletedOperationCache
+    private val trancheIdToCompletedOperationCache
     : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
         .executor(_.run())
         .maximumSize(trancheIdCacheMaximumSize)
-        .recordStats()
         .build[TrancheId, CompletedOperation]
 
     def noteCompletedOperation(trancheId: TrancheId,
