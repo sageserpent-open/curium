@@ -25,7 +25,7 @@ object ImmutableObjectStorageMeetsList extends RocksDbTranchesResource {
       .use(
         tranches =>
           IO {
-            val intersessionState = new IntersessionState[TrancheId](trancheIdCacheMaximumSize = 1000)
+            val intersessionState = new IntersessionState[TrancheId](trancheIdCacheMaximumSize = 150)
 
             val Right(initialTrancheId: TrancheId) = {
               val session: Session[TrancheId] =
@@ -41,15 +41,17 @@ object ImmutableObjectStorageMeetsList extends RocksDbTranchesResource {
 
             val startTime = Deadline.now
 
+            val rangeToRemoveACandidateFrom = 200
+
             for (step <- 0 until 100000000) {
               val session: Session[TrancheId] = for {
                 list <- immutableObjectStorage.retrieve[List[Int]](trancheId)
-                mutatedSet = step :: (if (1 == step % 5) {
-                  val indexOfElementToRemove = randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(6 min step)
+                mutatedList = step :: (if (rangeToRemoveACandidateFrom <= step && 1 == step % 5) {
+                  val indexOfElementToRemove = randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(rangeToRemoveACandidateFrom)
                   val (partOne, partTwo) = list.splitAt(indexOfElementToRemove)
                   partOne ++ partTwo.tail
                 } else list)
-                newTrancheId <- immutableObjectStorage.store(mutatedSet)
+                newTrancheId <- immutableObjectStorage.store(mutatedList)
               } yield newTrancheId
 
               trancheId = immutableObjectStorage
