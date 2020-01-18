@@ -8,16 +8,12 @@ import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session
 import scala.concurrent.duration.Deadline
 import scala.util.Random
 
-object ImmutableObjectStorageMeetsList extends RocksDbTranchesResource {
+object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
   type TrancheId = RocksDbTranches#TrancheId
 
   object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
     override protected val tranchesImplementationName: String =
       classOf[RocksDbTranches].getSimpleName
-
-    override protected def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
-      classOf[List[_]].isAssignableFrom(clazz) ||
-        super.canBeProxiedViaSuperTypes(clazz)
   }
 
   def main(args: Array[String]): Unit = {
@@ -29,7 +25,7 @@ object ImmutableObjectStorageMeetsList extends RocksDbTranchesResource {
 
             val Right(initialTrancheId: TrancheId) = {
               val session: Session[TrancheId] =
-                immutableObjectStorage.store(List.empty[Int])
+                immutableObjectStorage.store(Set.empty[Int])
 
               immutableObjectStorage
                 .runToYieldTrancheId(session, intersessionState)(tranches)
@@ -41,17 +37,14 @@ object ImmutableObjectStorageMeetsList extends RocksDbTranchesResource {
 
             val startTime = Deadline.now
 
-            val rangeToRemoveACandidateFrom = 200
-
             for (step <- 0 until 100000000) {
               val session: Session[TrancheId] = for {
-                list <- immutableObjectStorage.retrieve[List[Int]](trancheId)
-                mutatedList = step :: (if (rangeToRemoveACandidateFrom <= step && 1 == step % 5) {
-                  val indexOfElementToRemove = randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(rangeToRemoveACandidateFrom)
-                  val (partOne, partTwo) = list.splitAt(indexOfElementToRemove)
-                  partOne ++ partTwo.tail
-                } else list)
-                newTrancheId <- immutableObjectStorage.store(mutatedList)
+                set <- immutableObjectStorage.retrieve[Set[Int]](trancheId)
+                mutatedSet = (if (1 == step % 5) {
+                  val elementToRemove = randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(step)
+                  set - elementToRemove
+                } else set) + step
+                newTrancheId <- immutableObjectStorage.store(mutatedSet)
               } yield newTrancheId
 
               trancheId = immutableObjectStorage

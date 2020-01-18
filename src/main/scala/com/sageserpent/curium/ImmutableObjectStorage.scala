@@ -1,7 +1,6 @@
 package com.sageserpent.curium
 
 import java.lang.reflect.Modifier
-import java.util.concurrent.TimeUnit
 import java.util.{HashMap => JavaHashMap}
 
 import cats.arrow.FunctionK
@@ -25,8 +24,6 @@ import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
 import scala.collection.mutable
-import scala.concurrent.duration
-import scala.concurrent.duration.Duration
 import scala.ref.WeakReference
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
@@ -61,7 +58,7 @@ object ImmutableObjectStorage {
     def payloadSize: Int
   }
 
-  class IntersessionState[TrancheId](trancheIdCacheMaximumSize: Int = 100, secondaryTrancheIdCacheExpiry: Duration = Duration.create(1L, duration.MINUTES)) {
+  class IntersessionState[TrancheId](trancheIdCacheMaximumSize: Int = 100) {
     private val objectToReferenceIdCache: Cache[AnyRef, ObjectReferenceId] =
       caffeineBuilder()
         .executor(_.run())
