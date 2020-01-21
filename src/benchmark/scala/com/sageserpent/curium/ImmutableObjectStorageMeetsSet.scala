@@ -2,8 +2,8 @@ package com.sageserpent.curium
 
 import cats.effect.IO
 import cats.implicits._
-import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session}
 import com.sageserpent.americium.randomEnrichment._
+import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session}
 
 import scala.concurrent.duration.Deadline
 import scala.util.Random
@@ -21,7 +21,7 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
       .use(
         tranches =>
           IO {
-            val intersessionState = new IntersessionState[TrancheId]
+            val intersessionState = new IntersessionState[TrancheId](trancheIdCacheMaximumSize = 50)
 
             val Right(initialTrancheId: TrancheId) = {
               val session: Session[TrancheId] =
@@ -37,7 +37,7 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
 
             val startTime = Deadline.now
 
-            for (step <- 0 until 40000000) {
+            for (step <- 0 until 100000000) {
               val session: Session[TrancheId] = for {
                 set <- immutableObjectStorage.retrieve[Set[Int]](trancheId)
                 mutatedSet = (if (1 == step % 5) {

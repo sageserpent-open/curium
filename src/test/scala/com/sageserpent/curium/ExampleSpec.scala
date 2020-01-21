@@ -20,7 +20,7 @@ class ExampleSpec
     with H2ViaScalikeJdbcTranchesResource {
   import ExampleSpec._
 
-  "storing and retrieving a series immutable of objects that share structure" should "work" in {
+  "storing and retrieving a series of immutable of objects that share structure" should "work" in {
     // Start by obtaining a tranches object that provides backend storage and retrieval of tranche data.
     // Use the one provided by the testing support - it spins up a temporary H2 database and uses that
     // for its implementation; the database is torn down when the resource is relinquished.

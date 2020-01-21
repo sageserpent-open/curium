@@ -43,6 +43,8 @@ lazy val settings = Seq(
   testFrameworks in Benchmark += new TestFramework(
     "org.scalameter.ScalaMeterFramework"
   ),
+  fork in Benchmark := true,
+  javaOptions in Benchmark += "-Xmx1G",
   parallelExecution in Test := false,
   publishMavenStyle := true,
   bintrayReleaseOnPublish in ThisBuild := false,
