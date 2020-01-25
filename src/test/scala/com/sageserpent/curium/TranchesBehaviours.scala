@@ -3,7 +3,6 @@ package com.sageserpent.curium
 import cats.effect.{IO, Resource}
 import com.sageserpent.curium.ImmutableObjectStorage.{ObjectReferenceId, TrancheOfData, Tranches, TranchesContracts}
 import com.sageserpent.curium.ImmutableObjectStorageSpec.FakeTranches
-import com.sageserpent.curium.RocksDbTranchesResource.TranchesId
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Matchers}
@@ -201,15 +200,15 @@ class H2ViaScalikeJdbcTranchesSpec
 }
 
 object RocksDbTranchesResource {
-  type TranchesId = RocksDbTranches#TrancheId
+  type TrancheId = RocksDbTranches#TrancheId
 }
 
-trait RocksDbTranchesResource extends TranchesResource[RocksDbTranchesResource.TranchesId] with RocksDbResource {
-  override val tranchesResource: Resource[IO, Tranches[TranchesId]] = for {
+trait RocksDbTranchesResource extends TranchesResource[RocksDbTranchesResource.TrancheId] with RocksDbResource {
+  override val tranchesResource: Resource[IO, Tranches[RocksDbTranchesResource.TrancheId]] = for {
     rocksDb <- rocksDbResource
   } yield new RocksDbTranches(rocksDb)
 }
 
-class RocksDbTranchesSpec extends TranchesBehaviours[RocksDbTranchesResource.TranchesId] with RocksDbTranchesResource {
+class RocksDbTranchesSpec extends TranchesBehaviours[RocksDbTranchesResource.TrancheId] with RocksDbTranchesResource {
   "RocksDB tranches" should behave like tranchesBehaviour
 }
