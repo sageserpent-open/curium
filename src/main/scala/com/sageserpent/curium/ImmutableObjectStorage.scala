@@ -34,9 +34,10 @@ object ImmutableObjectStorage {
 
   case class TrancheOfData(payload: Array[Byte],
                            objectReferenceIdOffset: ObjectReferenceId) {
-    // TODO: have to override the default implementation solely to deal with array
-    // equality - should cutover to using the augmented array type in Scala when I
-    // remember what it is....
+    // NOTE: 'WrappedArray' isn't used here as it could require non-trivial runtime conversions
+    // if the array type is cast, or needs support to work with Doobie and other things that need
+    // an explicit typeclass for it.
+
     override def equals(another: Any): Boolean = another match {
       case TrancheOfData(payload, objectReferenceIdOffset) =>
         this.payload
@@ -44,8 +45,10 @@ object ImmutableObjectStorage {
       case _ => false
     }
 
+    override def hashCode(): ObjectReferenceId = MurmurHash3.productHash(MurmurHash3.bytesHash(payload) -> objectReferenceIdOffset)
+
     override def toString: String =
-      s"TrancheOfData(payload hash: ${MurmurHash3.arrayHash(payload)}, object reference id offset: $objectReferenceIdOffset)"
+      s"TrancheOfData(payload hash: ${MurmurHash3.bytesHash(payload)}, object reference id offset: $objectReferenceIdOffset)"
   }
 
   type EitherThrowableOr[X] = Either[Throwable, X]
@@ -162,7 +165,12 @@ object ImmutableObjectStorage {
 
     abstract override def retrieveTranche(
                                            trancheId: TranchesContracts.this.TrancheId)
-    : EitherThrowableOr[TrancheOfData] = super.retrieveTranche(trancheId)
+    : EitherThrowableOr[TrancheOfData] =
+      for {tranche <- super.retrieveTranche(trancheId)
+           objectReferenceIdOffsetForNewTranche <- this.objectReferenceIdOffsetForNewTranche
+           _ <- Try {
+             assert(objectReferenceIdOffsetForNewTranche >= tranche.objectReferenceIdOffset)
+           }.toEither} yield tranche
   }
 
   trait Operation[Result]
