@@ -12,7 +12,7 @@ resolvers in ThisBuild += "Sonatype OSS Snapshots" at
 lazy val settings = Seq(
   organization := "com.sageserpent",
   name := "curium",
-  scalaVersion := "2.12.8",
+  scalaVersion := "2.12.11",
   scalacOptions ++= Seq(
     "-Xexperimental",
     "-target:jvm-1.8",
