@@ -1,7 +1,7 @@
 package com.sageserpent.curium
 
 import cats.effect.{IO, Resource}
-import com.sageserpent.curium.ImmutableObjectStorage.{ObjectReferenceId, TrancheOfData, Tranches, TranchesContracts}
+import com.sageserpent.curium.ImmutableObjectStorage.{TrancheOfData, Tranches, TranchesContracts}
 import com.sageserpent.curium.ImmutableObjectStorageSpec.FakeTranches
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
@@ -17,12 +17,12 @@ object TranchesBehaviours {
   val payloadGenerator: Gen[Array[Byte]] =
     Gen.containerOf[Array, Byte](Arbitrary.arbByte.arbitrary)
 
-  val objectReferenceIdOffsetsGenerator: Gen[Set[Int]] =
-    Gen.containerOf[Set, ObjectReferenceId](Gen.posNum[Int].map(_ - 1))
+  val objectReferenceIdCountGenerator: Gen[Int] =
+    Gen.posNum[Int].map(_ - 1)
 
-  val fakePayloadAndObjectReferenceIdOffsetsPairsGenerator
-  : Gen[(Array[Byte], Set[ObjectReferenceId])] =
-    Gen.zip(payloadGenerator, objectReferenceIdOffsetsGenerator)
+  val fakePayloadAndObjectReferenceIdCountPairsGenerator
+  : Gen[(Array[Byte], Int)] =
+    Gen.zip(payloadGenerator, objectReferenceIdCountGenerator)
 }
 
 trait TranchesBehaviours[TrancheId]
@@ -37,20 +37,20 @@ trait TranchesBehaviours[TrancheId]
 
     "creating a tranche" should "yield a unique tranche id" in forAll(
       Gen
-        .nonEmptyListOf(fakePayloadAndObjectReferenceIdOffsetsPairsGenerator)) {
-      payloadAndOffsetsPairs =>
+        .nonEmptyListOf(fakePayloadAndObjectReferenceIdCountPairsGenerator)) {
+      payloadAndCountPairs =>
         tranchesResource
           .use(tranches =>
             IO {
-              val numberOfPayloads = payloadAndOffsetsPairs.size
+              val numberOfPayloads = payloadAndCountPairs.size
 
               val trancheIds = MutableSet.empty[TrancheId]
 
-              for ((payload, offsets) <- payloadAndOffsetsPairs) {
+              for ((payload, count) <- payloadAndCountPairs) {
                 val Right(trancheId) =
                   for {
                     objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
-                    objectReferenceIds = offsets map (_ + objectReferenceIdOffset)
+                    objectReferenceIds = objectReferenceIdOffset to count + objectReferenceIdOffset
                     trancheId <- tranches.createTrancheInStorage(
                       payload,
                       objectReferenceIdOffset,
@@ -67,19 +67,19 @@ trait TranchesBehaviours[TrancheId]
 
     it should "permit retrieval of that tranche id from any of the associated object reference ids" in forAll(
       Gen
-        .nonEmptyListOf(fakePayloadAndObjectReferenceIdOffsetsPairsGenerator)) {
-      payloadAndOffsetsPairs =>
+        .nonEmptyListOf(fakePayloadAndObjectReferenceIdCountPairsGenerator)) {
+      payloadAndCountPairs =>
         tranchesResource
           .use(tranches =>
             IO {
               val objectReferenceIdsByTrancheId =
-                MutableMap.empty[TrancheId, Set[ObjectReferenceId]]
+                MutableMap.empty[TrancheId, Range]
 
-              for ((payload, offsets) <- payloadAndOffsetsPairs) {
+              for ((payload, count) <- payloadAndCountPairs) {
                 val Right((trancheId, objectReferenceIds)) =
                   for {
                     objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
-                    objectReferenceIds = offsets map (_ + objectReferenceIdOffset)
+                    objectReferenceIds = objectReferenceIdOffset to count + objectReferenceIdOffset
                     trancheId <- tranches.createTrancheInStorage(
                       payload,
                       objectReferenceIdOffset,
@@ -103,19 +103,19 @@ trait TranchesBehaviours[TrancheId]
 
     "retrieving a tranche by tranche id" should "yield a tranche that corresponds to what was used to create it" in forAll(
       Gen
-        .nonEmptyListOf(fakePayloadAndObjectReferenceIdOffsetsPairsGenerator)) {
-      payloadAndOffsetsPairs =>
+        .nonEmptyListOf(fakePayloadAndObjectReferenceIdCountPairsGenerator)) {
+      payloadAndCountPairs =>
         tranchesResource
           .use(tranches =>
             IO {
               val trancheIdToExpectedTrancheMapping =
                 MutableMap.empty[TrancheId, TrancheOfData]
 
-              for ((payload, offsets) <- payloadAndOffsetsPairs) {
+              for ((payload, count) <- payloadAndCountPairs) {
                 val Right((trancheId, tranche)) =
                   for {
                     objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
-                    objectReferenceIds = offsets map (_ + objectReferenceIdOffset)
+                    objectReferenceIds = objectReferenceIdOffset to count + objectReferenceIdOffset
                     trancheId <- tranches.createTrancheInStorage(
                       payload,
                       objectReferenceIdOffset,

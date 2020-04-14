@@ -1,12 +1,7 @@
 package com.sageserpent.curium
 
 import cats.effect.IO
-import com.sageserpent.curium.ImmutableObjectStorage.{
-  EitherThrowableOr,
-  ObjectReferenceId,
-  TrancheOfData,
-  Tranches
-}
+import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, ObjectReferenceId, TrancheOfData, Tranches}
 import scalikejdbc._
 
 import scala.util.Try
@@ -31,41 +26,43 @@ object H2ViaScalikeJdbcTranches {
              )
          """.update.apply()
           }
-      })
+        })
 }
 
 class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
-    extends Tranches[Long] {
+  extends Tranches[Long] {
   override def createTrancheInStorage(
-      payload: Array[Byte],
-      objectReferenceIdOffset: ObjectReferenceId,
-      objectReferenceIds: Set[ObjectReferenceId])
-    : EitherThrowableOr[TrancheId] =
+                                       payload: Array[Byte],
+                                       objectReferenceIdOffset: ObjectReferenceId,
+                                       objectReferenceIds: Range)
+  : EitherThrowableOr[TrancheId] =
     Try {
       DBResource(connectionPool)
         .use(db =>
           IO {
             db localTx {
               implicit session: DBSession =>
-                val trancheId: TrancheId = sql"""
+                val trancheId: TrancheId =
+                  sql"""
           INSERT INTO Tranche(payload, objectReferenceIdOffset) VALUES ($payload, $objectReferenceIdOffset)
        """.updateAndReturnGeneratedKey("trancheId")
-                  .apply()
+                    .apply()
 
-                val _ = sql"""
+                val _ =
+                  sql"""
           INSERT INTO ObjectReference(objectReferenceId, trancheId) VALUES (?, ?)
          """.batch(objectReferenceIds.toSeq map (objectReferenceId =>
                     Seq(objectReferenceId, trancheId.toString)): _*)
-                  .apply()
+                    .apply()
 
                 trancheId
             }
-        })
+          })
         .unsafeRunSync()
     }.toEither
 
   override def objectReferenceIdOffsetForNewTranche
-    : EitherThrowableOr[ObjectReferenceId] =
+  : EitherThrowableOr[ObjectReferenceId] =
     Try {
       DBResource(connectionPool)
         .use(db =>
@@ -74,17 +71,17 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
               sql"""
           SELECT MAX(objectReferenceId) FROM ObjectReference
        """.map(_.intOpt(1)
-                  .fold(0)(100 + _) /* TODO - switch back to an offset of 1. */ )
+                .fold(0)(100 + _) /* TODO - switch back to an offset of 1. */)
                 .single()
                 .apply()
                 .get
             }
-        })
+          })
         .unsafeRunSync()
     }.toEither
 
   override def retrieveTranche(
-      trancheId: TrancheId): EitherThrowableOr[TrancheOfData] =
+                                trancheId: TrancheId): EitherThrowableOr[TrancheOfData] =
     Try {
       DBResource(connectionPool)
         .use(db =>
@@ -94,19 +91,19 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
                 sql"""
           SELECT payload, objectReferenceIdOffset FROM Tranche WHERE $trancheId = TrancheId
        """.map(resultSet =>
-                    TrancheOfData(payload = resultSet.bytes("payload"),
-                                  objectReferenceIdOffset =
-                                    resultSet.int("objectReferenceIdOffset")))
+                  TrancheOfData(payload = resultSet.bytes("payload"),
+                    objectReferenceIdOffset =
+                      resultSet.int("objectReferenceIdOffset")))
                   .single()
                   .apply()
                   .get
             }
-        })
+          })
         .unsafeRunSync()
     }.toEither
 
   override def retrieveTrancheId(
-      objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] =
+                                  objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] =
     Try {
       DBResource(connectionPool)
         .use(db =>
@@ -116,7 +113,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
            SELECT trancheId FROM ObjectReference WHERE $objectReferenceId = objectReferenceId
          """.map(_.long("trancheId")).single().apply().get
             }
-        })
+          })
         .unsafeRunSync()
     }.toEither
 }

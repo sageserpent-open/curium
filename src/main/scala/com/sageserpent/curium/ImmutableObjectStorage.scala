@@ -112,7 +112,7 @@ object ImmutableObjectStorage {
 
     def createTrancheInStorage(payload: Array[Byte],
                                objectReferenceIdOffset: ObjectReferenceId,
-                               objectReferenceIds: Set[ObjectReferenceId])
+                               objectReferenceIds: Range)
     : EitherThrowableOr[TrancheId]
 
     def objectReferenceIdOffsetForNewTranche
@@ -135,7 +135,7 @@ object ImmutableObjectStorage {
     abstract override def createTrancheInStorage(
                                                   payload: Array[Byte],
                                                   objectReferenceIdOffset: ObjectReferenceId,
-                                                  objectReferenceIds: Set[ObjectReferenceId])
+                                                  objectReferenceIds: Range)
     : EitherThrowableOr[TrancheId] =
       for {
         _ <- Try {
@@ -609,8 +609,10 @@ trait ImmutableObjectStorage[TrancheId] {
           BiMapUsingIdentityOnReverseMappingOnly.fromForwardMap(
             new JavaHashMap())
 
-        def writtenObjectReferenceIds: Set[ObjectReferenceId] =
-          (0 until numberOfAssociationsForTheRelevantTrancheOnly) map (objectReferenceIdOffset + _) toSet
+        def writtenObjectReferenceIds: Range =
+          // NOTE: mapping the addition of 'objectReferenceIdOffset' builds an 'IndexedSeq' that
+          // isn't a range, so use the prolix approach to ensure we keep a range implementation.
+          objectReferenceIdOffset until objectReferenceIdOffset + numberOfAssociationsForTheRelevantTrancheOnly
 
         def objectWithReferenceId(
                                    objectReferenceId: ObjectReferenceId): AnyRef =

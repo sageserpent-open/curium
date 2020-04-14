@@ -10,25 +10,23 @@ import org.scalacheck.{Arbitrary, Gen, Shrink}
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Inspectors, Matchers}
 
-import scala.collection.mutable.{
-  Map => MutableMap,
-  SortedMap => MutableSortedMap
-}
+import scala.collection.mutable.{Map => MutableMap, SortedMap => MutableSortedMap}
 import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
+
   class FakeTranches extends Tranches[UUID] {
     val tranchesById: MutableMap[TrancheId, TrancheOfData] =
       MutableMap.empty
     val objectReferenceIdsToAssociatedTrancheIdMap
-      : MutableSortedMap[ObjectReferenceId, TrancheId]           = MutableSortedMap.empty
+    : MutableSortedMap[ObjectReferenceId, TrancheId] = MutableSortedMap.empty
     var _objectReferenceIdOffsetForNewTranche: ObjectReferenceId = 0
 
     def purgeTranche(trancheId: TrancheId): Unit = {
       val objectReferenceIdsToRemove =
         objectReferenceIdsToAssociatedTrancheIdMap.collect {
           case (objectReferenceId, associatedTrancheId)
-              if trancheId == associatedTrancheId =>
+            if trancheId == associatedTrancheId =>
             objectReferenceId
         }
 
@@ -38,10 +36,10 @@ object ImmutableObjectStorageSpec {
     }
 
     override def createTrancheInStorage(
-        payload: Array[Byte],
-        objectReferenceIdOffset: ObjectReferenceId,
-        objectReferenceIds: Set[ObjectReferenceId])
-      : EitherThrowableOr[TrancheId] =
+                                         payload: Array[Byte],
+                                         objectReferenceIdOffset: ObjectReferenceId,
+                                         objectReferenceIds: Range)
+    : EitherThrowableOr[TrancheId] =
       Try {
         val trancheId = UUID.randomUUID()
 
@@ -66,15 +64,19 @@ object ImmutableObjectStorageSpec {
       }.toEither
 
     override def retrieveTranche(
-        trancheId: TrancheId): scala.Either[scala.Throwable, TrancheOfData] =
-      Try { tranchesById(trancheId) }.toEither
+                                  trancheId: TrancheId): scala.Either[scala.Throwable, TrancheOfData] =
+      Try {
+        tranchesById(trancheId)
+      }.toEither
 
     override def retrieveTrancheId(objectReferenceId: ObjectReferenceId)
-      : scala.Either[scala.Throwable, TrancheId] =
-      Try { objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) }.toEither
+    : scala.Either[scala.Throwable, TrancheId] =
+      Try {
+        objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId)
+      }.toEither
 
     override def objectReferenceIdOffsetForNewTranche
-      : EitherThrowableOr[ObjectReferenceId] =
+    : EitherThrowableOr[ObjectReferenceId] =
       _objectReferenceIdOffsetForNewTranche.pure[EitherThrowableOr]
   }
 
@@ -94,13 +96,15 @@ object ImmutableObjectStorageSpec {
   val labelStrings: Set[String] = Set("Huey", "Duey", "Louie")
 
   case class Leaf(id: Int, labelString: String) extends Part {
-    val problematicClosure: Any => String      = (_: Any) => aThing + aThing
+    val problematicClosure: Any => String = (_: Any) => aThing + aThing
+
     override def useProblematicClosure: String = problematicClosure()
   }
 
   case class Fork(left: Part, id: Int, right: Part, labelString: String)
-      extends Part {
-    val problematicClosure: Any => String      = (_: Any) => s"$aThing"
+    extends Part {
+    val problematicClosure: Any => String = (_: Any) => s"$aThing"
+
     override def useProblematicClosure: String = problematicClosure()
   }
 
@@ -162,8 +166,8 @@ object ImmutableObjectStorageSpec {
       }
 
     def storeViaMultipleSessions(
-        intersessionState: IntersessionState[TrancheId],
-        tranches: FakeTranches): Vector[TrancheId] = {
+                                  intersessionState: IntersessionState[TrancheId],
+                                  tranches: FakeTranches): Vector[TrancheId] = {
       val chunks: Seq[Vector[PartGrowthStep]] =
         thingsInChunks(chunkSizes, steps)
           .map(_.toVector)
@@ -185,7 +189,7 @@ object ImmutableObjectStorageSpec {
         val Right(trancheIdsForChunk) =
           immutableObjectStorage
             .runToYieldTrancheIds(retrievalAndStorageSession,
-                                  intersessionState)(tranches)
+              intersessionState)(tranches)
 
         trancheIdsSoFar ++= trancheIdsForChunk
       }
@@ -195,10 +199,10 @@ object ImmutableObjectStorageSpec {
   }
 
   def partGrowthLeadingToRootForkGenerator(
-      allowDuplicates: Boolean): Gen[PartGrowth] =
+                                            allowDuplicates: Boolean): Gen[PartGrowth] =
     for {
       numberOfLeavesRequired <- Gen.posNum[ObjectReferenceId]
-      seed                   <- seedGenerator
+      seed <- seedGenerator
     } yield
       partGrowthLeadingToRootFork(allowDuplicates, numberOfLeavesRequired, seed)
 
@@ -210,10 +214,10 @@ object ImmutableObjectStorageSpec {
     val randomBehaviour = new Random(seed)
 
     def growthSteps(
-        partIdSetsCoveredBySubparts: Vector[Set[ObjectReferenceId]],
-        numberOfLeaves: ObjectReferenceId): Stream[PartGrowthStep] = {
-      val numberOfSubparts                            = partIdSetsCoveredBySubparts.size
-      val partId                                      = numberOfSubparts // Makes it easier to read the test cases when debugging; the ids label the growth steps in ascending order.
+                     partIdSetsCoveredBySubparts: Vector[Set[ObjectReferenceId]],
+                     numberOfLeaves: ObjectReferenceId): Stream[PartGrowthStep] = {
+      val numberOfSubparts = partIdSetsCoveredBySubparts.size
+      val partId = numberOfSubparts // Makes it easier to read the test cases when debugging; the ids label the growth steps in ascending order.
       val collectingStrandsTogetherAsHaveEnoughLeaves = numberOfLeaves == numberOfLeavesRequired
 
       require(
@@ -231,10 +235,11 @@ object ImmutableObjectStorageSpec {
 
           Leaf(numberOfSubparts, label)
         }
+
         leaf _ #:: growthSteps(partIdSetsCoveredBySubparts :+ Set(partId),
-                               1 + numberOfLeaves)
+          1 + numberOfLeaves)
       } else if (allowDuplicates && 0 < numberOfSubparts && randomBehaviour
-                   .nextBoolean())
+        .nextBoolean())
         ((_: Vector[Part]).last) #:: growthSteps(
           partIdSetsCoveredBySubparts :+ partIdSetsCoveredBySubparts.last,
           numberOfLeaves)
@@ -263,7 +268,7 @@ object ImmutableObjectStorageSpec {
             randomBehaviour
               .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
         val partIdsCoveredByThisFork
-          : Set[ObjectReferenceId] = partIdSetsCoveredBySubparts(
+        : Set[ObjectReferenceId] = partIdSetsCoveredBySubparts(
           indexOfLeftSubpart) ++ Set(partId) ++ partIdSetsCoveredBySubparts(
           indexOfRightSubpart)
         val allSubpartsIncludedInThisFork =
@@ -274,20 +279,20 @@ object ImmutableObjectStorageSpec {
           require(numberOfSubparts == subparts.size)
 
           Fork(subparts(indexOfLeftSubpart),
-               partId,
-               subparts(indexOfRightSubpart),
-               label)
+            partId,
+            subparts(indexOfRightSubpart),
+            label)
         }
 
         val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
           collectingStrandsTogetherAsHaveEnoughLeaves
 
         fork _ #:: (if (thisCouldBeTheLastStep &&
-                        randomBehaviour.nextBoolean()) Stream.empty
-                    else
-                      growthSteps(
-                        partIdSetsCoveredBySubparts :+ partIdsCoveredByThisFork,
-                        numberOfLeaves))
+          randomBehaviour.nextBoolean()) Stream.empty
+        else
+          growthSteps(
+            partIdSetsCoveredBySubparts :+ partIdsCoveredByThisFork,
+            numberOfLeaves))
       }
     }
 
@@ -311,8 +316,8 @@ object ImmutableObjectStorageSpec {
           mergesOfChunkSizes(chunkSizes) // This can happen if the chunks are all of size 1.
         else
           mergedChunkSizes #:: (if (1 < mergedChunkSizes.size)
-                                  mergesOfChunkSizes(mergedChunkSizes)
-                                else Stream.empty)
+            mergesOfChunkSizes(mergedChunkSizes)
+          else Stream.empty)
       }
 
       val shrunkViaMergingChunks =
@@ -337,9 +342,10 @@ object ImmutableObjectStorageSpec {
 }
 
 class ImmutableObjectStorageSpec
-    extends FlatSpec
+  extends FlatSpec
     with Matchers
     with GeneratorDrivenPropertyChecks {
+
   import ImmutableObjectStorageSpec._
 
   implicit val shrinker: Shrink[PartGrowth] = Shrink(shrink)
@@ -432,7 +438,9 @@ class ImmutableObjectStorageSpec
       _ <- (referencePartsByTrancheId(sampleTrancheId) match {
         case _: Fork => immutableObjectStorage.retrieve[Leaf](sampleTrancheId)
         case _: Leaf => immutableObjectStorage.retrieve[Fork](sampleTrancheId)
-      }) flatMap (part => FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+      }) flatMap (part => FreeT.liftT(Try {
+        part.hashCode
+      }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
     immutableObjectStorage.runForEffectsOnly(
@@ -466,7 +474,9 @@ class ImmutableObjectStorageSpec
 
     val samplingSessionWithCorruptedTranche: Session[Unit] = for {
       _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
-        FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+        FreeT.liftT(Try {
+          part.hashCode
+        }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
     val freshIntersessionState = new IntersessionState[TrancheId]
@@ -497,7 +507,9 @@ class ImmutableObjectStorageSpec
 
     val samplingSessionWithMissingTranche: Session[Unit] = for {
       _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
-        FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+        FreeT.liftT(Try {
+          part.hashCode
+        }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
     val freshIntersessionState = new IntersessionState[TrancheId]
@@ -533,7 +545,9 @@ class ImmutableObjectStorageSpec
 
     val samplingSessionWithTrancheForIncompatibleType: Session[Unit] = for {
       _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
-        FreeT.liftT(Try { part.hashCode }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+        FreeT.liftT(Try {
+          part.hashCode
+        }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
     } yield ()
 
     val freshIntersessionState = new IntersessionState[TrancheId]
@@ -550,7 +564,7 @@ class ImmutableObjectStorageSpec
       val intersessionState = new IntersessionState[TrancheId]
 
       val isolatedSpokeTranches = new FakeTranches
-      with TranchesContracts[TrancheId]
+        with TranchesContracts[TrancheId]
 
       val root = partGrowth.parts().last
 

@@ -2,12 +2,7 @@ package com.sageserpent.curium
 
 import alleycats.std.all._
 import cats.effect.IO
-import com.sageserpent.curium.ImmutableObjectStorage.{
-  EitherThrowableOr,
-  ObjectReferenceId,
-  TrancheOfData,
-  Tranches
-}
+import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, ObjectReferenceId, TrancheOfData, Tranches}
 import doobie._
 import doobie.implicits._
 
@@ -16,7 +11,8 @@ import scala.util.Try
 object H2ViaDoobieTranches {
   type Transactor = doobie.util.transactor.Transactor[IO]
 
-  val trancheCreation: ConnectionIO[Int] = sql"""
+  val trancheCreation: ConnectionIO[Int] =
+    sql"""
                              CREATE TABLE Tranche(
                                 trancheId	              IDENTITY  PRIMARY KEY,
                                 payload		              BINARY      NOT NULL,
@@ -50,7 +46,8 @@ object H2ViaDoobieTranches {
 
   def dropDatabaseTables(transactor: Transactor): IO[Unit] = {
     val dropAll: ConnectionIO[Unit] = for {
-      _ <- sql"""
+      _ <-
+        sql"""
            DROP ALL OBJECTS
          """.update.run
     } yield {}
@@ -59,7 +56,7 @@ object H2ViaDoobieTranches {
   }
 
   val objectReferenceIdOffsetForNewTrancheQuery
-    : ConnectionIO[ObjectReferenceId] =
+  : ConnectionIO[ObjectReferenceId] =
     sql"""
           SELECT MAX(objectReferenceId) FROM ObjectReference
        """
@@ -69,14 +66,15 @@ object H2ViaDoobieTranches {
 }
 
 class H2ViaDoobieTranches(transactor: H2ViaDoobieTranches.Transactor)
-    extends Tranches[Long] {
+  extends Tranches[Long] {
+
   import H2ViaDoobieTranches.objectReferenceIdOffsetForNewTrancheQuery
 
   override def createTrancheInStorage(
-      payload: Array[Byte],
-      objectReferenceIdOffset: ObjectReferenceId,
-      objectReferenceIds: Set[ObjectReferenceId])
-    : EitherThrowableOr[TrancheId] = {
+                                       payload: Array[Byte],
+                                       objectReferenceIdOffset: ObjectReferenceId,
+                                       objectReferenceIds: Range)
+  : EitherThrowableOr[TrancheId] = {
     val insertion: ConnectionIO[TrancheId] = for {
       trancheId <- sql"""
           INSERT INTO Tranche(payload, objectReferenceIdOffset) VALUES ($payload, $objectReferenceIdOffset)
@@ -86,14 +84,16 @@ class H2ViaDoobieTranches(transactor: H2ViaDoobieTranches.Transactor)
       _ <- Update[(ObjectReferenceId, TrancheId)](
         """
           INSERT INTO ObjectReference(objectReferenceId, trancheId) VALUES (?, ?)
-         """).updateMany(objectReferenceIds map (_ -> trancheId))
+         """).updateMany(objectReferenceIds.toSet map ((_: ObjectReferenceId) -> trancheId))
     } yield trancheId
 
-    Try { insertion.transact(transactor).unsafeRunSync }.toEither
+    Try {
+      insertion.transact(transactor).unsafeRunSync
+    }.toEither
   }
 
   override def objectReferenceIdOffsetForNewTranche
-    : EitherThrowableOr[ObjectReferenceId] =
+  : EitherThrowableOr[ObjectReferenceId] =
     Try {
       objectReferenceIdOffsetForNewTrancheQuery
         .transact(transactor)
@@ -101,22 +101,26 @@ class H2ViaDoobieTranches(transactor: H2ViaDoobieTranches.Transactor)
     }.toEither
 
   override def retrieveTranche(
-      trancheId: TrancheId): EitherThrowableOr[TrancheOfData] = {
+                                trancheId: TrancheId): EitherThrowableOr[TrancheOfData] = {
     val trancheOfDataQuery: ConnectionIO[TrancheOfData] =
       sql"""
           SELECT payload, objectReferenceIdOffset FROM Tranche WHERE $trancheId = TrancheId 
        """.query[TrancheOfData].unique
 
-    Try { trancheOfDataQuery.transact(transactor).unsafeRunSync }.toEither
+    Try {
+      trancheOfDataQuery.transact(transactor).unsafeRunSync
+    }.toEither
   }
 
   override def retrieveTrancheId(
-      objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] = {
+                                  objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] = {
     val trancheIdQuery: ConnectionIO[TrancheId] =
       sql"""
              SELECT trancheId FROM ObjectReference WHERE $objectReferenceId = objectReferenceId
            """.query[TrancheId].unique
 
-    Try { trancheIdQuery.transact(transactor).unsafeRunSync }.toEither
+    Try {
+      trancheIdQuery.transact(transactor).unsafeRunSync
+    }.toEither
   }
 }

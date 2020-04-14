@@ -1,7 +1,5 @@
 package com.sageserpent.curium
 
-import java.util.UUID
-
 import com.google.common.primitives.{Ints, Longs}
 import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, ObjectReferenceId, TrancheOfData, Tranches}
 import org.rocksdb.{ColumnFamilyDescriptor, ColumnFamilyOptions, CompressionType, RocksDB}
@@ -27,7 +25,7 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
   val objectReferenceIdKeyTrancheIdValueColumnFamily =
     rocksDb.createColumnFamily(new ColumnFamilyDescriptor(objectReferenceIdKeyTrancheIdValueColumnFamilyName.getBytes, sharedColumnFamilyOptions))
 
-  override def createTrancheInStorage(payload: Array[Byte], objectReferenceIdOffset: ObjectReferenceId, objectReferenceIds: Set[ObjectReferenceId]): EitherThrowableOr[TrancheId] =
+  override def createTrancheInStorage(payload: Array[Byte], objectReferenceIdOffset: ObjectReferenceId, objectReferenceIds: Range): EitherThrowableOr[TrancheId] =
     Try {
       val trancheId = {
         val iterator = rocksDb.newIterator(trancheIdKeyPayloadValueColumnFamily)
