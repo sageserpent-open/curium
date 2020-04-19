@@ -5,6 +5,7 @@ import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session}
 
+import scala.collection.immutable.HashSet
 import scala.concurrent.duration.Deadline
 import scala.util.Random
 
@@ -21,11 +22,10 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
       .use(
         tranches =>
           IO {
-            val intersessionState = new IntersessionState[TrancheId](trancheIdCacheMaximumSize = 50)
-
+            val intersessionState = new IntersessionState[TrancheId]
             val Right(initialTrancheId: TrancheId) = {
               val session: Session[TrancheId] =
-                immutableObjectStorage.store(Set.empty[Int])
+                immutableObjectStorage.store(HashSet.empty[Int])
 
               immutableObjectStorage
                 .runToYieldTrancheId(session, intersessionState)(tranches)
@@ -41,7 +41,7 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
               val session: Session[TrancheId] = for {
                 set <- immutableObjectStorage.retrieve[Set[Int]](trancheId)
                 mutatedSet = (if (1 == step % 5) {
-                  val elementToRemove = randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(step)
+                  val elementToRemove = step - randomBehaviour.chooseAnyNumberFromOneTo(100000 min step)
                   set - elementToRemove
                 } else set) + step
                 newTrancheId <- immutableObjectStorage.store(mutatedSet)
