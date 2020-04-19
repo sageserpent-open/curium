@@ -61,7 +61,7 @@ object ImmutableObjectStorage {
     def payloadSize: Int
   }
 
-  class IntersessionState[TrancheId](trancheIdCacheMaximumSize: Int = 100) {
+  class IntersessionState[TrancheId]() {
     private val objectToReferenceIdCache: Cache[AnyRef, ObjectReferenceId] =
       caffeineBuilder()
         .executor(_.run())
@@ -71,30 +71,26 @@ object ImmutableObjectStorage {
     def noteReferenceId(immutableObject: AnyRef,
                         objectReferenceId: ObjectReferenceId): Unit = {
       objectToReferenceIdCache.put(immutableObject, objectReferenceId)
+      referenceIdToObjectCache.put(objectReferenceId, immutableObject)
     }
 
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
       Option(objectToReferenceIdCache.getIfPresent(immutableObject))
 
-    private val referenceIdToProxyCache: Cache[ObjectReferenceId, AnyRef] =
+    private val referenceIdToObjectCache: Cache[ObjectReferenceId, AnyRef] =
       caffeineBuilder()
         .executor(_.run())
         .weakValues()
         .build[ObjectReferenceId, AnyRef]()
 
-    def noteProxy(objectReferenceId: ObjectReferenceId,
-                  immutableObject: AnyRef): Unit = {
-      referenceIdToProxyCache.put(objectReferenceId, immutableObject)
-    }
-
-    def proxyFor(objectReferenceId: ObjectReferenceId) =
-      Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
+    def objectFor(objectReferenceId: ObjectReferenceId) =
+      Option(referenceIdToObjectCache.getIfPresent(objectReferenceId))
 
     private val trancheIdToCompletedOperationCache
     : Cache[TrancheId, CompletedOperation] =
       caffeineBuilder()
         .executor(_.run())
-        .maximumSize(trancheIdCacheMaximumSize)
+        .softValues()
         .build[TrancheId, CompletedOperation]
 
     def noteCompletedOperation(trancheId: TrancheId,
@@ -105,6 +101,12 @@ object ImmutableObjectStorage {
     def completedOperationFor(
                                trancheId: TrancheId): Option[CompletedOperation] =
       Option(trancheIdToCompletedOperationCache.getIfPresent(trancheId))
+
+    def clear(): Unit = {
+      objectToReferenceIdCache.invalidateAll()
+      referenceIdToObjectCache.invalidateAll()
+      trancheIdToCompletedOperationCache.invalidateAll()
+    }
   }
 
   trait Tranches[TrancheIdImplementation] {
@@ -610,8 +612,8 @@ trait ImmutableObjectStorage[TrancheId] {
             new JavaHashMap())
 
         def writtenObjectReferenceIds: Range =
-          // NOTE: mapping the addition of 'objectReferenceIdOffset' builds an 'IndexedSeq' that
-          // isn't a range, so use the prolix approach to ensure we keep a range implementation.
+        // NOTE: mapping the addition of 'objectReferenceIdOffset' builds an 'IndexedSeq' that
+        // isn't a range, so use the prolix approach to ensure we keep a range implementation.
           objectReferenceIdOffset until objectReferenceIdOffset + numberOfAssociationsForTheRelevantTrancheOnly
 
         def objectWithReferenceId(
@@ -620,16 +622,10 @@ trait ImmutableObjectStorage[TrancheId] {
             .map(decodePlaceholder)
             .get
 
-        override def getWrittenId(
-                                   immutableObject: AnyRef): ObjectReferenceId = {
-          (if (proxySupport.isProxy(immutableObject) || proxySupport
-            .canBeProxied(immutableObject))
-            intersessionState
-              .referenceIdFor(immutableObject)
-          else
-            Option(referenceIdToObjectMap.inverse().get(immutableObject)))
-            .getOrElse(-1)
-        }
+        override def getWrittenId(immutableObject: AnyRef): ObjectReferenceId = intersessionState
+          .referenceIdFor(immutableObject)
+          .orElse(Option(referenceIdToObjectMap.inverse().get(immutableObject)))
+          .getOrElse(-1)
 
         override def addWrittenObject(
                                        immutableObject: AnyRef): ObjectReferenceId = {
@@ -640,10 +636,8 @@ trait ImmutableObjectStorage[TrancheId] {
             referenceIdToObjectMap
               .put(nextObjectReferenceIdToAllocate, immutableObject))
 
-          if (proxySupport.canBeProxied(immutableObject)) {
-            intersessionState.noteReferenceId(immutableObject,
-              nextObjectReferenceIdToAllocate)
-          }
+          intersessionState.noteReferenceId(immutableObject,
+            nextObjectReferenceIdToAllocate)
 
           numberOfAssociationsForTheRelevantTrancheOnly += 1
 
@@ -680,10 +674,8 @@ trait ImmutableObjectStorage[TrancheId] {
             case None =>
           }
 
-          if (proxySupport.canBeProxied(immutableObject)) {
-            intersessionState.noteReferenceId(immutableObject,
-              objectReferenceId)
-          }
+          intersessionState.noteReferenceId(immutableObject,
+            objectReferenceId)
         }
 
         override def getReadObject(
@@ -703,21 +695,23 @@ trait ImmutableObjectStorage[TrancheId] {
           if (objectReferenceId >= objectReferenceIdOffset)
             objectWithReferenceId(objectReferenceId)
           else
-            intersessionState.proxyFor(objectReferenceId).getOrElse {
+            intersessionState.objectFor(objectReferenceId).getOrElse {
               val Right(trancheIdForExternalObjectReference) =
                 tranches
                   .retrieveTrancheId(objectReferenceId)
 
-              val proxy =
-                proxySupport.createProxy(
-                  clazz,
-                  new AcquiredState(trancheIdForExternalObjectReference,
-                    objectReferenceId))
+              if (proxySupport.superClazzAndInterfacesToProxy(clazz).isDefined) {
+                val proxy =
+                  proxySupport.createProxy(
+                    clazz,
+                    new AcquiredState(trancheIdForExternalObjectReference,
+                      objectReferenceId))
 
-              intersessionState.noteReferenceId(proxy, objectReferenceId)
-              intersessionState.noteProxy(objectReferenceId, proxy)
+                intersessionState.noteReferenceId(proxy, objectReferenceId)
 
-              proxy
+                proxy
+              } else retrieveUnderlying(trancheIdForExternalObjectReference,
+                objectReferenceId)
             }
         }
 
