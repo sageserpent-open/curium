@@ -71,20 +71,24 @@ object ImmutableObjectStorage {
     def noteReferenceId(immutableObject: AnyRef,
                         objectReferenceId: ObjectReferenceId): Unit = {
       objectToReferenceIdCache.put(immutableObject, objectReferenceId)
-      referenceIdToObjectCache.put(objectReferenceId, immutableObject)
     }
 
     def referenceIdFor(immutableObject: AnyRef): Option[ObjectReferenceId] =
       Option(objectToReferenceIdCache.getIfPresent(immutableObject))
 
-    private val referenceIdToObjectCache: Cache[ObjectReferenceId, AnyRef] =
+    private val referenceIdToProxyCache: Cache[ObjectReferenceId, AnyRef] =
       caffeineBuilder()
         .executor(_.run())
         .weakValues()
         .build[ObjectReferenceId, AnyRef]()
 
-    def objectFor(objectReferenceId: ObjectReferenceId) =
-      Option(referenceIdToObjectCache.getIfPresent(objectReferenceId))
+    def noteProxy(objectReferenceId: ObjectReferenceId,
+                  immutableObject: AnyRef): Unit = {
+      referenceIdToProxyCache.put(objectReferenceId, immutableObject)
+    }
+
+    def proxyFor(objectReferenceId: ObjectReferenceId) =
+      Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
     private val trancheIdToCompletedOperationCache
     : Cache[TrancheId, CompletedOperation] =
@@ -104,7 +108,7 @@ object ImmutableObjectStorage {
 
     def clear(): Unit = {
       objectToReferenceIdCache.invalidateAll()
-      referenceIdToObjectCache.invalidateAll()
+      referenceIdToProxyCache.invalidateAll()
       trancheIdToCompletedOperationCache.invalidateAll()
     }
   }
@@ -695,7 +699,7 @@ trait ImmutableObjectStorage[TrancheId] {
           if (objectReferenceId >= objectReferenceIdOffset)
             objectWithReferenceId(objectReferenceId)
           else
-            intersessionState.objectFor(objectReferenceId).getOrElse {
+            intersessionState.proxyFor(objectReferenceId).getOrElse {
               val Right(trancheIdForExternalObjectReference) =
                 tranches
                   .retrieveTrancheId(objectReferenceId)
@@ -707,6 +711,7 @@ trait ImmutableObjectStorage[TrancheId] {
                     new AcquiredState(trancheIdForExternalObjectReference,
                       objectReferenceId))
 
+                intersessionState.noteProxy(objectReferenceId, proxy)
                 intersessionState.noteReferenceId(proxy, objectReferenceId)
 
                 proxy
