@@ -2,3 +2,4 @@
 target/
 project/project/
 hs_err_pid*.log
+/.bsp/

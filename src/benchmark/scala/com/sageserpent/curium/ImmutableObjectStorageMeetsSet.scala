@@ -1,11 +1,10 @@
 package com.sageserpent.curium
 
+import cats.collections.AvlSet
 import cats.effect.IO
-import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session}
 
-import scala.collection.immutable.HashSet
 import scala.concurrent.duration.Deadline
 import scala.util.Random
 
@@ -15,6 +14,8 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
   object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
     override protected val tranchesImplementationName: String =
       classOf[RocksDbTranches].getSimpleName
+
+    override protected def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = clazz.getName.contains("BTNil")
   }
 
   def main(args: Array[String]): Unit = {
@@ -25,7 +26,7 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
             val intersessionState = new IntersessionState[TrancheId]
             val Right(initialTrancheId: TrancheId) = {
               val session: Session[TrancheId] =
-                immutableObjectStorage.store(HashSet.empty[Int])
+                immutableObjectStorage.store(AvlSet.empty[Int])
 
               immutableObjectStorage
                 .runToYieldTrancheId(session, intersessionState)(tranches)
@@ -39,10 +40,10 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
 
             for (step <- 0 until 100000000) {
               val session: Session[TrancheId] = for {
-                set <- immutableObjectStorage.retrieve[Set[Int]](trancheId)
+                set <- immutableObjectStorage.retrieve[AvlSet[Int]](trancheId)
                 mutatedSet = (if (1 == step % 5) {
                   val elementToRemove = step - randomBehaviour.chooseAnyNumberFromOneTo(100000 min step)
-                  set - elementToRemove
+                  set.remove(elementToRemove)
                 } else set) + step
                 newTrancheId <- immutableObjectStorage.store(mutatedSet)
               } yield newTrancheId

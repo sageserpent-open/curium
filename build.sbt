@@ -18,9 +18,9 @@ lazy val settings = Seq(
     "-target:jvm-1.8",
     "-Ypartial-unification"
   ),
-  libraryDependencies += "org.typelevel" %% "cats-core" % "1.6.0",
-  libraryDependencies += "org.typelevel" %% "alleycats-core" % "1.6.0",
-  libraryDependencies += "org.typelevel" %% "cats-effect" % "1.2.0",
+  libraryDependencies += "org.typelevel" %% "cats-core" % "2.2.0",
+  libraryDependencies += "org.typelevel" %% "alleycats-core" % "2.2.0",
+  libraryDependencies += "org.typelevel" %% "cats-effect" % "2.2.0",
   libraryDependencies += "net.bytebuddy" % "byte-buddy" % "1.10.10",
   libraryDependencies += "org.scala-lang.modules" %% "scala-java8-compat" % "0.9.0",
   libraryDependencies += "io.github.nicolasstucki" %% "multisets" % "0.4",
@@ -40,11 +40,13 @@ lazy val settings = Seq(
   libraryDependencies += "com.sageserpent" %% "americium" % "0.1.5" % "test",
   libraryDependencies += "com.github.alexarchambault" %% "scalacheck-shapeless_1.14" % "1.2.0-1" % "test",
   libraryDependencies += "com.storm-enroute" %% "scalameter" % "0.8.2" % "benchmark",
+  libraryDependencies += "org.typelevel" %% "cats-collections-core" % "0.9.1" % "benchmark",
   testFrameworks in Benchmark += new TestFramework(
     "org.scalameter.ScalaMeterFramework"
   ),
   fork in Benchmark := true,
   javaOptions in Benchmark += "-Xmx1G",
+  javaOptions in Benchmark += "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005",
   parallelExecution in Test := false,
   publishMavenStyle := true,
   bintrayReleaseOnPublish in ThisBuild := false,
