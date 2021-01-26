@@ -1,6 +1,6 @@
 package com.sageserpent.curium
 
-import cats.collections.AvlSet
+import cats.collections.{AvlMap, AvlSet}
 import cats.effect.IO
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session}
@@ -8,7 +8,7 @@ import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session
 import scala.concurrent.duration.Deadline
 import scala.util.Random
 
-object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
+object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
   type TrancheId = RocksDbTranches#TrancheId
 
   object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
@@ -26,7 +26,7 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
             val intersessionState = new IntersessionState[TrancheId]
             val Right(initialTrancheId: TrancheId) = {
               val session: Session[TrancheId] =
-                immutableObjectStorage.store(AvlSet.empty[Int])
+                immutableObjectStorage.store(AvlMap.empty[Int, AvlSet[String]])
 
               immutableObjectStorage
                 .runToYieldTrancheId(session, intersessionState)(tranches)
@@ -38,14 +38,16 @@ object ImmutableObjectStorageMeetsSet extends RocksDbTranchesResource {
 
             val startTime = Deadline.now
 
+            val lookbackLimit = 1000000
+
             for (step <- 0 until 100000000) {
               val session: Session[TrancheId] = for {
-                set <- immutableObjectStorage.retrieve[AvlSet[Int]](trancheId)
-                mutatedSet = (if (1 == step % 5) {
-                  val elementToRemove = step - randomBehaviour.chooseAnyNumberFromOneTo(100000 min step)
-                  set.remove(elementToRemove)
-                } else set) + step
-                newTrancheId <- immutableObjectStorage.store(mutatedSet)
+                map <- immutableObjectStorage.retrieve[AvlMap[Int, AvlSet[String]]](trancheId)
+                mutatedMap = (if (1 == step % 5) {
+                  val elementToRemove = step - randomBehaviour.chooseAnyNumberFromOneTo(lookbackLimit min step)
+                  map.remove(elementToRemove)
+                } else map) + (step -> (map.get(step - randomBehaviour.chooseAnyNumberFromOneTo(lookbackLimit min step)).getOrElse(AvlSet.empty) + step.toString))
+                newTrancheId <- immutableObjectStorage.store(mutatedMap)
               } yield newTrancheId
 
               trancheId = immutableObjectStorage
