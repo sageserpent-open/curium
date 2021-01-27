@@ -46,7 +46,10 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                 mutatedMap = (if (1 == step % 5) {
                   val elementToRemove = step - randomBehaviour.chooseAnyNumberFromOneTo(lookbackLimit min step)
                   map.remove(elementToRemove)
-                } else map) + (step -> (map.get(step - randomBehaviour.chooseAnyNumberFromOneTo(lookbackLimit min step)).getOrElse(AvlSet.empty) + step.toString))
+                } else map) + (step -> {
+                  val set = map.get(step - randomBehaviour.chooseAnyNumberFromOneTo(lookbackLimit min step)).getOrElse(AvlSet.empty)
+                  if (!set.isEmpty && 1 == step % 11) set.remove(set.min.get) else set + step.toString
+                })
                 newTrancheId <- immutableObjectStorage.store(mutatedMap)
               } yield newTrancheId
 
