@@ -122,14 +122,14 @@ object ImmutableObjectStorageSpec {
           val randomBehaviour = new Random(chunkingSeed)
 
           val numberOfRandomIndices =
-            randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(steps.size - 2)
+            randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(steps.size - 1)
 
           0 +: randomBehaviour
             .buildRandomSequenceOfDistinctIntegersFromZeroToOneLessThan(
-              steps.size - 2)
+              steps.size - 1)
+            .take(numberOfRandomIndices)
             .map(1 + _)
-            .sorted
-            .take(numberOfRandomIndices) :+ steps.size
+            .sorted :+ steps.size
         } else 0 to steps.size
 
       val chunkSizes = chunkEndIndices.zip(chunkEndIndices.tail).map {
