@@ -2,6 +2,7 @@ package com.sageserpent.curium
 
 import cats.collections.{AvlMap, AvlSet}
 import cats.effect.IO
+import cats.effect.unsafe.implicits.global
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session}
 

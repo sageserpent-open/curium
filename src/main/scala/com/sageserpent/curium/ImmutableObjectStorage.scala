@@ -1,8 +1,5 @@
 package com.sageserpent.curium
 
-import java.lang.reflect.Modifier
-import java.util.{HashMap => JavaHashMap}
-
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
@@ -23,6 +20,8 @@ import net.bytebuddy.{ByteBuddy, NamingStrategy}
 import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
+import java.lang.reflect.Modifier
+import java.util.{HashMap => JavaHashMap}
 import scala.collection.mutable
 import scala.ref.WeakReference
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
@@ -412,11 +411,8 @@ trait ImmutableObjectStorage[TrancheId] {
     private val proxySuffix =
       s"delayedLoadProxyFor${tranchesImplementationName}"
 
-    private implicit val superClazzBagConfiguration =
-      mutable.HashedBagConfiguration.compact[TypeDescription]
-
-    private val superClazzBag: mutable.HashBag[TypeDescription] =
-      mutable.HashBag.empty
+    private val superClazzBag: mutable.Map[TypeDescription, Int] =
+      mutable.Map.empty
 
     private def createProxyClass(
                                   superClazzAndInterfaces: SuperClazzAndInterfaces): Class[_] = {
@@ -426,8 +422,8 @@ trait ImmutableObjectStorage[TrancheId] {
       byteBuddy
         .`with`(new NamingStrategy.AbstractBase {
           override def name(superClass: TypeDescription): String = {
-            superClazzBag += superClass
-            s"${superClass.getSimpleName}_${superClazzBag(superClass).size}_$proxySuffix"
+            superClazzBag.updateWith(superClass)(count => count.map(1 + _).orElse(Some(1)))
+            s"${superClass.getSimpleName}_${superClazzBag(superClass)}_$proxySuffix"
           }
         })
         .subclass(superClazzAndInterfaces.superClazz,

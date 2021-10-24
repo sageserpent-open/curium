@@ -1,16 +1,16 @@
 package com.sageserpent.curium
 
-import java.util.UUID
-
 import cats.effect.{IO, Resource}
 import com.zaxxer.hikari.HikariDataSource
 import scalikejdbc._
+
+import java.util.UUID
 
 trait ConnectionPoolResource extends DirectoryResource {
   def connectionPoolResource: Resource[IO, ConnectionPool] =
     for {
       databaseDirectory <- directoryResource(prefix = "h2Storage")
-      databaseName <- Resource.liftF(IO {
+      databaseName <- Resource.liftK(IO {
         UUID.randomUUID().toString
       })
       dataSource <- Resource.make(IO {

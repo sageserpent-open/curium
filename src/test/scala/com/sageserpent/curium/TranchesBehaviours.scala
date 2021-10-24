@@ -1,11 +1,13 @@
 package com.sageserpent.curium
 
+import cats.effect.unsafe.implicits.global
 import cats.effect.{IO, Resource}
 import com.sageserpent.curium.ImmutableObjectStorage.{TrancheOfData, Tranches, TranchesContracts}
 import com.sageserpent.curium.ImmutableObjectStorageSpec.FakeTranches
 import org.scalacheck.{Arbitrary, Gen}
-import org.scalatest.prop.GeneratorDrivenPropertyChecks
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
 import scala.collection.mutable.{Map => MutableMap, Set => MutableSet}
 
@@ -26,9 +28,9 @@ object TranchesBehaviours {
 }
 
 trait TranchesBehaviours[TrancheId]
-  extends FlatSpec
+  extends AnyFlatSpec
     with Matchers
-    with GeneratorDrivenPropertyChecks {
+    with ScalaCheckPropertyChecks {
   this: TranchesResource[TrancheId] =>
 
   import TranchesBehaviours._
@@ -147,7 +149,7 @@ trait FakeTranchesResource
 
   override val tranchesResource
   : Resource[IO, Tranches[FakeTranchesResource.TrancheId]] =
-    Resource.liftF(IO {
+    Resource.liftK(IO {
       new FakeTranches with TranchesContracts[FakeTranchesResource.TrancheId]
     })
 }

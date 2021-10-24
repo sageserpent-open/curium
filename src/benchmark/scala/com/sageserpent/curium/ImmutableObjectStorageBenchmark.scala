@@ -26,17 +26,21 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
       new Gen[PartGrowth] {
         override def warmupset: Iterator[PartGrowth] =
           Iterator(partGrowthSteps)
+
         override def dataset: Iterator[Parameters] =
           Iterator(Parameters(
             Parameter[PartGrowthStep](axisName) -> partGrowthSteps.steps.size))
+
         override def generate(params: Parameters): PartGrowth =
           partGrowthSteps // HACK: ignore the supplied parameters, as we are generating only one possible value.
+
+        override def cardinality: Int = 1
       }
     }
 
   performance of "Bookings" in {
     measure method "storeAndRetrieve" in {
-      using(partGrowthGenerator) config (exec.benchRuns -> 5, exec.jvmflags -> List(
+      using(partGrowthGenerator) config(exec.benchRuns := 5, exec.jvmflags := List(
         "-Xmx3G")) in activity
     }
   }

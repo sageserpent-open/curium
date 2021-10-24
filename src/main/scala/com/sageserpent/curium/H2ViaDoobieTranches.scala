@@ -2,6 +2,7 @@ package com.sageserpent.curium
 
 import alleycats.std.all._
 import cats.effect.IO
+import cats.effect.unsafe.implicits.global
 import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, ObjectReferenceId, TrancheOfData, Tranches}
 import doobie._
 import doobie.implicits._

@@ -1,9 +1,11 @@
 package com.sageserpent.curium
 
 import cats.effect.IO
+import cats.effect.unsafe.implicits.global
 import cats.implicits._
 import com.sageserpent.curium.ImmutableObjectStorage.IntersessionState
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 object ExampleSpec {
   type TrancheId = H2ViaScalikeJdbcTranches#TrancheId
@@ -15,9 +17,9 @@ object ExampleSpec {
 }
 
 class ExampleSpec
-    extends FlatSpec
-    with Matchers
+  extends AnyFlatSpec with Matchers
     with H2ViaScalikeJdbcTranchesResource {
+
   import ExampleSpec._
 
   "storing and retrieving a series of immutable of objects that share structure" should "work" in {
@@ -91,7 +93,7 @@ class ExampleSpec
               immutableObjectStorage
                 .runForEffectsOnly(session, intersessionState)(tranches)
             }
-        }
+          }
       )
       .unsafeRunSync()
   }

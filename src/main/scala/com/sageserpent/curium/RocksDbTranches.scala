@@ -44,22 +44,22 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
       }
 
       trancheId
-    } toEither
+    }.toEither
 
   override def objectReferenceIdOffsetForNewTranche: EitherThrowableOr[ObjectReferenceId] = Try {
     val iterator = rocksDb.newIterator(objectReferenceIdKeyTrancheIdValueColumnFamily)
     iterator.seekToLast()
     if (iterator.isValid) 1 + Ints.fromByteArray(iterator.key()) else 0
-  } toEither
+  }.toEither
 
   override def retrieveTranche(trancheId: TrancheId): EitherThrowableOr[ImmutableObjectStorage.TrancheOfData] = Try {
     val trancheIdKey = Longs.toByteArray(trancheId)
     val payload = rocksDb.get(trancheIdKeyPayloadValueColumnFamily, trancheIdKey)
     val objectReferenceIdOffset = Ints.fromByteArray(rocksDb.get(trancheIdKeyObjectReferenceIdOffsetValueFamily, trancheIdKey))
     TrancheOfData(payload, objectReferenceIdOffset)
-  } toEither
+  }.toEither
 
   override def retrieveTrancheId(objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] = Try {
     Longs.fromByteArray(rocksDb.get(objectReferenceIdKeyTrancheIdValueColumnFamily, Ints.toByteArray(objectReferenceId)))
-  } toEither
+  }.toEither
 }

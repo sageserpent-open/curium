@@ -1,15 +1,16 @@
 package com.sageserpent.curium
 
-import java.util.UUID
-
 import cats.free.FreeT
 import cats.implicits._
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage._
 import org.scalacheck.{Arbitrary, Gen, Shrink}
-import org.scalatest.prop.GeneratorDrivenPropertyChecks
-import org.scalatest.{FlatSpec, Inspectors, Matchers}
+import org.scalatest.Inspectors
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 
+import java.util.UUID
 import scala.collection.mutable.{Map => MutableMap, SortedMap => MutableSortedMap}
 import scala.util.{Random, Try}
 
@@ -342,9 +343,9 @@ object ImmutableObjectStorageSpec {
 }
 
 class ImmutableObjectStorageSpec
-  extends FlatSpec
+  extends AnyFlatSpec
     with Matchers
-    with GeneratorDrivenPropertyChecks {
+    with ScalaCheckDrivenPropertyChecks {
 
   import ImmutableObjectStorageSpec._
 
