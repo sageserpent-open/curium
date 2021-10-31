@@ -23,7 +23,7 @@ object TranchesBehaviours {
 
   // TODO: need `api.integers` to have bounds and / or a positive only version.
   val objectReferenceIdCountGenerator: Trials[Int] =
-    api.choose(1 until 100) //api.integers.filter(0 < _).map(_ - 1)
+    api.choose(1 to 100) //api.integers.filter(0 < _).map(_ - 1)
 
   // TODO: why can't we use the `.and` combinator here - could it be extended so that `Trials.Tuple2Trials[X, Y]` actually extends `Trials[(X, Y)]`?
   val fakePayloadAndObjectReferenceIdCountPairsGenerator
@@ -40,10 +40,10 @@ trait TranchesBehaviours[TrancheId]
 
   def tranchesBehaviour: Unit = {
 
-    val maximumNumberOfTrials = 100
+    val maximumNumberOfCases = 100
 
     "creating a tranche" should "yield a unique tranche id" in
-      fakePayloadAndObjectReferenceIdCountPairsGenerator.lists.filter(_.nonEmpty).withLimit(maximumNumberOfTrials).supplyTo {
+      fakePayloadAndObjectReferenceIdCountPairsGenerator.lists.filter(_.nonEmpty).withLimit(maximumNumberOfCases).supplyTo {
         payloadAndCountPairs =>
           tranchesResource
             .use(tranches =>
@@ -72,7 +72,7 @@ trait TranchesBehaviours[TrancheId]
       }
 
     it should "permit retrieval of that tranche id from any of the associated object reference ids" in
-      fakePayloadAndObjectReferenceIdCountPairsGenerator.lists.filter(_.nonEmpty).withLimit(maximumNumberOfTrials).supplyTo {
+      fakePayloadAndObjectReferenceIdCountPairsGenerator.lists.filter(_.nonEmpty).withLimit(maximumNumberOfCases).supplyTo {
         payloadAndCountPairs =>
           tranchesResource
             .use(tranches =>
@@ -107,7 +107,7 @@ trait TranchesBehaviours[TrancheId]
       }
 
     "retrieving a tranche by tranche id" should "yield a tranche that corresponds to what was used to create it" in
-      fakePayloadAndObjectReferenceIdCountPairsGenerator.lists.filter(_.nonEmpty).withLimit(maximumNumberOfTrials).supplyTo {
+      fakePayloadAndObjectReferenceIdCountPairsGenerator.lists.filter(_.nonEmpty).withLimit(maximumNumberOfCases).supplyTo {
         payloadAndCountPairs =>
           tranchesResource
             .use(tranches =>
