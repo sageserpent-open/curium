@@ -4,6 +4,7 @@ import cats.effect.unsafe.implicits.global
 import cats.effect.{IO, Resource}
 import cats.implicits._
 import com.sageserpent.americium.Trials
+import com.sageserpent.americium.java.CaseFactory
 import com.sageserpent.curium.ImmutableObjectStorage.{TrancheOfData, Tranches, TranchesContracts}
 import com.sageserpent.curium.ImmutableObjectStorageSpec.FakeTranches
 import org.scalatest.flatspec.AnyFlatSpec
@@ -18,14 +19,21 @@ trait TranchesResource[TrancheId] {
 object TranchesBehaviours {
   val api = Trials.api
 
-  // TODO: need an `api.bytes`...
-  val payloadGenerator: Trials[Array[Byte]] = api.choose(Byte.MinValue to Byte.MaxValue).map(_.asInstanceOf[Byte]).several[Array[Byte]]
+  val payloadGenerator: Trials[Array[Byte]] = api.bytes.several[Array[Byte]]
 
-  // TODO: need `api.integers` to have bounds and / or a positive only version.
+  val nonZeroCountsFactory: CaseFactory[Int] = new CaseFactory[Int] {
+    override def apply(input: Long): Int = input.toInt
+
+    override def lowerBoundInput(): Long = 1L
+
+    override def upperBoundInput(): Long = 500L
+
+    override def maximallyShrunkInput(): Long = 1L
+  }
+
   val objectReferenceIdCountGenerator: Trials[Int] =
-    api.choose(1 to 100) //api.integers.filter(0 < _).map(_ - 1)
+    api.stream(nonZeroCountsFactory)
 
-  // TODO: why can't we use the `.and` combinator here - could it be extended so that `Trials.Tuple2Trials[X, Y]` actually extends `Trials[(X, Y)]`?
   val fakePayloadAndObjectReferenceIdCountPairsGenerator
   : Trials[(Array[Byte], Int)] =
     (payloadGenerator, objectReferenceIdCountGenerator).tupled
