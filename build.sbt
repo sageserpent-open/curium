@@ -5,7 +5,7 @@ import sbt.Keys.libraryDependencies
 lazy val settings = Seq(
   organization := "com.sageserpent",
   name := "curium",
-  scalaVersion := "2.13.6",
+  scalaVersion := "2.13.8",
   scalacOptions += s"-target:jvm-${javaVersion}",
   javacOptions ++= Seq("-source", javaVersion, "-target", javaVersion),
   libraryDependencies += "org.typelevel" %% "cats-core" % "2.6.1",
@@ -25,7 +25,7 @@ lazy val settings = Seq(
   libraryDependencies += "org.slf4j" % "slf4j-api" % "1.7.32" % "provided",
   libraryDependencies += "org.slf4j" % "slf4j-nop" % "1.7.32" % "test",
   libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.10" % Test,
-  libraryDependencies += "com.sageserpent" %% "americium" % "0.1.25" % "test",
+  libraryDependencies += "com.sageserpent" %% "americium" % "1.2.2" % "test",
   libraryDependencies += "com.storm-enroute" %% "scalameter" % "0.21" % "benchmark",
   libraryDependencies += "org.typelevel" %% "cats-collections-core" % "0.9.3" % "benchmark",
   Benchmark / testFrameworks += new TestFramework("org.scalameter.ScalaMeterFramework"),
