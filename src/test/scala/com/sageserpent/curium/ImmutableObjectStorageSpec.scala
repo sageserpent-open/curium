@@ -3,10 +3,8 @@ package com.sageserpent.curium
 import cats.free.FreeT
 import cats.implicits._
 import com.sageserpent.americium.Trials
-import com.sageserpent.americium.java.CaseFactory
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage._
-import com.sageserpent.curium.ImmutableObjectStorageSpec.PartGrowth.nonZeroNumberOfLeavesFactory
 import org.scalatest.Inspectors
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -120,7 +118,7 @@ object ImmutableObjectStorageSpec {
 
   def partGrowthLeadingToRootForkGenerator(allowDuplicates: Boolean): Trials[PartGrowth] =
     for {
-      numberOfLeavesRequired <- api.stream(nonZeroNumberOfLeavesFactory)
+      numberOfLeavesRequired <- api.integers(lowerBound = 1, upperBound = 300, shrinkageTarget = 1)
       seed <- seedTrials
       result <- partGrowthLeadingToRootFork(allowDuplicates, numberOfLeavesRequired, seed)
     } yield result
@@ -291,15 +289,6 @@ object ImmutableObjectStorageSpec {
   }
 
   object PartGrowth {
-    val nonZeroNumberOfLeavesFactory = new CaseFactory[Int] {
-      override def apply(input: Long): ObjectReferenceId = input.toInt
-
-      override def lowerBoundInput(): Long = 1L
-
-      override def upperBoundInput(): Long = 300L
-
-      override def maximallyShrunkInput(): Long = 1L
-    }
 
     def apply(steps: Seq[PartGrowthStep], chunkingSeed: Int): Trials[PartGrowth] = for {
       chunkEndIndices <- {
