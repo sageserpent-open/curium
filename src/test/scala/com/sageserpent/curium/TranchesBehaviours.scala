@@ -4,7 +4,6 @@ import cats.effect.unsafe.implicits.global
 import cats.effect.{IO, Resource}
 import cats.implicits._
 import com.sageserpent.americium.Trials
-import com.sageserpent.americium.java.CaseFactory
 import com.sageserpent.curium.ImmutableObjectStorage.{TrancheOfData, Tranches, TranchesContracts}
 import com.sageserpent.curium.ImmutableObjectStorageSpec.FakeTranches
 import org.scalatest.flatspec.AnyFlatSpec
@@ -21,18 +20,8 @@ object TranchesBehaviours {
 
   val payloadGenerator: Trials[Array[Byte]] = api.bytes.several[Array[Byte]]
 
-  val nonZeroCountsFactory: CaseFactory[Int] = new CaseFactory[Int] {
-    override def apply(input: Long): Int = input.toInt
-
-    override def lowerBoundInput(): Long = 1L
-
-    override def upperBoundInput(): Long = 500L
-
-    override def maximallyShrunkInput(): Long = 1L
-  }
-
   val objectReferenceIdCountGenerator: Trials[Int] =
-    api.stream(nonZeroCountsFactory)
+    api.integers(lowerBound = 1, upperBound = 500, shrinkageTarget = 1)
 
   val fakePayloadAndObjectReferenceIdCountPairsGenerator
   : Trials[(Array[Byte], Int)] =
