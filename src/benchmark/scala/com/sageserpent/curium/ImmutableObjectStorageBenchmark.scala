@@ -6,6 +6,7 @@ import org.scalameter.picklers.noPickler._
 import org.scalameter.{Parameter, Parameters}
 
 object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
+
   import ImmutableObjectStorage._
   import ImmutableObjectStorageSpec._
 
@@ -16,10 +17,13 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
     numberOfLeavesGenerator.flatMap { numberOfLeaves =>
       val seed = numberOfLeaves
 
+      // NASTY HACK: `Trials` doesn't currently support sampling of a single
+      // case, so we have to switch to the Java form and dig one out via the
+      // iterator support for JUnit.
       val partGrowthSteps: PartGrowth =
-        partGrowthLeadingToRootFork(allowDuplicates = true,
-                                    numberOfLeavesRequired = numberOfLeaves,
-                                    seed = seed)
+      partGrowthLeadingToRootFork(allowDuplicates = true,
+        numberOfLeavesRequired = numberOfLeaves,
+        seed = seed).javaTrials.withLimit(1).asIterator().next()
 
       val axisName = "Number of steps"
 
@@ -61,6 +65,6 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
 
     val Right(()) =
       immutableObjectStorage.runForEffectsOnly(retrievalSession,
-                                               intersessionState)(tranches)
+        intersessionState)(tranches)
   }
 }

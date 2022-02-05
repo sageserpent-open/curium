@@ -118,14 +118,13 @@ object ImmutableObjectStorageSpec {
 
   type PartGrowthStep = Vector[Part] => Part
 
-  def partGrowthLeadingToRootForkGenerator(
-                                            allowDuplicates: Boolean): Trials[PartGrowth] =
+  def partGrowthLeadingToRootForkGenerator(allowDuplicates: Boolean): Trials[PartGrowth] =
     for {
-
       numberOfLeavesRequired <- api.stream(nonZeroNumberOfLeavesFactory)
       seed <- seedTrials
-    } yield
-      partGrowthLeadingToRootFork(allowDuplicates, numberOfLeavesRequired, seed)
+      result <- partGrowthLeadingToRootFork(allowDuplicates, numberOfLeavesRequired, seed)
+    } yield result
+
 
   case class PartGrowth(steps: Seq[PartGrowthStep], chunkSizes: Seq[Int]) {
     require(steps.nonEmpty)
@@ -186,44 +185,9 @@ object ImmutableObjectStorageSpec {
     }
   }
 
-  object PartGrowth {
-    def apply(steps: Seq[PartGrowthStep], chunkingSeed: Int): PartGrowth = {
-      val chunkEndIndices =
-        if (1 < steps.size) {
-          val randomBehaviour = new Random(chunkingSeed)
-
-          val numberOfRandomIndices =
-            randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(steps.size - 1)
-
-          0 +: randomBehaviour
-            .buildRandomSequenceOfDistinctIntegersFromZeroToOneLessThan(
-              steps.size - 1)
-            .take(numberOfRandomIndices)
-            .map(1 + _)
-            .sorted :+ steps.size
-        } else 0 to steps.size
-
-      val chunkSizes = chunkEndIndices.zip(chunkEndIndices.tail).map {
-        case (lower, higher) => higher - lower
-      }
-
-      PartGrowth(steps, chunkSizes)
-    }
-
-    val nonZeroNumberOfLeavesFactory = new CaseFactory[Int] {
-      override def apply(input: Long): ObjectReferenceId = input.toInt
-
-      override def lowerBoundInput(): Long = 1L
-
-      override def upperBoundInput(): Long = 300L
-
-      override def maximallyShrunkInput(): Long = 1L
-    }
-  }
-
   def partGrowthLeadingToRootFork(allowDuplicates: Boolean,
                                   numberOfLeavesRequired: Int,
-                                  seed: Int): PartGrowth = {
+                                  seed: Int): Trials[PartGrowth] = {
     require(0 < numberOfLeavesRequired)
 
     val randomBehaviour = new Random(seed)
@@ -315,6 +279,51 @@ object ImmutableObjectStorageSpec {
       growthSteps(Vector.empty, numberOfLeaves = 0).force
 
     PartGrowth(steps, seed)
+  }
+
+  object TrialsHelpers {
+    def sequencesOfDistinctIntegersFromZeroToOneLessThan(exclusiveLimit: Int): Trials[LazyList[Int]] = {
+      // NOTE: need that mapping of `distinct` as the lazy lists yielded by `several`
+      // can (and will because it does not terminate) contain duplicates even though
+      // the base choices are unique.
+      api.choose(0 until exclusiveLimit).several[LazyList[Int]].map(_.distinct)
+    }
+  }
+
+  object PartGrowth {
+    val nonZeroNumberOfLeavesFactory = new CaseFactory[Int] {
+      override def apply(input: Long): ObjectReferenceId = input.toInt
+
+      override def lowerBoundInput(): Long = 1L
+
+      override def upperBoundInput(): Long = 300L
+
+      override def maximallyShrunkInput(): Long = 1L
+    }
+
+    def apply(steps: Seq[PartGrowthStep], chunkingSeed: Int): Trials[PartGrowth] = for {
+      chunkEndIndices <- {
+        val numberOfSteps = steps.size
+        val oneLessThanNumberOfSteps = numberOfSteps - 1
+        if (0 < oneLessThanNumberOfSteps) api
+          .integers(0, oneLessThanNumberOfSteps - 1)
+          .flatMap(numberOfIndices =>
+            TrialsHelpers.sequencesOfDistinctIntegersFromZeroToOneLessThan(oneLessThanNumberOfSteps)
+              .map { sequence =>
+                val innerIndices = sequence
+                  .take(numberOfIndices)
+                  .map(1 + _)
+                  .sorted
+
+                0 +: innerIndices :+ numberOfSteps
+              }
+          ) else api.only(0 to numberOfSteps)
+      }
+
+      chunkSizes = chunkEndIndices.zip(chunkEndIndices.tail).map {
+        case (lower, higher) => higher - lower
+      }
+    } yield PartGrowth(steps, chunkSizes)
   }
 }
 
