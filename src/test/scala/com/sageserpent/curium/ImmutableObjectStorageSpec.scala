@@ -202,9 +202,8 @@ object ImmutableObjectStorageSpec {
           0 < numberOfSubparts && numberOfLeaves == numberOfLeavesRequired)
 
       for {
-        coinFlip <- api.booleans
-        chooseALeaf = numberOfLeaves < numberOfLeavesRequired &&
-          (0 == numberOfSubparts || coinFlip)
+        chooseALeaf <- api.booleans.map(coinFlip =>
+          numberOfLeaves < numberOfLeavesRequired && (0 == numberOfSubparts || coinFlip))
 
         label <- api.choose(labelStrings)
 
@@ -217,62 +216,65 @@ object ImmutableObjectStorageSpec {
 
           growthSteps(partIdSetsCoveredBySubparts :+ Set(partId),
             1 + numberOfLeaves).map(leaf _ #:: _)
-        } else if (allowDuplicates && 0 < numberOfSubparts && randomBehaviour
-          .nextBoolean())
-          growthSteps(
-            partIdSetsCoveredBySubparts :+ partIdSetsCoveredBySubparts.last,
-            numberOfLeaves).map(((_: Vector[Part]).last) #:: _)
-        else {
-          val indexOfLeftSubpart =
-            if (collectingStrandsTogetherAsHaveEnoughLeaves)
-              numberOfSubparts - 1
-            else
-              randomBehaviour
-                .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
-          val indexOfRightSubpart =
-            if (collectingStrandsTogetherAsHaveEnoughLeaves) {
-              val partIdsCoveredByLeftSubpart = partIdSetsCoveredBySubparts.last
-              val indicesOfPartsNotCoveredByLeftSubpart = 0 until numberOfSubparts filterNot {
-                index =>
-                  val partIdsCoveredByIndex = partIdSetsCoveredBySubparts(index)
-                  partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
-              }
-              if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
-                indicesOfPartsNotCoveredByLeftSubpart.maxBy(index =>
-                  partIdSetsCoveredBySubparts(index).size)
-              else
-                randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
-                  numberOfSubparts)
-            } else
-              randomBehaviour
-                .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
-          val partIdsCoveredByThisFork
-          : Set[ObjectReferenceId] = partIdSetsCoveredBySubparts(
-            indexOfLeftSubpart) ++ Set(partId) ++ partIdSetsCoveredBySubparts(
-            indexOfRightSubpart)
-          val allSubpartsIncludedInThisFork =
-            partIdSetsCoveredBySubparts.forall(
-              _.subsetOf(partIdsCoveredByThisFork))
-
-          def fork(subparts: Vector[Part]): Fork = {
-            require(numberOfSubparts == subparts.size)
-
-            Fork(subparts(indexOfLeftSubpart),
-              partId,
-              subparts(indexOfRightSubpart),
-              label)
-          }
-
-          val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
-            collectingStrandsTogetherAsHaveEnoughLeaves
-
-          api.booleans.flatMap(coinFlip => if (thisCouldBeTheLastStep &&
-            coinFlip) api.only(LazyList.empty)
-          else
+        } else api.booleans.flatMap(anotherCoinFlip =>
+          if (allowDuplicates && 0 < numberOfSubparts && anotherCoinFlip)
             growthSteps(
-              partIdSetsCoveredBySubparts :+ partIdsCoveredByThisFork,
-              numberOfLeaves)).map(fork _ #:: _)
-        }
+              partIdSetsCoveredBySubparts :+ partIdSetsCoveredBySubparts.last,
+              numberOfLeaves).map(((_: Vector[Part]).last) #:: _)
+          else {
+            val indexOfLeftSubpart =
+              if (collectingStrandsTogetherAsHaveEnoughLeaves)
+                numberOfSubparts - 1
+              else
+                randomBehaviour
+                  .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
+
+            val indexOfRightSubpart =
+              if (collectingStrandsTogetherAsHaveEnoughLeaves) {
+                val partIdsCoveredByLeftSubpart = partIdSetsCoveredBySubparts.last
+                val indicesOfPartsNotCoveredByLeftSubpart = 0 until numberOfSubparts filterNot {
+                  index =>
+                    val partIdsCoveredByIndex = partIdSetsCoveredBySubparts(index)
+                    partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
+                }
+                if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
+                  indicesOfPartsNotCoveredByLeftSubpart.maxBy(index =>
+                    partIdSetsCoveredBySubparts(index).size)
+                else
+                  randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
+                    numberOfSubparts)
+              } else
+                randomBehaviour
+                  .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
+
+            val partIdsCoveredByThisFork
+            : Set[ObjectReferenceId] = partIdSetsCoveredBySubparts(
+              indexOfLeftSubpart) ++ Set(partId) ++ partIdSetsCoveredBySubparts(
+              indexOfRightSubpart)
+
+            val allSubpartsIncludedInThisFork =
+              partIdSetsCoveredBySubparts.forall(
+                _.subsetOf(partIdsCoveredByThisFork))
+
+            def fork(subparts: Vector[Part]): Fork = {
+              require(numberOfSubparts == subparts.size)
+
+              Fork(subparts(indexOfLeftSubpart),
+                partId,
+                subparts(indexOfRightSubpart),
+                label)
+            }
+
+            val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
+              collectingStrandsTogetherAsHaveEnoughLeaves
+
+            api.booleans.flatMap(coinFlip => if (thisCouldBeTheLastStep &&
+              coinFlip) api.only(LazyList.empty)
+            else
+              growthSteps(
+                partIdSetsCoveredBySubparts :+ partIdsCoveredByThisFork,
+                numberOfLeaves)).map(fork _ #:: _)
+          })
       } yield result
     }
 
