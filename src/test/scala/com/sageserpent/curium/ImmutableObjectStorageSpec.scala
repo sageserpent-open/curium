@@ -120,9 +120,108 @@ object ImmutableObjectStorageSpec {
     for {
       numberOfLeavesRequired <- api.integers(lowerBound = 1, upperBound = 300, shrinkageTarget = 1)
       seed <- seedTrials
-      result <- partGrowthLeadingToRootFork(allowDuplicates, numberOfLeavesRequired, seed)
+      result <- partGrowthLeadingToRootFork(allowDuplicates, numberOfLeavesRequired)
     } yield result
 
+  def partGrowthLeadingToRootFork(allowDuplicates: Boolean,
+                                  numberOfLeavesRequired: Int): Trials[PartGrowth] = {
+    require(0 < numberOfLeavesRequired)
+
+    def growthSteps(
+                     partIdSetsCoveredBySubparts: Vector[Set[ObjectReferenceId]],
+                     numberOfLeaves: ObjectReferenceId): Trials[LazyList[PartGrowthStep]] = {
+      val numberOfSubparts = partIdSetsCoveredBySubparts.size
+      val partId = numberOfSubparts // Makes it easier to read the test cases when debugging; the ids label the growth steps in ascending order.
+      val collectingStrandsTogetherAsHaveEnoughLeaves = numberOfLeaves == numberOfLeavesRequired
+
+      require(
+        numberOfLeaves < numberOfLeavesRequired ||
+          0 < numberOfSubparts && numberOfLeaves == numberOfLeavesRequired)
+
+      for {
+        chooseALeaf <- api.booleans.map(coinFlip =>
+          numberOfLeaves < numberOfLeavesRequired && (0 == numberOfSubparts || coinFlip))
+
+        label <- api.choose(labelStrings)
+
+        result <- if (chooseALeaf) {
+          def leaf(subparts: Vector[Part]): Part = {
+            require(numberOfSubparts == subparts.size)
+
+            Leaf(numberOfSubparts, label)
+          }
+
+          growthSteps(partIdSetsCoveredBySubparts :+ Set(partId),
+            1 + numberOfLeaves).map(leaf _ #:: _)
+        } else api.booleans.flatMap(anotherCoinFlip =>
+          if (allowDuplicates && 0 < numberOfSubparts && anotherCoinFlip)
+            growthSteps(
+              partIdSetsCoveredBySubparts :+ partIdSetsCoveredBySubparts.last,
+              numberOfLeaves).map(((_: Vector[Part]).last) #:: _)
+          else for {
+            foo <- api.integers(lowerBound = 0, upperBound = numberOfSubparts - 1, 0)
+            bar <- api.integers(lowerBound = 0, upperBound = numberOfSubparts - 1, 0)
+            baz <- api.integers(lowerBound = 0, upperBound = numberOfSubparts - 1, 0)
+            qux <- {
+              val indexOfLeftSubpart =
+                if (collectingStrandsTogetherAsHaveEnoughLeaves)
+                  numberOfSubparts - 1
+                else
+                  foo
+
+              val indexOfRightSubpart =
+                if (collectingStrandsTogetherAsHaveEnoughLeaves) {
+                  val partIdsCoveredByLeftSubpart = partIdSetsCoveredBySubparts.last
+                  val indicesOfPartsNotCoveredByLeftSubpart = 0 until numberOfSubparts filterNot {
+                    index =>
+                      val partIdsCoveredByIndex = partIdSetsCoveredBySubparts(index)
+                      partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
+                  }
+                  if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
+                    indicesOfPartsNotCoveredByLeftSubpart.maxBy(index =>
+                      partIdSetsCoveredBySubparts(index).size)
+                  else
+                    bar
+                } else
+                  baz
+
+              val partIdsCoveredByThisFork
+              : Set[ObjectReferenceId] = partIdSetsCoveredBySubparts(
+                indexOfLeftSubpart) ++ Set(partId) ++ partIdSetsCoveredBySubparts(
+                indexOfRightSubpart)
+
+              val allSubpartsIncludedInThisFork =
+                partIdSetsCoveredBySubparts.forall(
+                  _.subsetOf(partIdsCoveredByThisFork))
+
+              val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
+                collectingStrandsTogetherAsHaveEnoughLeaves
+
+              {
+                def fork(subparts: Vector[Part]): Fork = {
+                  require(numberOfSubparts == subparts.size)
+
+                  Fork(subparts(indexOfLeftSubpart),
+                    partId,
+                    subparts(indexOfRightSubpart),
+                    label)
+                }
+
+                api.booleans.flatMap(coinFlip => if (thisCouldBeTheLastStep &&
+                  coinFlip) api.only(LazyList.empty)
+                else
+                  growthSteps(
+                    partIdSetsCoveredBySubparts :+ partIdsCoveredByThisFork,
+                    numberOfLeaves)).map(fork _ #:: _)
+              }
+            }
+          } yield qux
+        )
+      } yield result
+    }
+
+    growthSteps(Vector.empty, numberOfLeaves = 0).map(_.force).flatMap(steps => PartGrowth(steps))
+  }
 
   case class PartGrowth(steps: Seq[PartGrowthStep], chunkSizes: Seq[Int]) {
     require(steps.nonEmpty)
@@ -167,6 +266,9 @@ object ImmutableObjectStorageSpec {
             case (existingSubparts, partGrowthStep) =>
               existingSubparts :+ partGrowthStep(existingSubparts)
           } drop retrievedPartsFromPreviousSessions.size
+          _ = {
+            println(newPartsFromThisSession)
+          }
           trancheIds <- newPartsFromThisSession.traverse(
             immutableObjectStorage.store)
         } yield trancheIds
@@ -179,106 +281,10 @@ object ImmutableObjectStorageSpec {
         trancheIdsSoFar ++= trancheIdsForChunk
       }
 
+      println("-------------")
+
       trancheIdsSoFar
     }
-  }
-
-  def partGrowthLeadingToRootFork(allowDuplicates: Boolean,
-                                  numberOfLeavesRequired: Int,
-                                  seed: Int): Trials[PartGrowth] = {
-    require(0 < numberOfLeavesRequired)
-
-    val randomBehaviour = new Random(seed)
-
-    def growthSteps(
-                     partIdSetsCoveredBySubparts: Vector[Set[ObjectReferenceId]],
-                     numberOfLeaves: ObjectReferenceId): Trials[LazyList[PartGrowthStep]] = {
-      val numberOfSubparts = partIdSetsCoveredBySubparts.size
-      val partId = numberOfSubparts // Makes it easier to read the test cases when debugging; the ids label the growth steps in ascending order.
-      val collectingStrandsTogetherAsHaveEnoughLeaves = numberOfLeaves == numberOfLeavesRequired
-
-      require(
-        numberOfLeaves < numberOfLeavesRequired ||
-          0 < numberOfSubparts && numberOfLeaves == numberOfLeavesRequired)
-
-      for {
-        chooseALeaf <- api.booleans.map(coinFlip =>
-          numberOfLeaves < numberOfLeavesRequired && (0 == numberOfSubparts || coinFlip))
-
-        label <- api.choose(labelStrings)
-
-        result <- if (chooseALeaf) {
-          def leaf(subparts: Vector[Part]): Part = {
-            require(numberOfSubparts == subparts.size)
-
-            Leaf(numberOfSubparts, label)
-          }
-
-          growthSteps(partIdSetsCoveredBySubparts :+ Set(partId),
-            1 + numberOfLeaves).map(leaf _ #:: _)
-        } else api.booleans.flatMap(anotherCoinFlip =>
-          if (allowDuplicates && 0 < numberOfSubparts && anotherCoinFlip)
-            growthSteps(
-              partIdSetsCoveredBySubparts :+ partIdSetsCoveredBySubparts.last,
-              numberOfLeaves).map(((_: Vector[Part]).last) #:: _)
-          else {
-            val indexOfLeftSubpart =
-              if (collectingStrandsTogetherAsHaveEnoughLeaves)
-                numberOfSubparts - 1
-              else
-                randomBehaviour
-                  .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
-
-            val indexOfRightSubpart =
-              if (collectingStrandsTogetherAsHaveEnoughLeaves) {
-                val partIdsCoveredByLeftSubpart = partIdSetsCoveredBySubparts.last
-                val indicesOfPartsNotCoveredByLeftSubpart = 0 until numberOfSubparts filterNot {
-                  index =>
-                    val partIdsCoveredByIndex = partIdSetsCoveredBySubparts(index)
-                    partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
-                }
-                if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
-                  indicesOfPartsNotCoveredByLeftSubpart.maxBy(index =>
-                    partIdSetsCoveredBySubparts(index).size)
-                else
-                  randomBehaviour.chooseAnyNumberFromZeroToOneLessThan(
-                    numberOfSubparts)
-              } else
-                randomBehaviour
-                  .chooseAnyNumberFromZeroToOneLessThan(numberOfSubparts)
-
-            val partIdsCoveredByThisFork
-            : Set[ObjectReferenceId] = partIdSetsCoveredBySubparts(
-              indexOfLeftSubpart) ++ Set(partId) ++ partIdSetsCoveredBySubparts(
-              indexOfRightSubpart)
-
-            val allSubpartsIncludedInThisFork =
-              partIdSetsCoveredBySubparts.forall(
-                _.subsetOf(partIdsCoveredByThisFork))
-
-            def fork(subparts: Vector[Part]): Fork = {
-              require(numberOfSubparts == subparts.size)
-
-              Fork(subparts(indexOfLeftSubpart),
-                partId,
-                subparts(indexOfRightSubpart),
-                label)
-            }
-
-            val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
-              collectingStrandsTogetherAsHaveEnoughLeaves
-
-            api.booleans.flatMap(coinFlip => if (thisCouldBeTheLastStep &&
-              coinFlip) api.only(LazyList.empty)
-            else
-              growthSteps(
-                partIdSetsCoveredBySubparts :+ partIdsCoveredByThisFork,
-                numberOfLeaves)).map(fork _ #:: _)
-          })
-      } yield result
-    }
-
-    growthSteps(Vector.empty, numberOfLeaves = 0).map(_.force).flatMap(steps => PartGrowth(steps, seed))
   }
 
   object TrialsHelpers {
@@ -295,7 +301,7 @@ object ImmutableObjectStorageSpec {
 
   object PartGrowth {
 
-    def apply(steps: Seq[PartGrowthStep], chunkingSeed: Int): Trials[PartGrowth] = for {
+    def apply(steps: Seq[PartGrowthStep]): Trials[PartGrowth] = for {
       chunkEndIndices <- {
         val numberOfSteps = steps.size
         val oneLessThanNumberOfSteps = numberOfSteps - 1

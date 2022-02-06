@@ -22,8 +22,7 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
       // iterator support for JUnit.
       val partGrowthSteps: PartGrowth =
       partGrowthLeadingToRootFork(allowDuplicates = true,
-        numberOfLeavesRequired = numberOfLeaves,
-        seed = seed).javaTrials.withLimit(1).asIterator().next()
+        numberOfLeavesRequired = numberOfLeaves).javaTrials.withLimit(1).asIterator().next()
 
       val axisName = "Number of steps"
 
