@@ -284,7 +284,10 @@ object ImmutableObjectStorageSpec {
       // NOTE: need that mapping of `distinct` as the lazy lists yielded by `several`
       // can (and will because it does not terminate) contain duplicates even though
       // the base choices are unique.
-      api.choose(0 until exclusiveLimit).several[LazyList[Int]].map(_.distinct)
+      api.choose(0 until exclusiveLimit)
+        .several[LazyList[Int]]
+        .map(_.distinct)
+        .map(_.take(exclusiveLimit))
     }
   }
 
