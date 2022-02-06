@@ -112,14 +112,11 @@ object ImmutableObjectStorageSpec {
 
   val api = Trials.api
 
-  val seedTrials: Trials[Int] = api.integers
-
   type PartGrowthStep = Vector[Part] => Part
 
   def partGrowthLeadingToRootForkGenerator(allowDuplicates: Boolean): Trials[PartGrowth] =
     for {
       numberOfLeavesRequired <- api.integers(lowerBound = 1, upperBound = 300, shrinkageTarget = 1)
-      seed <- seedTrials
       result <- partGrowthLeadingToRootFork(allowDuplicates, numberOfLeavesRequired)
     } yield result
 
