@@ -156,63 +156,58 @@ object ImmutableObjectStorageSpec {
               partIdSetsCoveredBySubparts :+ partIdSetsCoveredBySubparts.last,
               numberOfLeaves).map(((_: Vector[Part]).last) #:: _)
           else for {
-            foo <- api.integers(lowerBound = 0, upperBound = numberOfSubparts - 1, 0)
-            bar <- api.integers(lowerBound = 0, upperBound = numberOfSubparts - 1, 0)
-            baz <- api.integers(lowerBound = 0, upperBound = numberOfSubparts - 1, 0)
-            qux <- {
-              val indexOfLeftSubpart =
-                if (collectingStrandsTogetherAsHaveEnoughLeaves)
-                  numberOfSubparts - 1
-                else
-                  foo
+            indexOfLeftSubpart <-
+              if (collectingStrandsTogetherAsHaveEnoughLeaves)
+                api.only(numberOfSubparts - 1)
+              else
+                api.integers(lowerBound = 0, upperBound = numberOfSubparts - 1, 0)
 
-              val indexOfRightSubpart =
-                if (collectingStrandsTogetherAsHaveEnoughLeaves) {
-                  val partIdsCoveredByLeftSubpart = partIdSetsCoveredBySubparts.last
-                  val indicesOfPartsNotCoveredByLeftSubpart = 0 until numberOfSubparts filterNot {
-                    index =>
-                      val partIdsCoveredByIndex = partIdSetsCoveredBySubparts(index)
-                      partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
-                  }
-                  if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
-                    indicesOfPartsNotCoveredByLeftSubpart.maxBy(index =>
-                      partIdSetsCoveredBySubparts(index).size)
-                  else
-                    bar
-                } else
-                  baz
-
-              val partIdsCoveredByThisFork
-              : Set[ObjectReferenceId] = partIdSetsCoveredBySubparts(
-                indexOfLeftSubpart) ++ Set(partId) ++ partIdSetsCoveredBySubparts(
-                indexOfRightSubpart)
-
-              val allSubpartsIncludedInThisFork =
-                partIdSetsCoveredBySubparts.forall(
-                  _.subsetOf(partIdsCoveredByThisFork))
-
-              val thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
-                collectingStrandsTogetherAsHaveEnoughLeaves
-
-              {
-                def fork(subparts: Vector[Part]): Fork = {
-                  require(numberOfSubparts == subparts.size)
-
-                  Fork(subparts(indexOfLeftSubpart),
-                    partId,
-                    subparts(indexOfRightSubpart),
-                    label)
+            indexOfRightSubpart <-
+              if (collectingStrandsTogetherAsHaveEnoughLeaves) {
+                val partIdsCoveredByLeftSubpart = partIdSetsCoveredBySubparts.last
+                val indicesOfPartsNotCoveredByLeftSubpart = 0 until numberOfSubparts filterNot {
+                  index =>
+                    val partIdsCoveredByIndex = partIdSetsCoveredBySubparts(index)
+                    partIdsCoveredByIndex.subsetOf(partIdsCoveredByLeftSubpart)
                 }
-
-                api.booleans.flatMap(coinFlip => if (thisCouldBeTheLastStep &&
-                  coinFlip) api.only(LazyList.empty)
+                if (indicesOfPartsNotCoveredByLeftSubpart.nonEmpty)
+                  api.only(indicesOfPartsNotCoveredByLeftSubpart.maxBy(index =>
+                    partIdSetsCoveredBySubparts(index).size))
                 else
-                  growthSteps(
-                    partIdSetsCoveredBySubparts :+ partIdsCoveredByThisFork,
-                    numberOfLeaves)).map(fork _ #:: _)
+                  api.integers(lowerBound = 0, upperBound = numberOfSubparts - 1, 0)
+              } else
+                api.integers(lowerBound = 0, upperBound = numberOfSubparts - 1, 0)
+
+            partIdsCoveredByThisFork
+              : Set[ObjectReferenceId] = partIdSetsCoveredBySubparts(
+              indexOfLeftSubpart) ++ Set(partId) ++ partIdSetsCoveredBySubparts(
+              indexOfRightSubpart)
+
+            allSubpartsIncludedInThisFork =
+              partIdSetsCoveredBySubparts.forall(
+                _.subsetOf(partIdsCoveredByThisFork))
+
+            thisCouldBeTheLastStep = allSubpartsIncludedInThisFork &&
+              collectingStrandsTogetherAsHaveEnoughLeaves
+
+            subResult <- {
+              def fork(subparts: Vector[Part]): Fork = {
+                require(numberOfSubparts == subparts.size)
+
+                Fork(subparts(indexOfLeftSubpart),
+                  partId,
+                  subparts(indexOfRightSubpart),
+                  label)
               }
+
+              api.booleans.flatMap(coinFlip => if (thisCouldBeTheLastStep &&
+                coinFlip) api.only(LazyList.empty)
+              else
+                growthSteps(
+                  partIdSetsCoveredBySubparts :+ partIdsCoveredByThisFork,
+                  numberOfLeaves)).map(fork _ #:: _)
             }
-          } yield qux
+          } yield subResult
         )
       } yield result
     }
@@ -333,7 +328,7 @@ class ImmutableObjectStorageSpec
 
   private val maximumNumberOfCases = 100
 
-  private val complexityLimit = 500
+  private val complexityLimit = 300
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in
     partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimits(casesLimit = maximumNumberOfCases, complexityLimit = complexityLimit).supplyTo { partGrowth =>
