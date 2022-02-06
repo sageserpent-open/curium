@@ -258,9 +258,6 @@ object ImmutableObjectStorageSpec {
             case (existingSubparts, partGrowthStep) =>
               existingSubparts :+ partGrowthStep(existingSubparts)
           } drop retrievedPartsFromPreviousSessions.size
-          _ = {
-            println(newPartsFromThisSession)
-          }
           trancheIds <- newPartsFromThisSession.traverse(
             immutableObjectStorage.store)
         } yield trancheIds
@@ -272,8 +269,6 @@ object ImmutableObjectStorageSpec {
 
         trancheIdsSoFar ++= trancheIdsForChunk
       }
-
-      println("-------------")
 
       trancheIdsSoFar
     }
