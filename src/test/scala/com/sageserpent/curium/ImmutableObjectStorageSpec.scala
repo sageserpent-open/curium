@@ -333,8 +333,10 @@ class ImmutableObjectStorageSpec
 
   private val maximumNumberOfCases = 100
 
+  private val complexityLimit = 500
+
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in
-    partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimit(maximumNumberOfCases).supplyTo { partGrowth =>
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimits(casesLimit = maximumNumberOfCases, complexityLimit = complexityLimit).supplyTo { partGrowth =>
       val intersessionState = new IntersessionState[TrancheId]
 
       val tranches = new FakeTranches with TranchesContracts[TrancheId]
@@ -349,7 +351,7 @@ class ImmutableObjectStorageSpec
     }
 
   "reconstituting an immutable object via a tranche id" should "yield an object that is equal to what was stored" in
-    partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimit(maximumNumberOfCases).supplyTo { partGrowth =>
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimits(casesLimit = maximumNumberOfCases, complexityLimit = complexityLimit).supplyTo { partGrowth =>
       val expectedParts = partGrowth.parts()
 
       val intersessionState = new IntersessionState[TrancheId]
@@ -398,7 +400,7 @@ class ImmutableObjectStorageSpec
     }
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in
-    partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimit(maximumNumberOfCases).supplyTo { partGrowth =>
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimits(casesLimit = maximumNumberOfCases, complexityLimit = complexityLimit).supplyTo { partGrowth =>
       val intersessionState = new IntersessionState[TrancheId]
 
       val tranches = new FakeTranches with TranchesContracts[TrancheId]
@@ -429,7 +431,7 @@ class ImmutableObjectStorageSpec
     }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in
-    partGrowthLeadingToRootForkGenerator(allowDuplicates = false).withLimit(maximumNumberOfCases).supplyTo { partGrowth =>
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = false).withLimits(casesLimit = maximumNumberOfCases, complexityLimit = complexityLimit).supplyTo { partGrowth =>
       val intersessionState = new IntersessionState[TrancheId]
 
       val tranches = new FakeTranches with TranchesContracts[TrancheId]
@@ -466,7 +468,7 @@ class ImmutableObjectStorageSpec
     }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in
-    partGrowthLeadingToRootForkGenerator(allowDuplicates = false).withLimit(maximumNumberOfCases).supplyTo { partGrowth =>
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = false).withLimits(casesLimit = maximumNumberOfCases, complexityLimit = complexityLimit).supplyTo { partGrowth =>
       val intersessionState = new IntersessionState[TrancheId]
 
       val tranches = new FakeTranches with TranchesContracts[TrancheId]
@@ -498,7 +500,7 @@ class ImmutableObjectStorageSpec
     }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in
-    partGrowthLeadingToRootForkGenerator(allowDuplicates = false).withLimit(maximumNumberOfCases).supplyTo { partGrowth =>
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = false).withLimits(casesLimit = maximumNumberOfCases, complexityLimit = complexityLimit).supplyTo { partGrowth =>
       val intersessionState = new IntersessionState[TrancheId]
 
       val tranches = new FakeTranches with TranchesContracts[TrancheId]
@@ -535,7 +537,7 @@ class ImmutableObjectStorageSpec
     }
 
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in
-    partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimit(maximumNumberOfCases).supplyTo { partGrowth =>
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimits(casesLimit = maximumNumberOfCases, complexityLimit = complexityLimit).supplyTo { partGrowth =>
       val isolatedSpokeTranche = {
         val intersessionState = new IntersessionState[TrancheId]
 
@@ -570,7 +572,7 @@ class ImmutableObjectStorageSpec
     }
 
   it should "be idempotent in terms of object identity when retrieving using the same tranche id" in
-    partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimit(maximumNumberOfCases).supplyTo { partGrowth =>
+    partGrowthLeadingToRootForkGenerator(allowDuplicates = true).withLimits(casesLimit = maximumNumberOfCases, complexityLimit = complexityLimit).supplyTo { partGrowth =>
       val intersessionState = new IntersessionState[TrancheId]
 
       val tranches = new FakeTranches with TranchesContracts[TrancheId]
