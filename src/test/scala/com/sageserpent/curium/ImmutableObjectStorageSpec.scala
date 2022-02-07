@@ -3,7 +3,6 @@ package com.sageserpent.curium
 import cats.free.FreeT
 import cats.implicits._
 import com.sageserpent.americium.Trials
-import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage._
 import org.scalatest.Inspectors
 import org.scalatest.flatspec.AnyFlatSpec
@@ -402,22 +401,20 @@ class ImmutableObjectStorageSpec
 
       val referencePartsByTrancheId = (trancheIds zip referenceParts).toMap
 
-      val randomBehaviour = new Random(partGrowth.hashCode())
+      for (sampleTrancheId <- trancheIds) {
+        val samplingSession: Session[Unit] = for {
+          _ <- (referencePartsByTrancheId(sampleTrancheId) match {
+            case _: Fork => immutableObjectStorage.retrieve[Leaf](sampleTrancheId)
+            case _: Leaf => immutableObjectStorage.retrieve[Fork](sampleTrancheId)
+          }) flatMap (part => FreeT.liftT(Try {
+            part.hashCode
+          }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+        } yield ()
 
-      val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
-
-      val samplingSession: Session[Unit] = for {
-        _ <- (referencePartsByTrancheId(sampleTrancheId) match {
-          case _: Fork => immutableObjectStorage.retrieve[Leaf](sampleTrancheId)
-          case _: Leaf => immutableObjectStorage.retrieve[Fork](sampleTrancheId)
-        }) flatMap (part => FreeT.liftT(Try {
-          part.hashCode
-        }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
-      } yield ()
-
-      immutableObjectStorage.runForEffectsOnly(
-        samplingSession,
-        intersessionState)(tranches) shouldBe a[Left[_, _]]
+        immutableObjectStorage.runForEffectsOnly(
+          samplingSession,
+          intersessionState)(tranches) shouldBe a[Left[_, _]]
+      }
     }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in
@@ -429,32 +426,30 @@ class ImmutableObjectStorageSpec
       val trancheIds =
         partGrowth.storeViaMultipleSessions(intersessionState, tranches)
 
-      val randomBehaviour = new Random(partGrowth.hashCode())
+      for (idOfCorruptedTranche <- trancheIds) {
+        tranches.tranchesById(idOfCorruptedTranche) = {
+          val trancheToCorrupt = tranches.tranchesById(idOfCorruptedTranche)
+          trancheToCorrupt.copy(
+            payload = "*** CORRUPTION! ***"
+              .map(_.toByte)
+              .toArray ++ trancheToCorrupt.payload)
+        }
 
-      val idOfCorruptedTranche = randomBehaviour.chooseOneOf(trancheIds)
+        val rootTrancheId = trancheIds.last
 
-      tranches.tranchesById(idOfCorruptedTranche) = {
-        val trancheToCorrupt = tranches.tranchesById(idOfCorruptedTranche)
-        trancheToCorrupt.copy(
-          payload = "*** CORRUPTION! ***"
-            .map(_.toByte)
-            .toArray ++ trancheToCorrupt.payload)
+        val samplingSessionWithCorruptedTranche: Session[Unit] = for {
+          _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
+            FreeT.liftT(Try {
+              part.hashCode
+            }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+        } yield ()
+
+        val freshIntersessionState = new IntersessionState[TrancheId]
+
+        immutableObjectStorage.runForEffectsOnly(
+          samplingSessionWithCorruptedTranche,
+          freshIntersessionState)(tranches) shouldBe a[Left[_, _]]
       }
-
-      val rootTrancheId = trancheIds.last
-
-      val samplingSessionWithCorruptedTranche: Session[Unit] = for {
-        _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
-          FreeT.liftT(Try {
-            part.hashCode
-          }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
-      } yield ()
-
-      val freshIntersessionState = new IntersessionState[TrancheId]
-
-      immutableObjectStorage.runForEffectsOnly(
-        samplingSessionWithCorruptedTranche,
-        freshIntersessionState)(tranches) shouldBe a[Left[_, _]]
     }
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in
@@ -466,27 +461,24 @@ class ImmutableObjectStorageSpec
       val trancheIds =
         partGrowth.storeViaMultipleSessions(intersessionState, tranches)
 
-      val randomBehaviour = new Random(partGrowth.hashCode())
+      for (idOfMissingTranche <- trancheIds) {
+        tranches.purgeTranche(idOfMissingTranche)
 
-      val idOfMissingTranche =
-        randomBehaviour.chooseOneOf(trancheIds)
+        val rootTrancheId = trancheIds.last
 
-      tranches.purgeTranche(idOfMissingTranche)
+        val samplingSessionWithMissingTranche: Session[Unit] = for {
+          _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
+            FreeT.liftT(Try {
+              part.hashCode
+            }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+        } yield ()
 
-      val rootTrancheId = trancheIds.last
+        val freshIntersessionState = new IntersessionState[TrancheId]
 
-      val samplingSessionWithMissingTranche: Session[Unit] = for {
-        _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
-          FreeT.liftT(Try {
-            part.hashCode
-          }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
-      } yield ()
-
-      val freshIntersessionState = new IntersessionState[TrancheId]
-
-      immutableObjectStorage.runForEffectsOnly(
-        samplingSessionWithMissingTranche,
-        freshIntersessionState)(tranches) shouldBe a[Left[_, _]]
+        immutableObjectStorage.runForEffectsOnly(
+          samplingSessionWithMissingTranche,
+          freshIntersessionState)(tranches) shouldBe a[Left[_, _]]
+      }
     }
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in
@@ -502,28 +494,25 @@ class ImmutableObjectStorageSpec
       val nonAlienTrancheIds =
         partGrowth.storeViaMultipleSessions(intersessionState, tranches)
 
-      val randomBehaviour = new Random(partGrowth.hashCode())
+      for (idOfIncorrectlyTypedTranche <- nonAlienTrancheIds) {
+        tranches.tranchesById(idOfIncorrectlyTypedTranche) =
+          tranches.tranchesById(alienTrancheId)
 
-      val idOfIncorrectlyTypedTranche =
-        randomBehaviour.chooseOneOf(nonAlienTrancheIds)
+        val rootTrancheId = nonAlienTrancheIds.last
 
-      tranches.tranchesById(idOfIncorrectlyTypedTranche) =
-        tranches.tranchesById(alienTrancheId)
+        val samplingSessionWithTrancheForIncompatibleType: Session[Unit] = for {
+          _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
+            FreeT.liftT(Try {
+              part.hashCode
+            }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
+        } yield ()
 
-      val rootTrancheId = nonAlienTrancheIds.last
+        val freshIntersessionState = new IntersessionState[TrancheId]
 
-      val samplingSessionWithTrancheForIncompatibleType: Session[Unit] = for {
-        _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (part =>
-          FreeT.liftT(Try {
-            part.hashCode
-          }.toEither)) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
-      } yield ()
-
-      val freshIntersessionState = new IntersessionState[TrancheId]
-
-      immutableObjectStorage.runForEffectsOnly(
-        samplingSessionWithTrancheForIncompatibleType,
-        freshIntersessionState)(tranches) shouldBe a[Left[_, _]]
+        immutableObjectStorage.runForEffectsOnly(
+          samplingSessionWithTrancheForIncompatibleType,
+          freshIntersessionState)(tranches) shouldBe a[Left[_, _]]
+      }
     }
 
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in
@@ -570,21 +559,19 @@ class ImmutableObjectStorageSpec
       val trancheIds =
         partGrowth.storeViaMultipleSessions(intersessionState, tranches)
 
-      val randomBehaviour = new Random(partGrowth.hashCode())
+      for (sampleTrancheId <- trancheIds) {
+        val samplingSession: Session[Unit] = for {
+          retrievedPartTakeOne <- immutableObjectStorage.retrieve[Part](
+            sampleTrancheId)
+          retrievedPartTakeTwo <- immutableObjectStorage.retrieve[Part](
+            sampleTrancheId)
+        } yield {
+          retrievedPartTakeTwo should be theSameInstanceAs retrievedPartTakeOne
+        }
 
-      val sampleTrancheId = randomBehaviour.chooseOneOf(trancheIds)
-
-      val samplingSession: Session[Unit] = for {
-        retrievedPartTakeOne <- immutableObjectStorage.retrieve[Part](
-          sampleTrancheId)
-        retrievedPartTakeTwo <- immutableObjectStorage.retrieve[Part](
-          sampleTrancheId)
-      } yield {
-        retrievedPartTakeTwo should be theSameInstanceAs retrievedPartTakeOne
+        immutableObjectStorage.runForEffectsOnly(
+          samplingSession,
+          intersessionState)(tranches) shouldBe a[Right[_, _]]
       }
-
-      immutableObjectStorage.runForEffectsOnly(
-        samplingSession,
-        intersessionState)(tranches) shouldBe a[Right[_, _]]
     }
 }
