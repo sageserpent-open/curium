@@ -159,26 +159,6 @@ class FakeTranchesSpec
   "Fake tranches" should behave like tranchesBehaviour
 }
 
-object H2ViaDoobieTranchesResource {
-  type TrancheId = H2ViaDoobieTranches#TrancheId
-}
-
-trait H2ViaDoobieTranchesResource
-  extends TranchesResource[H2ViaDoobieTranchesResource.TrancheId] {
-  override val tranchesResource
-  : Resource[IO, Tranches[H2ViaDoobieTranchesResource.TrancheId]] =
-    H2ViaDoobieResource.transactorResource.map(
-      transactor =>
-        new H2ViaDoobieTranches(transactor)
-          with TranchesContracts[H2ViaDoobieTranchesResource.TrancheId])
-}
-
-class H2ViaDoobieTranchesSpec
-  extends TranchesBehaviours[H2ViaDoobieTranchesResource.TrancheId]
-    with H2ViaDoobieTranchesResource {
-  "H2 tranches" should behave like tranchesBehaviour
-}
-
 object H2ViaScalikeJdbcTranchesResource {
   type TrancheId = H2ViaScalikeJdbcTranches#TrancheId
 }
@@ -191,7 +171,7 @@ trait H2ViaScalikeJdbcTranchesResource
     connectionPoolResource.map(
       connectionPool =>
         new H2ViaScalikeJdbcTranches(connectionPool)
-          with TranchesContracts[H2ViaDoobieTranchesResource.TrancheId])
+          with TranchesContracts[H2ViaScalikeJdbcTranchesResource.TrancheId])
 }
 
 class H2ViaScalikeJdbcTranchesSpec
