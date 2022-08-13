@@ -1,7 +1,8 @@
+/*
 package com.sageserpent.curium
 
 import com.google.common.primitives.{Ints, Longs}
-import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, ObjectReferenceId, TrancheOfData, Tranches}
+import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, TrancheLocalObjectReferenceId, TrancheOfData, Tranches}
 import org.rocksdb.{ColumnFamilyDescriptor, ColumnFamilyOptions, CompressionType, RocksDB}
 
 import scala.util.Try
@@ -25,7 +26,7 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
   val objectReferenceIdKeyTrancheIdValueColumnFamily =
     rocksDb.createColumnFamily(new ColumnFamilyDescriptor(objectReferenceIdKeyTrancheIdValueColumnFamilyName.getBytes, sharedColumnFamilyOptions))
 
-  override def createTrancheInStorage(payload: Array[Byte], objectReferenceIdOffset: ObjectReferenceId, objectReferenceIds: Range): EitherThrowableOr[TrancheId] =
+  override def createTrancheInStorage(payload: Array[Byte], objectReferenceIdOffset: TrancheLocalObjectReferenceId, objectReferenceIds: Range): EitherThrowableOr[TrancheId] =
     Try {
       val trancheId = {
         val iterator = rocksDb.newIterator(trancheIdKeyPayloadValueColumnFamily)
@@ -46,7 +47,7 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
       trancheId
     }.toEither
 
-  override def objectReferenceIdOffsetForNewTranche: EitherThrowableOr[ObjectReferenceId] = Try {
+  override def objectReferenceIdOffsetForNewTranche: EitherThrowableOr[TrancheLocalObjectReferenceId] = Try {
     val iterator = rocksDb.newIterator(objectReferenceIdKeyTrancheIdValueColumnFamily)
     iterator.seekToLast()
     if (iterator.isValid) 1 + Ints.fromByteArray(iterator.key()) else 0
@@ -59,7 +60,8 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
     TrancheOfData(payload, objectReferenceIdOffset)
   }.toEither
 
-  override def retrieveTrancheId(objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] = Try {
+  override def retrieveTrancheId(objectReferenceId: TrancheLocalObjectReferenceId): EitherThrowableOr[TrancheId] = Try {
     Longs.fromByteArray(rocksDb.get(objectReferenceIdKeyTrancheIdValueColumnFamily, Ints.toByteArray(objectReferenceId)))
   }.toEither
 }
+*/

@@ -1,3 +1,4 @@
+/*
 package com.sageserpent.curium
 
 import cats.effect.IO
@@ -98,3 +99,4 @@ class ExampleSpec
       .unsafeRunSync()
   }
 }
+*/

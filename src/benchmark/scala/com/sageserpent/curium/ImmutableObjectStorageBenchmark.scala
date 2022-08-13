@@ -10,7 +10,7 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
   import ImmutableObjectStorage._
   import ImmutableObjectStorageSpec._
 
-  val numberOfLeavesGenerator: Gen[ObjectReferenceId] =
+  val numberOfLeavesGenerator: Gen[TrancheLocalObjectReferenceId] =
     Gen.range("Number of leaves")(10, 300, 5)
 
   val partGrowthGenerator: Gen[PartGrowth] =

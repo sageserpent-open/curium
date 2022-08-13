@@ -1,8 +1,9 @@
+/*
 package com.sageserpent.curium
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, ObjectReferenceId, TrancheOfData, Tranches}
+import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, TrancheLocalObjectReferenceId, TrancheOfData, Tranches}
 import scalikejdbc._
 
 import scala.util.Try
@@ -34,7 +35,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
   extends Tranches[Long] {
   override def createTrancheInStorage(
                                        payload: Array[Byte],
-                                       objectReferenceIdOffset: ObjectReferenceId,
+                                       objectReferenceIdOffset: TrancheLocalObjectReferenceId,
                                        objectReferenceIds: Range)
   : EitherThrowableOr[TrancheId] =
     Try {
@@ -63,7 +64,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     }.toEither
 
   override def objectReferenceIdOffsetForNewTranche
-  : EitherThrowableOr[ObjectReferenceId] =
+  : EitherThrowableOr[TrancheLocalObjectReferenceId] =
     Try {
       DBResource(connectionPool)
         .use(db =>
@@ -104,7 +105,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     }.toEither
 
   override def retrieveTrancheId(
-                                  objectReferenceId: ObjectReferenceId): EitherThrowableOr[TrancheId] =
+                                  objectReferenceId: TrancheLocalObjectReferenceId): EitherThrowableOr[TrancheId] =
     Try {
       DBResource(connectionPool)
         .use(db =>
@@ -118,3 +119,4 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
         .unsafeRunSync()
     }.toEither
 }
+*/

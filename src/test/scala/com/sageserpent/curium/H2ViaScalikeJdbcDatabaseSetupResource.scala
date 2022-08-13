@@ -1,3 +1,4 @@
+/*
 package com.sageserpent.curium
 
 import cats.effect.{IO, Resource}
@@ -13,3 +14,4 @@ trait H2ViaScalikeJdbcDatabaseSetupResource extends ConnectionPoolResource {
         IO {})
     } yield connectionPool
 }
+*/

@@ -14,104 +14,11 @@ import scala.util.Try
 
 object ImmutableObjectStorageSpec {
 
-  class FakeTranches extends Tranches[UUID] {
-    val tranchesById: MutableMap[TrancheId, TrancheOfData] =
-      MutableMap.empty
-    val objectReferenceIdsToAssociatedTrancheIdMap
-    : MutableSortedMap[ObjectReferenceId, TrancheId] = MutableSortedMap.empty
-    var _objectReferenceIdOffsetForNewTranche: ObjectReferenceId = 0
-
-    def purgeTranche(trancheId: TrancheId): Unit = {
-      val objectReferenceIdsToRemove =
-        objectReferenceIdsToAssociatedTrancheIdMap.collect {
-          case (objectReferenceId, associatedTrancheId)
-            if trancheId == associatedTrancheId =>
-            objectReferenceId
-        }
-
-      objectReferenceIdsToAssociatedTrancheIdMap --= objectReferenceIdsToRemove
-
-      tranchesById -= trancheId
-    }
-
-    override def createTrancheInStorage(
-                                         payload: Array[Byte],
-                                         objectReferenceIdOffset: ObjectReferenceId,
-                                         objectReferenceIds: Range)
-    : EitherThrowableOr[TrancheId] =
-      Try {
-        val trancheId = UUID.randomUUID()
-
-        tranchesById(trancheId) =
-          TrancheOfData(payload, objectReferenceIdOffset)
-
-        for (objectReferenceId <- objectReferenceIds) {
-          objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) =
-            trancheId
-        }
-
-        val alignmentMultipleForObjectReferenceIdsInSeparateTranches = 100
-
-        objectReferenceIds.reduceOption(_ max _).foreach {
-          maximumObjectReferenceId =>
-            _objectReferenceIdOffsetForNewTranche =
-              (1 + maximumObjectReferenceId / alignmentMultipleForObjectReferenceIdsInSeparateTranches) *
-                alignmentMultipleForObjectReferenceIdsInSeparateTranches
-        }
-
-        trancheId
-      }.toEither
-
-    override def retrieveTranche(
-                                  trancheId: TrancheId): scala.Either[scala.Throwable, TrancheOfData] =
-      Try {
-        tranchesById(trancheId)
-      }.toEither
-
-    override def retrieveTrancheId(objectReferenceId: ObjectReferenceId)
-    : scala.Either[scala.Throwable, TrancheId] =
-      Try {
-        objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId)
-      }.toEither
-
-    override def objectReferenceIdOffsetForNewTranche
-    : EitherThrowableOr[ObjectReferenceId] =
-      _objectReferenceIdOffsetForNewTranche.pure[EitherThrowableOr]
-  }
-
   type TrancheId = FakeTranches#TrancheId
-
-  object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
-    override protected val tranchesImplementationName: String =
-      classOf[FakeTranches].getSimpleName
-  }
-
-  val aThing = "Foo"
-
-  sealed trait Part {
-    def useProblematicClosure: String
-  }
-
-  val labelStrings: Set[String] = Set("Huey", "Duey", "Louie")
-
-  case class Leaf(id: Int, labelString: String) extends Part {
-    val problematicClosure: Any => String = (_: Any) => aThing + aThing
-
-    override def useProblematicClosure: String = problematicClosure()
-  }
-
-  case class Fork(left: Part, id: Int, right: Part, labelString: String)
-    extends Part {
-    val problematicClosure: Any => String = (_: Any) => s"$aThing"
-
-    override def useProblematicClosure: String = problematicClosure()
-  }
-
-  case object alien
-
-  val api = Trials.api
-
   type PartGrowthStep = Vector[Part] => Part
+  val aThing = "Foo"
+  val labelStrings: Set[String] = Set("Huey", "Duey", "Louie")
+  val api = Trials.api
 
   def partGrowthLeadingToRootForkTrials(allowDuplicates: Boolean): Trials[PartGrowth] =
     for {
@@ -124,8 +31,8 @@ object ImmutableObjectStorageSpec {
     require(0 < numberOfLeavesRequired)
 
     def growthSteps(
-                     partIdSetsCoveredBySubparts: Vector[Set[ObjectReferenceId]],
-                     numberOfLeaves: ObjectReferenceId): Trials[LazyList[PartGrowthStep]] = {
+                     partIdSetsCoveredBySubparts: Vector[Set[TrancheLocalObjectReferenceId]],
+                     numberOfLeaves: TrancheLocalObjectReferenceId): Trials[LazyList[PartGrowthStep]] = {
       val numberOfSubparts = partIdSetsCoveredBySubparts.size
       val partId = numberOfSubparts // Makes it easier to read the test cases when debugging; the ids label the growth steps in ascending order.
       val collectingStrandsTogetherAsHaveEnoughLeaves = numberOfLeaves == numberOfLeavesRequired
@@ -178,7 +85,7 @@ object ImmutableObjectStorageSpec {
                 api.integers(lowerBound = 0, upperBound = numberOfSubparts - 1, 0)
 
             partIdsCoveredByThisFork
-              : Set[ObjectReferenceId] = partIdSetsCoveredBySubparts(
+              : Set[TrancheLocalObjectReferenceId] = partIdSetsCoveredBySubparts(
               indexOfLeftSubpart) ++ Set(partId) ++ partIdSetsCoveredBySubparts(
               indexOfRightSubpart)
 
@@ -214,17 +121,88 @@ object ImmutableObjectStorageSpec {
     growthSteps(Vector.empty, numberOfLeaves = 0).map(_.force).flatMap(steps => PartGrowth(steps))
   }
 
+  sealed trait Part {
+    def useProblematicClosure: String
+  }
+
+  class FakeTranches extends Tranches[UUID] {
+    val tranchesById: MutableMap[TrancheId, TrancheOfData] =
+      MutableMap.empty
+    val objectReferenceIdsToAssociatedTrancheIdMap
+    : MutableSortedMap[CanonicalObjectReferenceId, TrancheId] = MutableSortedMap.empty
+    var _objectReferenceIdOffsetForNewTranche: CanonicalObjectReferenceId = 0
+
+    def purgeTranche(trancheId: TrancheId): Unit = {
+      val objectReferenceIdsToRemove =
+        objectReferenceIdsToAssociatedTrancheIdMap.collect {
+          case (objectReferenceId, associatedTrancheId)
+            if trancheId == associatedTrancheId =>
+            objectReferenceId
+        }
+
+      objectReferenceIdsToAssociatedTrancheIdMap --= objectReferenceIdsToRemove
+
+      tranchesById -= trancheId
+    }
+
+    override def createTrancheInStorage(tranche: TrancheOfData,
+                                        objectReferenceIds: Seq[CanonicalObjectReferenceId]): EitherThrowableOr[TrancheId] =
+      Try {
+        val trancheId = UUID.randomUUID()
+
+        tranchesById(trancheId) =
+          tranche
+
+        for (objectReferenceId <- objectReferenceIds) {
+          objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId) =
+            trancheId
+        }
+
+        val alignmentMultipleForObjectReferenceIdsInSeparateTranches = 100
+
+        objectReferenceIds.maxOption.foreach {
+          maximumObjectReferenceId =>
+            _objectReferenceIdOffsetForNewTranche =
+              (1 + maximumObjectReferenceId / alignmentMultipleForObjectReferenceIdsInSeparateTranches) *
+                alignmentMultipleForObjectReferenceIdsInSeparateTranches
+        }
+
+        trancheId
+      }.toEither
+
+    override def retrieveTranche(
+                                  trancheId: TrancheId): scala.Either[scala.Throwable, TrancheOfData] =
+      Try {
+        tranchesById(trancheId)
+      }.toEither
+
+    override def retrieveTrancheId(objectReferenceId: CanonicalObjectReferenceId)
+    : scala.Either[scala.Throwable, TrancheId] =
+      Try {
+        objectReferenceIdsToAssociatedTrancheIdMap(objectReferenceId)
+      }.toEither
+
+    override def objectReferenceIdOffsetForNewTranche
+    : EitherThrowableOr[CanonicalObjectReferenceId] =
+      _objectReferenceIdOffsetForNewTranche.pure[EitherThrowableOr]
+  }
+
+  case class Leaf(id: Int, labelString: String) extends Part {
+    val problematicClosure: Any => String = (_: Any) => aThing + aThing
+
+    override def useProblematicClosure: String = problematicClosure()
+  }
+
+  case class Fork(left: Part, id: Int, right: Part, labelString: String)
+    extends Part {
+    val problematicClosure: Any => String = (_: Any) => s"$aThing"
+
+    override def useProblematicClosure: String = problematicClosure()
+  }
+
   case class PartGrowth(steps: Seq[PartGrowthStep], chunkSizes: Seq[Int]) {
     require(steps.nonEmpty)
     require(steps.size == chunkSizes.sum)
-
-    private def thingsInChunks[Thing](chunkSizes: Seq[Int],
-                                      things: Seq[Thing]): Seq[Seq[Thing]] =
-      if (chunkSizes.nonEmpty) {
-        val (leadingChunk, remainder) = things.splitAt(chunkSizes.head)
-
-        leadingChunk +: thingsInChunks(chunkSizes.tail, remainder)
-      } else Seq.empty
 
     override def toString(): String = {
       val partsInChunks = thingsInChunks(chunkSizes, parts())
@@ -271,7 +249,22 @@ object ImmutableObjectStorageSpec {
 
       trancheIdsSoFar
     }
+
+    private def thingsInChunks[Thing](chunkSizes: Seq[Int],
+                                      things: Seq[Thing]): Seq[Seq[Thing]] =
+      if (chunkSizes.nonEmpty) {
+        val (leadingChunk, remainder) = things.splitAt(chunkSizes.head)
+
+        leadingChunk +: thingsInChunks(chunkSizes.tail, remainder)
+      } else Seq.empty
   }
+
+  object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
+    override protected val tranchesImplementationName: String =
+      classOf[FakeTranches].getSimpleName
+  }
+
+  case object alien
 
   object TrialsHelpers {
     def sequencesOfDistinctIntegersFromZeroToOneLessThan(exclusiveLimit: Int): Trials[LazyList[Int]] = {
@@ -320,9 +313,9 @@ class ImmutableObjectStorageSpec
   import ImmutableObjectStorageSpec._
 
 
-  private val maximumNumberOfCases = 100
+  private val maximumNumberOfCases = 200
 
-  private val complexityLimit = 300
+  private val complexityLimit = 10000
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true).withLimits(casesLimit = maximumNumberOfCases, complexityLimit = complexityLimit).supplyTo { partGrowth =>

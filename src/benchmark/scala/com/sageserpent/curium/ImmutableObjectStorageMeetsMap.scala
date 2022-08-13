@@ -1,3 +1,4 @@
+/*
 package com.sageserpent.curium
 
 import cats.collections.{AvlMap, AvlSet}
@@ -74,3 +75,4 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
       .unsafeRunSync()
   }
 }
+*/
