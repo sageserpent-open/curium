@@ -177,14 +177,14 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
   private def augmentWith(trancheId: TrancheId)(
       trancheLocalObjectReferenceId: TrancheLocalObjectReferenceId
   ): AugmentedTrancheLocalObjectReferenceId =
-    (trancheId << JavaInteger.SIZE.toLong) + JavaInteger.toUnsignedLong(
+    (trancheId << JavaInteger.SIZE) + JavaInteger.toUnsignedLong(
       trancheLocalObjectReferenceId
     )
 
   private def extractTrancheLocalObjectReferenceIdFrom(
       augmentedTrancheLocalObjectReferenceId: AugmentedTrancheLocalObjectReferenceId
   ): TrancheLocalObjectReferenceId =
-    (augmentedTrancheLocalObjectReferenceId & ((1L << JavaInteger.SIZE.toLong) - 1L)).toInt
+    (augmentedTrancheLocalObjectReferenceId & ((1L << JavaInteger.SIZE) - 1L)).toInt
 
   override def retrieveTrancheId(
       objectReferenceId: CanonicalObjectReferenceId
