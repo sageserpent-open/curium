@@ -4,13 +4,12 @@ import com.google.common.primitives.Longs
 import com.sageserpent.curium.ImmutableObjectStorage._
 import org.rocksdb._
 
-import java.lang.{Integer => JavaInteger}
+import java.lang.{Integer => JavaInteger, Long => JavaLong}
 import scala.collection.mutable
 import scala.util.Try
 
 object RocksDbTranches {
-  type AugmentedTrancheLocalObjectReferenceId = Long
-
+  type AugmentedTrancheLocalObjectReferenceId = BigInt
   val trancheIdKeyPayloadValueColumnFamilyName = "TrancheIdKeyPayloadValue"
   val trancheIdKeyObjectReferenceIdOffsetValueFamilyName =
     "TrancheIdKeyObjectReferenceIdOffsetValue"
@@ -18,6 +17,23 @@ object RocksDbTranches {
     "ObjectReferenceIdKeyTrancheIdValue"
   val augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamilyName =
     "AugmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValue"
+
+  private val numberOfBytesForTheKeyRepresentationOfAugmentedTrancheLocalObjectReferenceId =
+    JavaLong.BYTES + JavaInteger.BYTES
+
+  private def keyFor(
+      augmentedTrancheLocalObjectReferenceId: AugmentedTrancheLocalObjectReferenceId
+  ): Array[Byte] = {
+    val byteArray = augmentedTrancheLocalObjectReferenceId.toByteArray
+
+    // Remember that RocksDB by default uses lexicographical ordering of keys,
+    // so we have to left-pad with zero bytes to ensure that small `BigInt`
+    // instances that don't require many bytes come before larger values that
+    // require more bytes.
+    Array.fill[Byte](
+      numberOfBytesForTheKeyRepresentationOfAugmentedTrancheLocalObjectReferenceId - byteArray.length
+    )(0) ++ byteArray
+  }
 }
 
 class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
@@ -103,13 +119,20 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
 
         rocksDb.put(
           augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamily,
-          Longs.toByteArray(augmentedTrancheLocalObjectReferenceId),
+          keyFor(augmentedTrancheLocalObjectReferenceId),
           Longs.toByteArray(canonicalObjectReferenceId)
         )
       }
 
       trancheId
     }.toEither
+
+  private def augmentWith(trancheId: TrancheId)(
+      trancheLocalObjectReferenceId: TrancheLocalObjectReferenceId
+  ): AugmentedTrancheLocalObjectReferenceId =
+    (BigInt.long2bigInt(trancheId) << JavaInteger.SIZE) + BigInt.long2bigInt(
+      JavaInteger.toUnsignedLong(trancheLocalObjectReferenceId)
+    )
 
   override def objectReferenceIdOffsetForNewTranche
       : EitherThrowableOr[CanonicalObjectReferenceId] = Try {
@@ -144,7 +167,7 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
     val upperBound = augmentWith(1L + trancheId)(0)
 
     readOptions
-      .setIterateUpperBound(new Slice(Longs.toByteArray(upperBound)))
+      .setIterateUpperBound(new Slice(keyFor(upperBound)))
 
     val iterator = rocksDb.newIterator(
       augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamily,
@@ -152,12 +175,12 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
     )
 
     try {
-      iterator.seek(Longs.toByteArray(lowerBound))
+      iterator.seek(keyFor(lowerBound))
 
       while (iterator.isValid) {
         interTrancheObjectReferenceIdTranslation +=
           (extractTrancheLocalObjectReferenceIdFrom(
-            Longs.fromByteArray(iterator.key())
+            BigInt(iterator.key())
           ) -> Longs.fromByteArray(iterator.value()))
 
         iterator.next()
@@ -173,13 +196,6 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
       interTrancheObjectReferenceIdTranslation.toMap
     )
   }.toEither
-
-  private def augmentWith(trancheId: TrancheId)(
-      trancheLocalObjectReferenceId: TrancheLocalObjectReferenceId
-  ): AugmentedTrancheLocalObjectReferenceId =
-    (trancheId << JavaInteger.SIZE) + JavaInteger.toUnsignedLong(
-      trancheLocalObjectReferenceId
-    )
 
   private def extractTrancheLocalObjectReferenceIdFrom(
       augmentedTrancheLocalObjectReferenceId: AugmentedTrancheLocalObjectReferenceId
