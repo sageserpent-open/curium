@@ -4,7 +4,7 @@ import cats.effect.unsafe.implicits.global
 import cats.effect.{IO, Resource}
 import cats.implicits._
 import com.sageserpent.americium.Trials
-import com.sageserpent.curium.ImmutableObjectStorage.{CanonicalObjectReferenceId, TrancheOfData, Tranches, TranchesContracts}
+import com.sageserpent.curium.ImmutableObjectStorage._
 import com.sageserpent.curium.ImmutableObjectStorageSpec.FakeTranches
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -18,14 +18,16 @@ trait TranchesResource[TrancheId] {
 object TranchesBehaviours {
   val api = Trials.api
 
-  val payloadGenerator: Trials[Array[Byte]] = api.bytes.several[Array[Byte]]
+  val payloads: Trials[Array[Byte]] = api.bytes.several[Array[Byte]]
 
-  val objectReferenceIdOffsetsGenerator: Trials[Seq[Long]] =
+  val objectReferenceIdOffsetSequences: Trials[Seq[Long]] =
     api.longs(lowerBound = 0L, upperBound = 500L, shrinkageTarget = 0L).lists.map(_.distinct)
 
-  val fakePayloadAndObjectReferenceIdOffsetsPairsGenerator
-  : Trials[(Array[Byte], Seq[Long])] =
-    (payloadGenerator, objectReferenceIdOffsetsGenerator).tupled
+  val interTrancheObjectReferenceIdTranslations: Trials[Map[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId]] = api.integers.maps(api.longs).asInstanceOf
+
+  val cases
+  : Trials[List[(Array[Byte], Seq[Long], Map[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId])]] =
+    (payloads, objectReferenceIdOffsetSequences, interTrancheObjectReferenceIdTranslations).tupled.lists.filter(_.nonEmpty)
 }
 
 trait TranchesBehaviours[TrancheId]
@@ -40,7 +42,7 @@ trait TranchesBehaviours[TrancheId]
     val maximumNumberOfCases = 100
 
     "creating a tranche" should "yield a unique tranche id" in
-      fakePayloadAndObjectReferenceIdOffsetsPairsGenerator.lists.filter(_.nonEmpty).withLimit(maximumNumberOfCases).supplyTo {
+      cases.withLimit(maximumNumberOfCases).supplyTo {
         payloadAndCountPairs =>
           tranchesResource
             .use(tranches =>
@@ -49,13 +51,13 @@ trait TranchesBehaviours[TrancheId]
 
                 val trancheIds = MutableSet.empty[TrancheId]
 
-                for ((payload, offsets) <- payloadAndCountPairs) {
+                for ((payload, offsets, interTrancheObjectReferenceIdTranslation) <- payloadAndCountPairs) {
                   val Right(trancheId) =
                     for {
                       objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
                       objectReferenceIds: Seq[CanonicalObjectReferenceId] = offsets map (objectReferenceIdOffset + _)
                       trancheId <- tranches.createTrancheInStorage(
-                        TrancheOfData(payload, objectReferenceIdOffset, Map.empty /*TODO*/), objectReferenceIds)
+                        TrancheOfData(payload, objectReferenceIdOffset, interTrancheObjectReferenceIdTranslation), objectReferenceIds)
                     } yield trancheId
 
                   trancheIds += trancheId
@@ -67,7 +69,7 @@ trait TranchesBehaviours[TrancheId]
       }
 
     it should "permit retrieval of that tranche id from any of the associated object reference ids" in
-      fakePayloadAndObjectReferenceIdOffsetsPairsGenerator.lists.filter(_.nonEmpty).withLimit(maximumNumberOfCases).supplyTo {
+      cases.withLimit(maximumNumberOfCases).supplyTo {
         payloadAndCountPairs =>
           tranchesResource
             .use(tranches =>
@@ -75,13 +77,13 @@ trait TranchesBehaviours[TrancheId]
                 val objectReferenceIdsByTrancheId =
                   MutableMap.empty[TrancheId, Seq[CanonicalObjectReferenceId]]
 
-                for ((payload, offsets) <- payloadAndCountPairs) {
+                for ((payload, offsets, interTrancheObjectReferenceIdTranslation) <- payloadAndCountPairs) {
                   val Right((trancheId, objectReferenceIds)) =
                     for {
                       objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
                       objectReferenceIds: Seq[CanonicalObjectReferenceId] = offsets map (objectReferenceIdOffset + _)
                       trancheId <- tranches.createTrancheInStorage(
-                        TrancheOfData(payload, objectReferenceIdOffset, Map.empty /*TODO*/),
+                        TrancheOfData(payload, objectReferenceIdOffset, interTrancheObjectReferenceIdTranslation),
                         objectReferenceIds)
                     } yield trancheId -> objectReferenceIds
 
@@ -101,7 +103,7 @@ trait TranchesBehaviours[TrancheId]
       }
 
     "retrieving a tranche by tranche id" should "yield a tranche that corresponds to what was used to create it" in
-      fakePayloadAndObjectReferenceIdOffsetsPairsGenerator.lists.filter(_.nonEmpty).withLimit(maximumNumberOfCases).supplyTo {
+      cases.withLimit(maximumNumberOfCases).supplyTo {
         payloadAndCountPairs =>
           tranchesResource
             .use(tranches =>
@@ -109,12 +111,12 @@ trait TranchesBehaviours[TrancheId]
                 val trancheIdToExpectedTrancheMapping =
                   MutableMap.empty[TrancheId, TrancheOfData]
 
-                for ((payload, offsets) <- payloadAndCountPairs) {
+                for ((payload, offsets, interTrancheObjectReferenceIdTranslation) <- payloadAndCountPairs) {
                   val Right((trancheId, tranche)) =
                     for {
                       objectReferenceIdOffset <- tranches.objectReferenceIdOffsetForNewTranche
                       objectReferenceIds: Seq[CanonicalObjectReferenceId] = offsets map (objectReferenceIdOffset + _)
-                      tranche = TrancheOfData(payload, objectReferenceIdOffset, Map.empty /*TODO*/)
+                      tranche = TrancheOfData(payload, objectReferenceIdOffset, interTrancheObjectReferenceIdTranslation)
 
                       trancheId <- tranches.createTrancheInStorage(
                         tranche,
