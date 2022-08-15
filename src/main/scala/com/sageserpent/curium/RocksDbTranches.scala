@@ -6,7 +6,7 @@ import org.rocksdb._
 
 import java.lang.{Integer => JavaInteger, Long => JavaLong}
 import scala.collection.mutable
-import scala.util.Try
+import scala.util.{Try, Using}
 
 object RocksDbTranches {
   type AugmentedTrancheLocalObjectReferenceId = BigInt
@@ -77,14 +77,11 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
       objectReferenceIds: Seq[CanonicalObjectReferenceId]
   ): EitherThrowableOr[TrancheId] =
     Try {
-      val trancheId = {
-        val iterator = rocksDb.newIterator(trancheIdKeyPayloadValueColumnFamily)
-        try {
-          iterator.seekToLast()
-          if (iterator.isValid) 1L + Longs.fromByteArray(iterator.key()) else 0L
-        } finally {
-          iterator.close()
-        }
+      val trancheId = Using.resource(
+        rocksDb.newIterator(trancheIdKeyPayloadValueColumnFamily)
+      ) { iterator =>
+        iterator.seekToLast()
+        if (iterator.isValid) 1L + Longs.fromByteArray(iterator.key()) else 0L
       }
 
       val trancheIdKey = Longs.toByteArray(trancheId)
@@ -136,13 +133,11 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
 
   override def objectReferenceIdOffsetForNewTranche
       : EitherThrowableOr[CanonicalObjectReferenceId] = Try {
-    val iterator =
+    Using.resource(
       rocksDb.newIterator(objectReferenceIdKeyTrancheIdValueColumnFamily)
-    try {
+    ) { iterator =>
       iterator.seekToLast()
       if (iterator.isValid) 1L + Longs.fromByteArray(iterator.key()) else 0L
-    } finally {
-      iterator.close()
     }
   }.toEither
 
@@ -161,33 +156,29 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
       CanonicalObjectReferenceId
     ] = mutable.Map.empty
 
-    val readOptions: ReadOptions = new ReadOptions()
-
     val lowerBound = augmentWith(trancheId)(0)
     val upperBound = augmentWith(1L + trancheId)(0)
 
-    readOptions
-      .setIterateUpperBound(new Slice(keyFor(upperBound)))
+    Using.resource(
+      new ReadOptions().setIterateUpperBound(new Slice(keyFor(upperBound)))
+    ) { readOptions =>
+      Using.resource(
+        rocksDb.newIterator(
+          augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamily,
+          readOptions
+        )
+      ) { iterator =>
+        iterator.seek(keyFor(lowerBound))
 
-    val iterator = rocksDb.newIterator(
-      augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamily,
-      readOptions
-    )
+        while (iterator.isValid) {
+          interTrancheObjectReferenceIdTranslation +=
+            (extractTrancheLocalObjectReferenceIdFrom(
+              BigInt(iterator.key())
+            ) -> Longs.fromByteArray(iterator.value()))
 
-    try {
-      iterator.seek(keyFor(lowerBound))
-
-      while (iterator.isValid) {
-        interTrancheObjectReferenceIdTranslation +=
-          (extractTrancheLocalObjectReferenceIdFrom(
-            BigInt(iterator.key())
-          ) -> Longs.fromByteArray(iterator.value()))
-
-        iterator.next()
+          iterator.next()
+        }
       }
-    } finally {
-      iterator.close()
-      readOptions.close()
     }
 
     TrancheOfData(
