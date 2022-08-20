@@ -68,7 +68,8 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
     rocksDb.createColumnFamily(
       new ColumnFamilyDescriptor(
         augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamilyName.getBytes,
-        sharedColumnFamilyOptions
+        new ColumnFamilyOptions(sharedColumnFamilyOptions)
+          .useFixedLengthPrefixExtractor(JavaLong.BYTES)
       )
     )
 
@@ -160,7 +161,9 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
     val upperBound = augmentWith(1L + trancheId)(0)
 
     Using.resource(
-      new ReadOptions().setIterateUpperBound(new Slice(keyFor(upperBound)))
+      new ReadOptions()
+        .setAutoPrefixMode(true)
+        .setIterateUpperBound(new Slice(keyFor(upperBound)))
     ) { readOptions =>
       Using.resource(
         rocksDb.newIterator(
