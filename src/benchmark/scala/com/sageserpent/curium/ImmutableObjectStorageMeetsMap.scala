@@ -9,6 +9,7 @@ import com.sageserpent.curium.ImmutableObjectStorage.{
   Session
 }
 
+import scala.annotation.tailrec
 import scala.concurrent.duration.Deadline
 import scala.util.Random
 
@@ -36,30 +37,60 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
           val lookbackLimit = 1000000
 
-          for (step <- 0 until 100000000) {
-            val session: Session[TrancheId] = for {
-              map <- immutableObjectStorage
-                .retrieve[AvlMap[Int, AvlSet[String]]](trancheId)
-              mapWithPossibleRemoval =
-                if (1 == step % 5) {
-                  val elementToRemove =
-                    step - randomBehaviour.chooseAnyNumberFromOneTo(
-                      lookbackLimit min step
-                    )
-                  map.remove(elementToRemove)
-                } else map
-              mutatedMap = mapWithPossibleRemoval + (step -> {
-                val set = map
-                  .get(
-                    if (0 < step)
-                      step - randomBehaviour
-                        .chooseAnyNumberFromOneTo(lookbackLimit min step)
-                    else 0
+          val batchSize = 10
+
+          for (step <- 0 until (100000000, batchSize)) {
+            if (step % 5000 == 0) {
+              val currentTime = Deadline.now
+
+              val duration = currentTime - startTime
+
+              immutableObjectStorage.runForEffectsOnly(
+                for {
+                  retrievedMap <- immutableObjectStorage
+                    .retrieve[AvlMap[Int, AvlSet[String]]](trancheId)
+                } yield {
+                  println(
+                    s"Step: $step, duration: ${duration.toMillis} milliseconds, contents at previous step: ${retrievedMap.get(step - 1).getOrElse(AvlSet.empty).toScalaSet}"
                   )
-                  .getOrElse(AvlSet.empty)
-                if (!set.isEmpty && 1 == step % 11) set.remove(set.min.get)
-                else set + step.toString
-              })
+                },
+                intersessionState
+              )(tranches)
+            }
+
+            val session: Session[TrancheId] = for {
+              retrievedMap <- immutableObjectStorage
+                .retrieve[AvlMap[Int, AvlSet[String]]](trancheId)
+              mutatedMap = iterate {
+                (count, originalMap: AvlMap[Int, AvlSet[String]]) =>
+                  val microStep = step + count
+
+                  val mapWithPossibleRemoval =
+                    if (1 == microStep % 5) {
+                      val elementToRemove =
+                        microStep - randomBehaviour.chooseAnyNumberFromOneTo(
+                          lookbackLimit min microStep
+                        )
+                      originalMap.remove(elementToRemove)
+                    } else originalMap
+
+                  mapWithPossibleRemoval + (microStep -> {
+                    val set = originalMap
+                      .get(
+                        if (0 < microStep)
+                          microStep - randomBehaviour
+                            .chooseAnyNumberFromOneTo(
+                              lookbackLimit min microStep
+                            )
+                        else 0
+                      )
+                      .getOrElse(AvlSet.empty)
+                    if (!set.isEmpty && 1 == microStep % 11)
+                      set.remove(set.min.get)
+                    else set + microStep.toString
+                  })
+              }(seed = retrievedMap, numberOfIterations = batchSize)
+
               newTrancheId <- immutableObjectStorage.store(mutatedMap)
             } yield newTrancheId
 
@@ -67,20 +98,21 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
               .runToYieldTrancheId(session, intersessionState)(tranches)
               .right
               .get
-
-            if (step % 5000 == 0) {
-              val currentTime = Deadline.now
-
-              val duration = currentTime - startTime
-
-              println(
-                s"Step: $step, duration: ${duration.toMillis} milliseconds"
-              )
-            }
           }
         }
       )
       .unsafeRunSync()
+  }
+
+  def iterate[X](step: (Int, X) => X)(seed: X, numberOfIterations: Int): X = {
+    require(0 <= numberOfIterations)
+
+    @tailrec
+    def evaluate(seed: X, count: Int): X =
+      if (numberOfIterations > count) evaluate(step(count, seed), 1 + count)
+      else seed
+
+    evaluate(seed, 0)
   }
 
   object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
