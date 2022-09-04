@@ -35,11 +35,11 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
           val startTime = Deadline.now
 
-          val lookbackLimit = 1000000
+          val lookbackLimit = 10000000
 
           val batchSize = 10
 
-          for (step <- 0 until (100000000, batchSize)) {
+          for (step <- 0 until (1000000000, batchSize)) {
             if (step % 5000 == 0) {
               val currentTime = Deadline.now
 
