@@ -356,6 +356,8 @@ trait ImmutableObjectStorage[TrancheId] {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
 
+      val notYetWritten = -1
+
       def decodePlaceholder(placeholderOrActualObject: AnyRef): AnyRef =
         placeholderOrActualObject match {
           case AssociatedValueForAlias(immutableObject) => immutableObject
@@ -469,7 +471,7 @@ trait ImmutableObjectStorage[TrancheId] {
         ): TrancheLocalObjectReferenceId = {
           val result = super.getWrittenId(immutableObject)
 
-          if (-1 == result) {
+          if (notYetWritten == result) {
             assert(!proxySupport.isProxy(immutableObject))
           }
 
@@ -622,7 +624,7 @@ trait ImmutableObjectStorage[TrancheId] {
             .orElse(
               Option(referenceIdToLocalObjectMap.inverse().get(immutableObject))
             )
-            .getOrElse(-1)
+            .getOrElse(notYetWritten)
 
         private def interTrancheObjectReferenceIdFor(
             canonicalReference: CanonicalObjectReferenceId
