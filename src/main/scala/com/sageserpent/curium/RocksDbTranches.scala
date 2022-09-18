@@ -1,39 +1,18 @@
 package com.sageserpent.curium
 
+import com.google.common.io.ByteStreams
 import com.google.common.primitives.Longs
 import com.sageserpent.curium.ImmutableObjectStorage._
 import org.rocksdb._
 
-import java.lang.{Integer => JavaInteger, Long => JavaLong}
+import java.lang.{Long => JavaLong}
 import scala.collection.mutable
 import scala.util.{Try, Using}
 
 object RocksDbTranches {
-  type AugmentedTrancheLocalObjectReferenceId = BigInt
   val trancheIdKeyPayloadValueColumnFamilyName = "TrancheIdKeyPayloadValue"
-  val trancheIdKeyObjectReferenceIdOffsetValueFamilyName =
-    "TrancheIdKeyObjectReferenceIdOffsetValue"
-  val objectReferenceIdKeyTrancheIdValueColumnFamilyName =
-    "ObjectReferenceIdKeyTrancheIdValue"
   val augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamilyName =
     "AugmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValue"
-
-  private val numberOfBytesForTheKeyRepresentationOfAugmentedTrancheLocalObjectReferenceId =
-    JavaLong.BYTES + JavaInteger.BYTES
-
-  private def keyFor(
-      augmentedTrancheLocalObjectReferenceId: AugmentedTrancheLocalObjectReferenceId
-  ): Array[Byte] = {
-    val byteArray = augmentedTrancheLocalObjectReferenceId.toByteArray
-
-    // Remember that RocksDB by default uses lexicographical ordering of keys,
-    // so we have to left-pad with zero bytes to ensure that small `BigInt`
-    // instances that don't require many bytes come before larger values that
-    // require more bytes.
-    Array.fill[Byte](
-      numberOfBytesForTheKeyRepresentationOfAugmentedTrancheLocalObjectReferenceId - byteArray.length
-    )(0) ++ byteArray
-  }
 }
 
 class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
@@ -50,20 +29,6 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
         sharedColumnFamilyOptions
       )
     )
-  val trancheIdKeyObjectReferenceIdOffsetValueFamily =
-    rocksDb.createColumnFamily(
-      new ColumnFamilyDescriptor(
-        trancheIdKeyObjectReferenceIdOffsetValueFamilyName.getBytes,
-        sharedColumnFamilyOptions
-      )
-    )
-  val objectReferenceIdKeyTrancheIdValueColumnFamily =
-    rocksDb.createColumnFamily(
-      new ColumnFamilyDescriptor(
-        objectReferenceIdKeyTrancheIdValueColumnFamilyName.getBytes,
-        sharedColumnFamilyOptions
-      )
-    )
   val augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamily =
     rocksDb.createColumnFamily(
       new ColumnFamilyDescriptor(
@@ -74,8 +39,7 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
     )
 
   override def createTrancheInStorage(
-      tranche: TrancheOfData,
-      objectReferenceIds: Seq[CanonicalObjectReferenceId]
+      tranche: TrancheOfData[TrancheId]
   ): EitherThrowableOr[TrancheId] =
     Try {
       val trancheId = Using.resource(
@@ -93,77 +57,39 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
         tranche.payload
       )
 
-      rocksDb.put(
-        trancheIdKeyObjectReferenceIdOffsetValueFamily,
-        trancheIdKey,
-        Longs.toByteArray(tranche.objectReferenceIdOffset)
-      )
-
-      for (objectReferenceId <- objectReferenceIds) {
-        rocksDb.put(
-          objectReferenceIdKeyTrancheIdValueColumnFamily,
-          Longs.toByteArray(objectReferenceId),
-          trancheIdKey
-        )
-      }
-
       for (
         (trancheLocalObjectReferenceId, canonicalObjectReferenceId) <-
           tranche.interTrancheObjectReferenceIdTranslation
       ) {
-        val augmentedTrancheLocalObjectReferenceId
-            : AugmentedTrancheLocalObjectReferenceId =
-          augmentWith(trancheId)(trancheLocalObjectReferenceId)
-
         rocksDb.put(
           augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamily,
-          keyFor(augmentedTrancheLocalObjectReferenceId),
-          Longs.toByteArray(canonicalObjectReferenceId)
+          byteArrayOf(trancheId -> trancheLocalObjectReferenceId),
+          byteArrayOf(canonicalObjectReferenceId)
         )
       }
 
       trancheId
     }.toEither
 
-  private def augmentWith(trancheId: TrancheId)(
-      trancheLocalObjectReferenceId: TrancheLocalObjectReferenceId
-  ): AugmentedTrancheLocalObjectReferenceId =
-    (BigInt.long2bigInt(trancheId) << JavaInteger.SIZE) + BigInt.long2bigInt(
-      JavaInteger.toUnsignedLong(trancheLocalObjectReferenceId)
-    )
-
-  override def objectReferenceIdOffsetForNewTranche
-      : EitherThrowableOr[CanonicalObjectReferenceId] = Try {
-    Using.resource(
-      rocksDb.newIterator(objectReferenceIdKeyTrancheIdValueColumnFamily)
-    ) { iterator =>
-      iterator.seekToLast()
-      if (iterator.isValid) 1L + Longs.fromByteArray(iterator.key()) else 0L
-    }
-  }.toEither
-
   override def retrieveTranche(
       trancheId: TrancheId
-  ): EitherThrowableOr[ImmutableObjectStorage.TrancheOfData] = Try {
+  ): EitherThrowableOr[TrancheOfData[TrancheId]] = Try {
     val trancheIdKey = Longs.toByteArray(trancheId)
     val payload =
       rocksDb.get(trancheIdKeyPayloadValueColumnFamily, trancheIdKey)
-    val objectReferenceIdOffset = Longs.fromByteArray(
-      rocksDb.get(trancheIdKeyObjectReferenceIdOffsetValueFamily, trancheIdKey)
-    )
 
     val interTrancheObjectReferenceIdTranslation: mutable.Map[
       TrancheLocalObjectReferenceId,
-      CanonicalObjectReferenceId
+      CanonicalObjectReferenceId[TrancheId]
     ] = mutable.Map.empty
 
-    val lowerBound = augmentWith(trancheId)(0)
-    val upperBound = augmentWith(1L + trancheId)(0)
+    val lowerBound = trancheId        -> 0
+    val upperBound = (1L + trancheId) -> 0
 
     Using.resource(
       new ReadOptions()
         .setAutoPrefixMode(true)
-        .setIterateUpperBound(new Slice(keyFor(upperBound)))
+        .setIterateUpperBound(new Slice(byteArrayOf(upperBound)))
     ) { readOptions =>
       Using.resource(
         rocksDb.newIterator(
@@ -171,13 +97,15 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
           readOptions
         )
       ) { iterator =>
-        iterator.seek(keyFor(lowerBound))
+        iterator.seek(byteArrayOf(lowerBound))
 
         while (iterator.isValid) {
           interTrancheObjectReferenceIdTranslation +=
-            (extractTrancheLocalObjectReferenceIdFrom(
-              BigInt(iterator.key())
-            ) -> Longs.fromByteArray(iterator.value()))
+            (trancheLocalObjectReferenceIdOf(
+              iterator.key()
+            ) -> canonicalObjectReferenceIdOf(
+              iterator.value()
+            ))
 
           iterator.next()
         }
@@ -186,24 +114,43 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
 
     TrancheOfData(
       payload,
-      objectReferenceIdOffset,
       interTrancheObjectReferenceIdTranslation.toMap
     )
   }.toEither
 
-  private def extractTrancheLocalObjectReferenceIdFrom(
-      augmentedTrancheLocalObjectReferenceId: AugmentedTrancheLocalObjectReferenceId
-  ): TrancheLocalObjectReferenceId =
-    (augmentedTrancheLocalObjectReferenceId & ((1L << JavaInteger.SIZE) - 1L)).toInt
+  private def byteArrayOf(
+      canonicalObjectReferenceId: CanonicalObjectReferenceId[TrancheId]
+  ): Array[Byte] = {
+    val (
+      trancheId: TrancheId,
+      trancheLocalObjectReferenceId: TrancheLocalObjectReferenceId
+    ) = canonicalObjectReferenceId
 
-  override def retrieveTrancheId(
-      objectReferenceId: CanonicalObjectReferenceId
-  ): EitherThrowableOr[TrancheId] = Try {
-    Longs.fromByteArray(
-      rocksDb.get(
-        objectReferenceIdKeyTrancheIdValueColumnFamily,
-        Longs.toByteArray(objectReferenceId)
-      )
-    )
-  }.toEither
+    val output = ByteStreams.newDataOutput()
+    output.writeLong(trancheId)
+    output.writeInt(trancheLocalObjectReferenceId)
+    output.toByteArray
+  }
+
+  private def trancheLocalObjectReferenceIdOf(
+      payload: Array[Byte]
+  ): TrancheLocalObjectReferenceId = {
+    val input = ByteStreams.newDataInput(payload)
+
+    input.readLong(): Unit // Skip the tranche id, and fail fast if there aren't enough bytes; therefore prefer this to using `skipBytes`.
+
+    input.readInt()
+  }
+
+  private def canonicalObjectReferenceIdOf(
+      payload: Array[Byte]
+  ): CanonicalObjectReferenceId[TrancheId] = {
+    val input = ByteStreams.newDataInput(payload)
+
+    val trancheId: TrancheId = input.readLong()
+    val trancheLocalObjectReferenceId: TrancheLocalObjectReferenceId =
+      input.readInt()
+
+    trancheId -> trancheLocalObjectReferenceId
+  }
 }

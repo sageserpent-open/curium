@@ -19,39 +19,36 @@ object TranchesBehaviours {
   val api = Trials.api
 
   val payloads: Trials[Array[Byte]] = api.bytes.several[Array[Byte]]
-
-  val objectReferenceIdOffsetSequences: Trials[Seq[Long]] =
-    api
-      .longs(lowerBound = 0L, upperBound = 500L, shrinkageTarget = 0L)
-      .lists
-      .map(_.distinct)
-
-  val interTrancheObjectReferenceIdTranslations
-  : Trials[Map[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId]] =
-    api.integers
-      .maps(api.longs)
-      .asInstanceOf[Trials[
-      Map[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId]
-    ]]
-
-  val cases: Trials[List[
-    (
-      Array[Byte],
-        Seq[Long],
-        Map[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId]
-      )
-  ]] =
-    (
-      payloads,
-      objectReferenceIdOffsetSequences,
-      interTrancheObjectReferenceIdTranslations
-      ).tupled.lists.filter(_.nonEmpty)
 }
 
 trait TranchesBehaviours[TrancheId] extends AnyFlatSpec with Matchers {
   this: TranchesResource[TrancheId] =>
 
   import TranchesBehaviours._
+
+  val interTrancheObjectReferenceIdTranslations: Trials[
+    Map[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId[TrancheId]]
+  ] =
+    api.integers
+      .maps((api.longs, api.integers).mapN(_ -> _))
+      .asInstanceOf[Trials[
+        Map[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId[
+          TrancheId
+        ]]
+      ]]
+
+  val cases: Trials[List[
+    (
+        Array[Byte],
+        Map[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId[
+          TrancheId
+        ]]
+    )
+  ]] =
+    (
+      payloads,
+      interTrancheObjectReferenceIdTranslations
+    ).tupled.lists.filter(_.nonEmpty)
 
   def tranchesBehaviour: Unit = {
 
@@ -67,22 +64,19 @@ trait TranchesBehaviours[TrancheId] extends AnyFlatSpec with Matchers {
               val trancheIds = MutableSet.empty[TrancheId]
 
               for (
-                (payload, offsets, interTrancheObjectReferenceIdTranslation) <-
+                (
+                  payload,
+                  interTrancheObjectReferenceIdTranslation
+                ) <-
                   payloadAndCountPairs
               ) {
                 val Right(trancheId) =
                   for {
-                    objectReferenceIdOffset <-
-                      tranches.objectReferenceIdOffsetForNewTranche
-                    objectReferenceIds: Seq[CanonicalObjectReferenceId] =
-                      offsets map (objectReferenceIdOffset + _)
                     trancheId <- tranches.createTrancheInStorage(
                       TrancheOfData(
                         payload,
-                        objectReferenceIdOffset,
                         interTrancheObjectReferenceIdTranslation
-                      ),
-                      objectReferenceIds
+                      )
                     )
                   } yield trancheId
 
@@ -95,77 +89,32 @@ trait TranchesBehaviours[TrancheId] extends AnyFlatSpec with Matchers {
           .unsafeRunSync
       }
 
-    it should "permit retrieval of that tranche id from any of the associated object reference ids" in
-      cases.withLimit(maximumNumberOfCases).supplyTo { payloadAndCountPairs =>
-        tranchesResource
-          .use(tranches =>
-            IO {
-              val objectReferenceIdsByTrancheId =
-                MutableMap.empty[TrancheId, Seq[CanonicalObjectReferenceId]]
-
-              for (
-                (payload, offsets, interTrancheObjectReferenceIdTranslation) <-
-                  payloadAndCountPairs
-              ) {
-                val Right((trancheId, objectReferenceIds)) =
-                  for {
-                    objectReferenceIdOffset <-
-                      tranches.objectReferenceIdOffsetForNewTranche
-                    objectReferenceIds: Seq[CanonicalObjectReferenceId] =
-                      offsets map (objectReferenceIdOffset + _)
-                    trancheId <- tranches.createTrancheInStorage(
-                      TrancheOfData(
-                        payload,
-                        objectReferenceIdOffset,
-                        interTrancheObjectReferenceIdTranslation
-                      ),
-                      objectReferenceIds
-                    )
-                  } yield trancheId -> objectReferenceIds
-
-                objectReferenceIdsByTrancheId += (trancheId -> objectReferenceIds)
-              }
-
-              objectReferenceIdsByTrancheId.foreach {
-                case (trancheId, objectReferenceIds) =>
-                  objectReferenceIds.foreach { objectReferenceId =>
-                    val Right(retrievedTrancheId) =
-                      tranches.retrieveTrancheId(objectReferenceId)
-                    retrievedTrancheId shouldBe trancheId
-                  }
-              }
-            }
-          )
-          .unsafeRunSync
-      }
-
     "retrieving a tranche by tranche id" should "yield a tranche that corresponds to what was used to create it" in
       cases.withLimit(maximumNumberOfCases).supplyTo { payloadAndCountPairs =>
         tranchesResource
           .use(tranches =>
             IO {
               val trancheIdToExpectedTrancheMapping =
-                MutableMap.empty[TrancheId, TrancheOfData]
+                MutableMap.empty[TrancheId, TrancheOfData[TrancheId]]
 
               for (
-                (payload, offsets, interTrancheObjectReferenceIdTranslation) <-
+                (
+                  payload,
+                  interTrancheObjectReferenceIdTranslation
+                ) <-
                   payloadAndCountPairs
               ) {
-                val Right((trancheId, tranche)) =
-                  for {
-                    objectReferenceIdOffset <-
-                      tranches.objectReferenceIdOffsetForNewTranche
-                    objectReferenceIds: Seq[CanonicalObjectReferenceId] =
-                      offsets map (objectReferenceIdOffset + _)
-                    tranche = TrancheOfData(
-                      payload,
-                      objectReferenceIdOffset,
-                      interTrancheObjectReferenceIdTranslation
-                    )
+                val Right((trancheId, tranche)) = {
+                  val tranche = TrancheOfData(
+                    payload,
+                    interTrancheObjectReferenceIdTranslation
+                  )
 
+                  for {
                     trancheId <- tranches
-                      .createTrancheInStorage(tranche, objectReferenceIds)
+                      .createTrancheInStorage(tranche)
                   } yield trancheId -> tranche
+                }
 
                 trancheIdToExpectedTrancheMapping += (trancheId -> tranche)
               }
@@ -188,17 +137,17 @@ object FakeTranchesResource {
 }
 
 trait FakeTranchesResource
-  extends TranchesResource[FakeTranchesResource.TrancheId] {
+    extends TranchesResource[FakeTranchesResource.TrancheId] {
 
   override val tranchesResource
-  : Resource[IO, Tranches[FakeTranchesResource.TrancheId]] =
+      : Resource[IO, Tranches[FakeTranchesResource.TrancheId]] =
     Resource.liftK(IO {
-      new FakeTranches with TranchesContracts[FakeTranchesResource.TrancheId]
+      new FakeTranches
     })
 }
 
 class FakeTranchesSpec
-  extends TranchesBehaviours[FakeTranchesResource.TrancheId]
+    extends TranchesBehaviours[FakeTranchesResource.TrancheId]
     with FakeTranchesResource {
   "Fake tranches" should behave like tranchesBehaviour
 }
@@ -223,16 +172,16 @@ object RocksDbTranchesResource {
 }
 
 trait RocksDbTranchesResource
-  extends TranchesResource[RocksDbTranchesResource.TrancheId]
+    extends TranchesResource[RocksDbTranchesResource.TrancheId]
     with RocksDbResource {
   override val tranchesResource
-  : Resource[IO, Tranches[RocksDbTranchesResource.TrancheId]] = for {
+      : Resource[IO, Tranches[RocksDbTranchesResource.TrancheId]] = for {
     rocksDb <- rocksDbResource
   } yield new RocksDbTranches(rocksDb)
 }
 
 class RocksDbTranchesSpec
-  extends TranchesBehaviours[RocksDbTranchesResource.TrancheId]
+    extends TranchesBehaviours[RocksDbTranchesResource.TrancheId]
     with RocksDbTranchesResource {
   "RocksDB tranches" should behave like tranchesBehaviour
 }
