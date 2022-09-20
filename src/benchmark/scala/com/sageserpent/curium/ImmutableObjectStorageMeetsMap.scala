@@ -9,8 +9,9 @@ import com.sageserpent.curium.ImmutableObjectStorage.{
   Session
 }
 
+import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
-import scala.concurrent.duration.Deadline
+import scala.concurrent.duration.{Deadline, FiniteDuration}
 import scala.util.Random
 
 object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
@@ -35,6 +36,9 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
           val startTime = Deadline.now
 
+          var maximumUpdateDuration: FiniteDuration =
+            FiniteDuration(0L, TimeUnit.MILLISECONDS)
+
           val lookbackLimit = 10000000
 
           val batchSize = 20
@@ -51,11 +55,13 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                     .retrieve[AvlMap[Int, AvlSet[String]]](trancheId)
                 } yield {
                   println(
-                    s"Step: $step, duration: ${duration.toMillis} milliseconds, contents at previous step: ${retrievedMap.get(step - 1).getOrElse(AvlSet.empty).toScalaSet}"
+                    s"Step: $step, duration: ${duration.toMillis} milliseconds, maximum update duration: ${maximumUpdateDuration.toMillis} milliseconds, contents at previous step: ${retrievedMap.get(step - 1).getOrElse(AvlSet.empty).toScalaSet}"
                   )
                 },
                 intersessionState
               )(tranches)
+
+              maximumUpdateDuration = FiniteDuration(0L, TimeUnit.MILLISECONDS)
             }
 
             val session: Session[TrancheId] = for {
@@ -94,10 +100,18 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
               newTrancheId <- immutableObjectStorage.store(mutatedMap)
             } yield newTrancheId
 
-            trancheId = immutableObjectStorage
-              .runToYieldTrancheId(session, intersessionState)(tranches)
-              .right
-              .get
+            {
+
+              val updateStartTime = Deadline.now
+
+              trancheId = immutableObjectStorage
+                .runToYieldTrancheId(session, intersessionState)(tranches)
+                .right
+                .get
+
+              maximumUpdateDuration =
+                maximumUpdateDuration max (Deadline.now - updateStartTime)
+            }
           }
         }
       )
