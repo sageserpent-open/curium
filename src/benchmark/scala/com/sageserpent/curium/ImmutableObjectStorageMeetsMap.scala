@@ -9,9 +9,9 @@ import com.sageserpent.curium.ImmutableObjectStorage.{
   Session
 }
 
-import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
-import scala.concurrent.duration.{Deadline, FiniteDuration}
+import scala.collection.mutable
+import scala.concurrent.duration.{Deadline, Duration}
 import scala.util.Random
 
 object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
@@ -36,15 +36,20 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
           val startTime = Deadline.now
 
-          var maximumUpdateDuration: FiniteDuration =
-            FiniteDuration(0L, TimeUnit.MILLISECONDS)
+          var maximumUpdateDuration: Duration =
+            Duration.Zero
+
+          var minimumUpdateDuration: Duration = Duration.Inf
+
+          val updateDurations: mutable.ListBuffer[Duration] =
+            mutable.ListBuffer.empty
 
           val lookbackLimit = 10000000
 
-          val batchSize = 20
+          val batchSize = 5
 
           for (step <- 0 until (1000000000, batchSize)) {
-            if (step % 5000 == 0) {
+            if (0 < step && step % 5000 == 0) {
               val currentTime = Deadline.now
 
               val duration = currentTime - startTime
@@ -55,13 +60,24 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                     .retrieve[AvlMap[Int, AvlSet[String]]](trancheId)
                 } yield {
                   println(
-                    s"Step: $step, duration: ${duration.toMillis} milliseconds, maximum update duration: ${maximumUpdateDuration.toMillis} milliseconds, contents at previous step: ${retrievedMap.get(step - 1).getOrElse(AvlSet.empty).toScalaSet}"
+                    s"Step: $step, duration: ${duration.toMillis} milliseconds, minimum update duration: ${minimumUpdateDuration.toMillis} milliseconds, maximum update duration: ${maximumUpdateDuration.toMillis} milliseconds, average update duration: ${updateDurations
+                        .map(_.toMillis)
+                        .sum / updateDurations.size}, update durations: ${updateDurations
+                        .map(_.toMillis)
+                        .groupBy(identity)
+                        .toSeq
+                        .map { case (duration, group) =>
+                          group.size -> duration
+                        }
+                        .sortBy(_._1)} ,contents at previous step: ${retrievedMap.get(step - 1).getOrElse(AvlSet.empty).toScalaSet}"
                   )
                 },
                 intersessionState
               )(tranches)
 
-              maximumUpdateDuration = FiniteDuration(0L, TimeUnit.MILLISECONDS)
+              maximumUpdateDuration = Duration.Zero
+              minimumUpdateDuration = Duration.Inf
+              updateDurations.clear()
             }
 
             val session: Session[TrancheId] = for {
@@ -109,8 +125,13 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                 .right
                 .get
 
-              maximumUpdateDuration =
-                maximumUpdateDuration max (Deadline.now - updateStartTime)
+              val updateDuration = Deadline.now - updateStartTime
+
+              maximumUpdateDuration = maximumUpdateDuration max updateDuration
+
+              minimumUpdateDuration = minimumUpdateDuration min updateDuration
+
+              updateDurations += updateDuration
             }
           }
         }
