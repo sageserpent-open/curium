@@ -166,6 +166,7 @@ object ImmutableObjectStorage {
       caffeineBuilder()
         .executor(_.run())
         .softValues()
+        .maximumSize(1000L)
         .build[TrancheId, CompletedOperation[TrancheId]]
 
     def noteReferenceId(
