@@ -3,8 +3,10 @@ package com.sageserpent.curium
 import cats.collections.{AvlMap, AvlSet}
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
+import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage.{
+  CompletedOperation,
   IntersessionState,
   Session
 }
@@ -21,7 +23,15 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
     tranchesResource
       .use(tranches =>
         IO {
-          val intersessionState = new IntersessionState[TrancheId]
+          val intersessionState = new IntersessionState[TrancheId] {
+            protected override def finalCustomisationForTrancheCaching(
+                caffeine: Caffeine[Any, Any]
+            ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
+              caffeine
+                .maximumSize(1000L)
+                .build[TrancheId, CompletedOperation[TrancheId]]
+            }
+          }
           val Right(initialTrancheId: TrancheId) = {
             val session: Session[TrancheId] =
               immutableObjectStorage.store(AvlMap.empty[Int, AvlSet[String]])

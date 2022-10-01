@@ -12,7 +12,7 @@ import com.esotericsoftware.kryo.{
   Registration,
   Serializer
 }
-import com.github.benmanes.caffeine.cache.Cache
+import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.google.common.collect.{BiMap, BiMapFactory}
 import com.twitter.chill.{
   CleaningSerializer,
@@ -148,26 +148,26 @@ object ImmutableObjectStorage {
       s"TrancheOfData(payload hash: ${MurmurHash3.bytesHash(payload)}, inter-tranche object reference id translation: $interTrancheObjectReferenceIdTranslation)"
   }
 
-  class IntersessionState[TrancheId]() {
+  class IntersessionState[TrancheId] {
     private val objectToReferenceIdCache
         : Cache[AnyRef, CanonicalObjectReferenceId[TrancheId]] =
       caffeineBuilder()
         .executor(_.run())
         .weakKeys()
         .build[AnyRef, CanonicalObjectReferenceId[TrancheId]]()
+
     private val referenceIdToProxyCache
         : Cache[CanonicalObjectReferenceId[TrancheId], AnyRef] =
       caffeineBuilder()
         .executor(_.run())
         .weakValues()
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
+
     private val trancheIdToCompletedOperationCache
         : Cache[TrancheId, CompletedOperation[TrancheId]] =
-      caffeineBuilder()
-        .executor(_.run())
-        .softValues()
-        .maximumSize(1000L)
-        .build[TrancheId, CompletedOperation[TrancheId]]
+      finalCustomisationForTrancheCaching(
+        caffeineBuilder().executor(_.run()).softValues
+      )
 
     def noteReferenceId(
         immutableObject: AnyRef,
@@ -207,6 +207,13 @@ object ImmutableObjectStorage {
       objectToReferenceIdCache.invalidateAll()
       referenceIdToProxyCache.invalidateAll()
       trancheIdToCompletedOperationCache.invalidateAll()
+    }
+
+    protected def finalCustomisationForTrancheCaching(
+        caffeine: Caffeine[Any, Any]
+    ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
+      caffeine
+        .build[TrancheId, CompletedOperation[TrancheId]]
     }
   }
 
@@ -320,6 +327,39 @@ trait ImmutableObjectStorage[TrancheId] {
           .objectWithReferenceId(trancheLocalObjectReferenceId)
       }
 
+      def retrieveTrancheTopLevelObject[X](
+          trancheId: TrancheId,
+          clazz: Class[X]
+      ): EitherThrowableOr[X] =
+        for {
+          tranche <- tranches.retrieveTranche(trancheId)
+          result <- Try {
+            val trancheSpecificReferenceResolver =
+              new TrancheSpecificReadingReferenceResolver(
+                trancheId,
+                tranche.interTrancheObjectReferenceIdTranslation
+              ) with ReferenceResolverContracts
+
+            val deserialized =
+              sessionReferenceResolver.withValue(
+                Some(trancheSpecificReferenceResolver)
+              ) {
+                kryoPool.fromBytes(tranche.payload)
+              }
+
+            intersessionState.noteCompletedOperation(
+              trancheId,
+              new CompleteOperationImplementation(
+                deserialized,
+                trancheSpecificReferenceResolver,
+                tranche.payload.length
+              )
+            )
+
+            clazz.cast(deserialized)
+          }.toEither
+        } yield result
+
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
           case Store(immutableObject) =>
@@ -360,39 +400,6 @@ trait ImmutableObjectStorage[TrancheId] {
                 }.toEither
               )
         }
-
-      def retrieveTrancheTopLevelObject[X](
-          trancheId: TrancheId,
-          clazz: Class[X]
-      ): EitherThrowableOr[X] =
-        for {
-          tranche <- tranches.retrieveTranche(trancheId)
-          result <- Try {
-            val trancheSpecificReferenceResolver =
-              new TrancheSpecificReadingReferenceResolver(
-                trancheId,
-                tranche.interTrancheObjectReferenceIdTranslation
-              ) with ReferenceResolverContracts
-
-            val deserialized =
-              sessionReferenceResolver.withValue(
-                Some(trancheSpecificReferenceResolver)
-              ) {
-                kryoPool.fromBytes(tranche.payload)
-              }
-
-            intersessionState.noteCompletedOperation(
-              trancheId,
-              new CompleteOperationImplementation(
-                deserialized,
-                trancheSpecificReferenceResolver,
-                tranche.payload.length
-              )
-            )
-
-            clazz.cast(deserialized)
-          }.toEither
-        } yield result
 
       trait ReferenceResolverContracts extends ReferenceResolver {
 
