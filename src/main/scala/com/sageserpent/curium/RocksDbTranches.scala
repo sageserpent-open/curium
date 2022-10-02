@@ -13,6 +13,8 @@ object RocksDbTranches {
   val trancheIdKeyPayloadValueColumnFamilyName = "TrancheIdKeyPayloadValue"
   val augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamilyName =
     "AugmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValue"
+
+  val writeOptions = new WriteOptions()
 }
 
 class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
@@ -51,21 +53,25 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
 
       val trancheIdKey = Longs.toByteArray(trancheId)
 
-      rocksDb.put(
-        trancheIdKeyPayloadValueColumnFamily,
-        trancheIdKey,
-        tranche.payload
-      )
-
-      for (
-        (trancheLocalObjectReferenceId, canonicalObjectReferenceId) <-
-          tranche.interTrancheObjectReferenceIdTranslation
-      ) {
-        rocksDb.put(
-          augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamily,
-          byteArrayOf(trancheId -> trancheLocalObjectReferenceId),
-          byteArrayOf(canonicalObjectReferenceId)
+      Using.resource(new WriteBatch()) { writeBatch =>
+        writeBatch.put(
+          trancheIdKeyPayloadValueColumnFamily,
+          trancheIdKey,
+          tranche.payload
         )
+
+        for (
+          (trancheLocalObjectReferenceId, canonicalObjectReferenceId) <-
+            tranche.interTrancheObjectReferenceIdTranslation
+        ) {
+          writeBatch.put(
+            augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamily,
+            byteArrayOf(trancheId -> trancheLocalObjectReferenceId),
+            byteArrayOf(canonicalObjectReferenceId)
+          )
+        }
+
+        rocksDb.write(writeOptions, writeBatch)
       }
 
       trancheId
