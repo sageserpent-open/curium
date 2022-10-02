@@ -152,21 +152,28 @@ class FakeTranchesSpec
   "Fake tranches" should behave like tranchesBehaviour
 }
 
-/* object H2ViaScalikeJdbcTranchesResource { type TrancheId =
- * H2ViaScalikeJdbcTranches#TrancheId }
- *
- * trait H2ViaScalikeJdbcTranchesResource extends
- * TranchesResource[H2ViaScalikeJdbcTranchesResource.TrancheId] with
- * H2ViaScalikeJdbcDatabaseSetupResource { override val tranchesResource :
- * Resource[IO, Tranches[H2ViaScalikeJdbcTranchesResource.TrancheId]] =
- * connectionPoolResource.map( connectionPool => new
- * H2ViaScalikeJdbcTranches(connectionPool) with
- * TranchesContracts[H2ViaScalikeJdbcTranchesResource.TrancheId]) }
- *
- * class H2ViaScalikeJdbcTranchesSpec extends
- * TranchesBehaviours[H2ViaScalikeJdbcTranchesResource.TrancheId] with
- * H2ViaScalikeJdbcTranchesResource { "H2 tranches" should behave like
- * tranchesBehaviour } */
+object H2ViaScalikeJdbcTranchesResource {
+  type TrancheId =
+    H2ViaScalikeJdbcTranches#TrancheId
+}
+
+trait H2ViaScalikeJdbcTranchesResource
+    extends TranchesResource[H2ViaScalikeJdbcTranchesResource.TrancheId]
+    with H2ViaScalikeJdbcDatabaseSetupResource {
+  override val tranchesResource
+      : Resource[IO, Tranches[H2ViaScalikeJdbcTranchesResource.TrancheId]] =
+    connectionPoolResource.map(connectionPool =>
+      new H2ViaScalikeJdbcTranches(connectionPool)
+    )
+}
+
+class H2ViaScalikeJdbcTranchesSpec
+    extends TranchesBehaviours[H2ViaScalikeJdbcTranchesResource.TrancheId]
+    with H2ViaScalikeJdbcTranchesResource {
+  "H2 tranches" should behave like
+    tranchesBehaviour
+}
+
 object RocksDbTranchesResource {
   type TrancheId = RocksDbTranches#TrancheId
 }

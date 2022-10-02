@@ -1,9 +1,13 @@
-/*
 package com.sageserpent.curium
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import com.sageserpent.curium.ImmutableObjectStorage.{EitherThrowableOr, TrancheLocalObjectReferenceId, TrancheOfData, Tranches}
+import com.sageserpent.curium.ImmutableObjectStorage.{
+  EitherThrowableOr,
+  TrancheLocalObjectReferenceId,
+  TrancheOfData,
+  Tranches
+}
 import scalikejdbc._
 
 import scala.util.Try
@@ -16,107 +20,103 @@ object H2ViaScalikeJdbcTranches {
           db localTx { implicit session: DBSession =>
             sql"""
              CREATE TABLE Tranche(
-                trancheId	              IDENTITY  PRIMARY KEY,
-                payload		              BINARY    NOT NULL,
-                objectReferenceIdOffset INTEGER   NOT NULL
+                trancheId   IDENTITY  PRIMARY KEY,
+                payload     BINARY    NOT NULL
              )
       """.update.apply()
             sql"""
-             CREATE TABLE ObjectReference(
-                objectReferenceId	INTEGER		PRIMARY KEY,
-                trancheId			    BIGINT  	REFERENCES Tranche(trancheId)
+             CREATE TABLE InterTrancheObjectReferenceIdTranslation(
+                referringTrancheId                      BIGINT,
+                referringTrancheLocalObjectReferenceId  INTEGER,
+                homeTrancheId                           BIGINT,
+                homeTrancheLocalObjectReferenceId       INTEGER,
+                PRIMARY KEY(referringTrancheId, referringTrancheLocalObjectReferenceId)
              )
          """.update.apply()
           }
-        })
+        }
+      )
 }
 
 class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
-  extends Tranches[Long] {
+    extends Tranches[Long] {
   override def createTrancheInStorage(
-                                       payload: Array[Byte],
-                                       objectReferenceIdOffset: TrancheLocalObjectReferenceId,
-                                       objectReferenceIds: Range)
-  : EitherThrowableOr[TrancheId] =
-    Try {
-      DBResource(connectionPool)
-        .use(db =>
-          IO {
-            db localTx {
-              implicit session: DBSession =>
-                val trancheId: TrancheId =
-                  sql"""
-          INSERT INTO Tranche(payload, objectReferenceIdOffset) VALUES ($payload, $objectReferenceIdOffset)
-       """.updateAndReturnGeneratedKey("trancheId")
-                    .apply()
-
-                val _ =
-                  sql"""
-          INSERT INTO ObjectReference(objectReferenceId, trancheId) VALUES (?, ?)
-         """.batch(objectReferenceIds.toSeq map (objectReferenceId =>
-                    Seq(objectReferenceId, trancheId.toString)): _*)
-                    .apply()
-
-                trancheId
-            }
-          })
-        .unsafeRunSync()
-    }.toEither
-
-  override def objectReferenceIdOffsetForNewTranche
-  : EitherThrowableOr[TrancheLocalObjectReferenceId] =
+      tranche: TrancheOfData[TrancheId]
+  ): EitherThrowableOr[TrancheId] =
     Try {
       DBResource(connectionPool)
         .use(db =>
           IO {
             db localTx { implicit session: DBSession =>
-              sql"""
-          SELECT MAX(objectReferenceId) FROM ObjectReference
-       """.map(_.intOpt(1)
-                .fold(0)(100 + _) /* TODO - switch back to an offset of 1. */)
-                .single()
-                .apply()
-                .get
+              val trancheId: TrancheId =
+                sql"""
+          INSERT INTO Tranche(payload) VALUES (${tranche.payload})
+       """.updateAndReturnGeneratedKey("trancheId")
+                  .apply()
+
+              val _ =
+                sql"""
+          INSERT INTO InterTrancheObjectReferenceIdTranslation(referringTrancheId, referringTrancheLocalObjectReferenceId, homeTrancheId, homeTrancheLocalObjectReferenceId) VALUES (?, ?, ?, ?)
+         """.batch(
+                  tranche.interTrancheObjectReferenceIdTranslation.toSeq map {
+                    case (
+                          referringTrancheLocalObjectReferenceId,
+                          (homeTrancheId, homeTranceLocalObjectReferenceId)
+                        ) =>
+                      Seq(
+                        trancheId,
+                        referringTrancheLocalObjectReferenceId,
+                        homeTrancheId,
+                        homeTranceLocalObjectReferenceId
+                      )
+                  }: _*
+                ).apply()
+
+              trancheId
             }
-          })
+          }
+        )
         .unsafeRunSync()
     }.toEither
 
   override def retrieveTranche(
-                                trancheId: TrancheId): EitherThrowableOr[TrancheOfData] =
-    Try {
-      DBResource(connectionPool)
-        .use(db =>
-          IO {
-            db localTx {
-              implicit session: DBSession =>
-                sql"""
-          SELECT payload, objectReferenceIdOffset FROM Tranche WHERE $trancheId = TrancheId
-       """.map(resultSet =>
-                  TrancheOfData(payload = resultSet.bytes("payload"),
-                    objectReferenceIdOffset =
-                      resultSet.int("objectReferenceIdOffset")))
-                  .single()
-                  .apply()
-                  .get
-            }
-          })
-        .unsafeRunSync()
-    }.toEither
-
-  override def retrieveTrancheId(
-                                  objectReferenceId: TrancheLocalObjectReferenceId): EitherThrowableOr[TrancheId] =
+      trancheId: TrancheId
+  ): EitherThrowableOr[TrancheOfData[TrancheId]] =
     Try {
       DBResource(connectionPool)
         .use(db =>
           IO {
             db localTx { implicit session: DBSession =>
-              sql"""
-           SELECT trancheId FROM ObjectReference WHERE $objectReferenceId = objectReferenceId
-         """.map(_.long("trancheId")).single().apply().get
+              (for {
+                payload <-
+                  sql"""
+          SELECT payload FROM Tranche WHERE $trancheId = TrancheId
+       """.map(_.bytes("payload")).single().apply()
+
+                interTrancheObjectReferenceIdTranslation =
+                  sql"""SELECT referringTrancheLocalObjectReferenceId, homeTrancheId, homeTrancheLocalObjectReferenceId FROM InterTrancheObjectReferenceIdTranslation WHERE referringTrancheId = $trancheId"""
+                    .map { resultSet =>
+                      val referringTrancheLocalObjectReferenceId
+                          : TrancheLocalObjectReferenceId =
+                        resultSet.int("referringTrancheLocalObjectReferenceId")
+                      val homeTrancheId: TrancheId =
+                        resultSet.long("homeTrancheId")
+                      val homeTrancheLocalObjectReferenceId =
+                        resultSet.int("homeTrancheLocalObjectReferenceId")
+
+                      referringTrancheLocalObjectReferenceId -> (homeTrancheId, homeTrancheLocalObjectReferenceId)
+                    }
+                    .toIterable()
+                    .apply()
+                    .toMap
+              } yield TrancheOfData(
+                payload = payload,
+                interTrancheObjectReferenceIdTranslation =
+                  interTrancheObjectReferenceIdTranslation
+              )).get
             }
-          })
+          }
+        )
         .unsafeRunSync()
     }.toEither
 }
-*/
