@@ -237,11 +237,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
         result.register(
           proxySupport.kryoClosureMarkerClazz,
-          // NASTY HACK: this is ghastly, but those Spark and Twitter folks know
-          // what they're doing. Just using plain old `ClosureSerializer` will
-          // cause a test failure due to uncleaned closures pulling in lots of
-          // useless closed over objects. Yes, we need `ClosureSerializer` too.
-          new NastyCleaningSerializer()
+          new ClosureCleaningSerializer()
         )
 
         result.setAutoReset(
