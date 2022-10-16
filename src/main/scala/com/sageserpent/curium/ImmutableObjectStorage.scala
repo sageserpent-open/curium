@@ -3,24 +3,13 @@ package com.sageserpent.curium
 import cats.arrow.FunctionK
 import cats.free.FreeT
 import cats.implicits._
-import com.esotericsoftware.kryo.serializers.ClosureSerializer
+import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
-import com.esotericsoftware.kryo.util.Util
-import com.esotericsoftware.kryo.{
-  Kryo,
-  ReferenceResolver,
-  Registration,
-  Serializer
-}
+import com.esotericsoftware.kryo.util.{DefaultClassResolver, Pool, Util}
+import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Registration}
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.google.common.collect.{BiMap, BiMapFactory}
-import com.twitter.chill.{
-  CleaningSerializer,
-  EmptyScalaKryoInstantiator,
-  KryoBase,
-  KryoInstantiator,
-  KryoPool
-}
+import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
@@ -35,13 +24,15 @@ import net.bytebuddy.{ByteBuddy, NamingStrategy}
 import org.objenesis.instantiator.ObjectInstantiator
 import org.objenesis.strategy.StdInstantiatorStrategy
 
+import java.io.ByteArrayOutputStream
 import java.lang.reflect.Modifier
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
 import scala.ref.WeakReference
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
+import scala.util.Using.Releasable
 import scala.util.hashing.MurmurHash3
-import scala.util.{DynamicVariable, Try}
+import scala.util.{DynamicVariable, Try, Using}
 
 object ImmutableObjectStorage {
   type TrancheLocalObjectReferenceId = Int
@@ -228,14 +219,13 @@ trait ImmutableObjectStorage[TrancheId] {
   private val sessionReferenceResolver
       : DynamicVariable[Option[ReferenceResolver]] =
     new DynamicVariable(None)
-  private val kryoInstantiator: KryoInstantiator =
-    new EmptyScalaKryoInstantiator {
-      override def newKryo(): KryoBase = {
-        // NASTY HACK: extracted from overridden method in superclass, had to to
-        // this as neither Kryo nor Chill's Kryobase allow customization of
-        // class registration once the instance has been constructed. Sheez...
-
-        val result = new KryoBase {
+  private val kryoPool: Pool[Kryo] =
+    new Pool[Kryo](true, false) {
+      override def create(): Kryo = {
+        val result = new ScalaKryo(
+          classResolver = new DefaultClassResolver,
+          referenceResolver = referenceResolver
+        ) {
           override def getRegistration(clazz: Class[_]): Registration =
             super.getRegistration(proxySupport.nonProxyClazzFor(clazz))
         }
@@ -244,9 +234,15 @@ trait ImmutableObjectStorage[TrancheId] {
         result.setInstantiatorStrategy(
           new org.objenesis.strategy.StdInstantiatorStrategy
         )
-        // ... end of nasty hack.
 
-        result.setReferenceResolver(referenceResolver)
+        result.register(
+          proxySupport.kryoClosureMarkerClazz,
+          // NASTY HACK: this is ghastly, but those Spark and Twitter folks know
+          // what they're doing. Just using plain old `ClosureSerializer` will
+          // cause a test failure due to uncleaned closures pulling in lots of
+          // useless closed over objects. Yes, we need `ClosureSerializer` too.
+          new NastyCleaningSerializer()
+        )
 
         result.setAutoReset(
           true
@@ -254,17 +250,15 @@ trait ImmutableObjectStorage[TrancheId] {
 
         result
       }
-    }.withRegistrar { kryo =>
-      // TODO - check that this is really necessary...
-      kryo.register(
-        proxySupport.kryoClosureMarkerClazz,
-        new CleaningSerializer(
-          (new ClosureSerializer).asInstanceOf[Serializer[_ <: AnyRef]]
-        )
-      )
     }
-  private val kryoPool: KryoPool =
-    KryoPool.withByteArrayOutputStream(40, kryoInstantiator)
+
+  private val inputPool: Pool[Input] = new Pool[Input](true, false) {
+    override def create(): Input = new Input()
+  }
+
+  private val outputPool: Pool[Output] = new Pool[Output](true, false) {
+    override def create(): Output = new Output(new ByteArrayOutputStream())
+  }
 
   def store[X](immutableObject: X): Session[TrancheId] =
     FreeT.liftF[Operation, EitherThrowableOr, TrancheId](Store(immutableObject))
@@ -327,39 +321,6 @@ trait ImmutableObjectStorage[TrancheId] {
           .objectWithReferenceId(trancheLocalObjectReferenceId)
       }
 
-      def retrieveTrancheTopLevelObject[X](
-          trancheId: TrancheId,
-          clazz: Class[X]
-      ): EitherThrowableOr[X] =
-        for {
-          tranche <- tranches.retrieveTranche(trancheId)
-          result <- Try {
-            val trancheSpecificReferenceResolver =
-              new TrancheSpecificReadingReferenceResolver(
-                trancheId,
-                tranche.interTrancheObjectReferenceIdTranslation
-              ) with ReferenceResolverContracts
-
-            val deserialized =
-              sessionReferenceResolver.withValue(
-                Some(trancheSpecificReferenceResolver)
-              ) {
-                kryoPool.fromBytes(tranche.payload)
-              }
-
-            intersessionState.noteCompletedOperation(
-              trancheId,
-              new CompleteOperationImplementation(
-                deserialized,
-                trancheSpecificReferenceResolver,
-                tranche.payload.length
-              )
-            )
-
-            clazz.cast(deserialized)
-          }.toEither
-        } yield result
-
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
           case Store(immutableObject) =>
@@ -368,7 +329,7 @@ trait ImmutableObjectStorage[TrancheId] {
                 with ReferenceResolverContracts
             val serializedRepresentation: Array[Byte] = sessionReferenceResolver
               .withValue(Some(trancheSpecificReferenceResolver)) {
-                kryoPool.toBytesWithClass(immutableObject)
+                serializationFacade.toBytesWithClass(immutableObject)
               }
 
             for {
@@ -400,6 +361,39 @@ trait ImmutableObjectStorage[TrancheId] {
                 }.toEither
               )
         }
+
+      def retrieveTrancheTopLevelObject[X](
+          trancheId: TrancheId,
+          clazz: Class[X]
+      ): EitherThrowableOr[X] =
+        for {
+          tranche <- tranches.retrieveTranche(trancheId)
+          result <- Try {
+            val trancheSpecificReferenceResolver =
+              new TrancheSpecificReadingReferenceResolver(
+                trancheId,
+                tranche.interTrancheObjectReferenceIdTranslation
+              ) with ReferenceResolverContracts
+
+            val deserialized =
+              sessionReferenceResolver.withValue(
+                Some(trancheSpecificReferenceResolver)
+              ) {
+                serializationFacade.fromBytes(tranche.payload)
+              }
+
+            intersessionState.noteCompletedOperation(
+              trancheId,
+              new CompleteOperationImplementation(
+                deserialized,
+                trancheSpecificReferenceResolver,
+                tranche.payload.length
+              )
+            )
+
+            clazz.cast(deserialized)
+          }.toEither
+        } yield result
 
       trait ReferenceResolverContracts extends ReferenceResolver {
 
@@ -760,6 +754,28 @@ trait ImmutableObjectStorage[TrancheId] {
 
   case class Retrieve[X](trancheId: TrancheId, clazz: Class[X])
       extends Operation[X]
+
+  // Replacement for the now removed use of Chill's `KryoPool`...
+  object serializationFacade {
+    def evidence[X](pool: Pool[X]): Releasable[X] = pool.free
+
+    implicit val kryoEvidence: Releasable[Kryo]     = evidence(kryoPool)
+    implicit val inputEvidence: Releasable[Input]   = evidence(inputPool)
+    implicit val outputEvidence: Releasable[Output] = evidence(outputPool)
+
+    def fromBytes(bytes: Array[Byte]): Any =
+      Using.resources(kryoPool.obtain(), inputPool.obtain()) { (kryo, input) =>
+        input.setBuffer(bytes)
+        kryo.readClassAndObject(input)
+      }
+
+    def toBytesWithClass(immutableObject: Any): Array[Byte] =
+      Using.resources(kryoPool.obtain(), outputPool.obtain()) {
+        (kryo, output) =>
+          kryo.writeClassAndObject(output, immutableObject)
+          output.toBytes
+      }
+  }
 
   object proxySupport extends ProxySupport {
 
