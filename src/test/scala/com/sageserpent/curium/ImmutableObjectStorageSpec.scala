@@ -3,11 +3,13 @@ package com.sageserpent.curium
 import cats.free.FreeT
 import cats.implicits._
 import com.sageserpent.americium.Trials
+import com.sageserpent.americium.java.CasesLimitStrategy
 import com.sageserpent.curium.ImmutableObjectStorage._
 import org.scalatest.Inspectors
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.time.Duration
 import java.util.UUID
 import scala.collection.mutable.{Map => MutableMap}
 import scala.util.Try
@@ -16,9 +18,18 @@ object ImmutableObjectStorageSpec {
 
   type TrancheId      = FakeTranches#TrancheId
   type PartGrowthStep = Vector[Part] => Part
-  val aThing                    = "Foo"
-  val labelStrings: Set[String] = Set("Huey", "Duey", "Louie")
-  val api                       = Trials.api
+  val aThing = "Foo"
+  val labelStrings: Set[String] = {
+    // NOTE: the length of the names is significant - Kryo makes a real effort
+    // to compress data, and this can lead to a legitimate case where storing a
+    // tranche in isolation can result in a payload that is more compressed than
+    // the corresponding one sharing structure with a previously stored tranche.
+    // This only happens when the objects being stored contain little data whose
+    // values are small integers, or short ASCII strings, so we defeat that
+    // confusing loophole here to avoid confusing the tests.
+    Set("Huey Green", "Duey Dean", "Louie Keene")
+  }
+  val api = Trials.api
 
   def partGrowthLeadingToRootForkTrials(
       allowDuplicates: Boolean
@@ -351,8 +362,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .withLimits(
-        casesLimit = maximumNumberOfCases,
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -378,8 +390,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           .integers(0, maximumNumberOfPermutationsToChooseFrom - 1, 0)
           .map(_.toDouble / maximumNumberOfPermutationsToChooseFrom)
       )
-      .withLimits(
-        casesLimit = maximumNumberOfCases,
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
         complexityLimit = complexityLimit
       )
       .supplyTo { (partGrowth, permutationScale) =>
@@ -443,8 +456,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .withLimits(
-        casesLimit = maximumNumberOfCases,
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -482,8 +496,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = false)
-      .withLimits(
-        casesLimit = maximumNumberOfCases,
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -526,8 +541,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = false)
-      .withLimits(
-        casesLimit = maximumNumberOfCases,
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -563,8 +579,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = false)
-      .withLimits(
-        casesLimit = maximumNumberOfCases,
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -608,8 +625,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .withLimits(
-        casesLimit = maximumNumberOfCases,
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -648,8 +666,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "be idempotent in terms of object identity when retrieving using the same tranche id" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .withLimits(
-        casesLimit = maximumNumberOfCases,
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
