@@ -270,12 +270,6 @@ trait ImmutableObjectStorage[TrancheId] {
   ): Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
     unsafeRun(session, intersessionState)
 
-  def runToYieldTrancheId(
-      session: Session[TrancheId],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
-    unsafeRun(session, intersessionState)
-
   def unsafeRun[Result](
       session: Session[Result],
       intersessionState: IntersessionState[TrancheId]
@@ -725,6 +719,12 @@ trait ImmutableObjectStorage[TrancheId] {
     !Util.isWrapperClass(clazz) &&
       clazz != classOf[String]
 
+  def runToYieldTrancheId(
+      session: Session[TrancheId],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
+    unsafeRun(session, intersessionState)
+
   def runForEffectsOnly(
       session: Session[Unit],
       intersessionState: IntersessionState[TrancheId]
@@ -768,8 +768,15 @@ trait ImmutableObjectStorage[TrancheId] {
     def toBytesWithClass(immutableObject: Any): Array[Byte] =
       Using.resources(kryoPool.obtain(), outputPool.obtain()) {
         (kryo, output) =>
+          val byteArrayOutputStream =
+            output.getOutputStream.asInstanceOf[ByteArrayOutputStream]
+          byteArrayOutputStream.reset()
+          output.reset()
+
           kryo.writeClassAndObject(output, immutableObject)
-          output.toBytes
+
+          output.flush()
+          byteArrayOutputStream.toByteArray
       }
   }
 
