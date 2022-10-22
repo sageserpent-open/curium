@@ -35,6 +35,7 @@ lazy val settings = Seq(
   ),
   Benchmark / fork := true,
   Benchmark / javaOptions += "-Xmx1G",
+  Benchmark / javaOptions += "-Xms1G",
   Benchmark / javaOptions += "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005",
   Test / parallelExecution := false,
   publishMavenStyle        := true,
