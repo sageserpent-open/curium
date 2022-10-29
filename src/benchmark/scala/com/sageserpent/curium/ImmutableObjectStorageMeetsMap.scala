@@ -28,7 +28,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                 caffeine: Caffeine[Any, Any]
             ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
               caffeine
-                .maximumSize(1000L)
+                .maximumSize(10000L)
                 .build[TrancheId, CompletedOperation[TrancheId]]
             }
           }
