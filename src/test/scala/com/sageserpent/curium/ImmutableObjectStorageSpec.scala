@@ -356,8 +356,6 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   import ImmutableObjectStorageSpec._
 
-  private val maximumNumberOfCases = 200
-
   private val complexityLimit = 10000
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in
