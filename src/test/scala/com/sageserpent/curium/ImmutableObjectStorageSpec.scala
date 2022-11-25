@@ -463,7 +463,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
             tranches
           )
 
-        result should be(Right(()))
+        result shouldBe a[Right[_, _]]
       }
 
   it should "yield an object that is equal to what was stored - with a twist" in
