@@ -6,7 +6,12 @@ import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, Pool, Util}
-import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Registration}
+import com.esotericsoftware.kryo.{
+  Kryo,
+  KryoCopyable,
+  ReferenceResolver,
+  Registration
+}
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.google.common.collect.{BiMap, BiMapFactory}
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
@@ -74,6 +79,7 @@ object ImmutableObjectStorage {
      * reference resolver class' methods. */
     val kryoClosureMarkerClazz = classOf[Closure]
     val stateAcquisitionClazz  = classOf[StateAcquisition]
+    val kryoCopyableClazz      = classOf[KryoCopyable[StateAcquisition]]
     val instantiatorStrategy: StdInstantiatorStrategy =
       new StdInstantiatorStrategy
 
@@ -100,6 +106,21 @@ object ImmutableObjectStorage {
         val underlying: AnyRef = acquiredState.underlying
 
         pipeTo(underlying)
+      }
+    }
+
+    object proxyCopying {
+      @RuntimeType
+      def copy(
+          @RuntimeType kryo: Kryo,
+          @FieldValue("acquiredState") acquiredState: AcquiredState
+      ): Any = {
+        val underlying: AnyRef = acquiredState.underlying
+
+        val copyOfUnderlying = kryo.copy(underlying)
+        kryo.reference(copyOfUnderlying)
+
+        copyOfUnderlying
       }
     }
 
@@ -286,7 +307,9 @@ trait ImmutableObjectStorage[TrancheId] {
       session: Session[Result],
       intersessionState: IntersessionState[TrancheId]
   ): Tranches[TrancheId] => EitherThrowableOr[Result] =
-    unsafeRun(session, intersessionState)
+    (unsafeRun(session, intersessionState)(_)).andThen(result =>
+      result.map(serializationFacade.copy)
+    )
 
   private def unsafeRun[Result](
       session: Session[Result],
@@ -784,6 +807,9 @@ trait ImmutableObjectStorage[TrancheId] {
           output.flush()
           byteArrayOutputStream.toByteArray
       }
+
+    def copy[X](immutableObject: X): X =
+      Using.resource(kryoPool.obtain())(_.copy(immutableObject))
   }
 
   object proxySupport extends ProxySupport {
@@ -923,6 +949,9 @@ trait ImmutableObjectStorage[TrancheId] {
         .implement(stateAcquisitionClazz)
         .method(ElementMatchers.named("acquire"))
         .intercept(FieldAccessor.ofField("acquiredState"))
+        .implement(kryoCopyableClazz)
+        .method(ElementMatchers.named("copy"))
+        .intercept(MethodDelegation.to(proxyCopying))
         .make
         .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
         .getLoaded
