@@ -64,26 +64,24 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
               val duration = currentTime - startTime
 
-              immutableObjectStorage.runForEffectsOnly(
-                for {
-                  retrievedMap <- immutableObjectStorage
-                    .retrieve[AvlMap[Int, AvlSet[String]]](trancheId)
-                } yield {
-                  println(
-                    s"Step: $step, duration: ${duration.toMillis} milliseconds, minimum update duration: ${minimumUpdateDuration.toMillis} milliseconds, maximum update duration: ${maximumUpdateDuration.toMillis} milliseconds, average update duration: ${updateDurations
-                        .map(_.toMillis)
-                        .sum / updateDurations.size}, update durations: ${updateDurations
-                        .map(_.toMillis)
-                        .groupBy(identity)
-                        .toSeq
-                        .map { case (duration, group) =>
-                          group.size -> duration
-                        }
-                        .sortBy(_._1)} ,contents at previous step: ${retrievedMap.get(step - 1).getOrElse(AvlSet.empty).toScalaSet}"
-                  )
-                },
+              val Right(retrievedMap) = immutableObjectStorage.runToYieldResult(
+                immutableObjectStorage
+                  .retrieve[AvlMap[Int, AvlSet[String]]](trancheId),
                 intersessionState
               )(tranches)
+
+              println(
+                s"Step: $step, duration: ${duration.toMillis} milliseconds, minimum update duration: ${minimumUpdateDuration.toMillis} milliseconds, maximum update duration: ${maximumUpdateDuration.toMillis} milliseconds, average update duration: ${updateDurations
+                    .map(_.toMillis)
+                    .sum / updateDurations.size}, update durations: ${updateDurations
+                    .map(_.toMillis)
+                    .groupBy(identity)
+                    .toSeq
+                    .map { case (duration, group) =>
+                      group.size -> duration
+                    }
+                    .sortBy(_._1)} ,contents at previous step: ${retrievedMap.get(step - 1).getOrElse(AvlSet.empty).toScalaSet}"
+              )
 
               maximumUpdateDuration = Duration.Zero
               minimumUpdateDuration = Duration.Inf

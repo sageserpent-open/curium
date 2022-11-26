@@ -223,6 +223,8 @@ object ImmutableObjectStorageSpec {
   case class Leaf(id: Int, labelString: String) extends Part {
     val problematicClosure: Any => String = (_: Any) => aThing + aThing
 
+    val referenceToStandalone = theOneAndOnlyStandaloneObjectExample
+
     override def useProblematicClosure: String = problematicClosure()
   }
 
@@ -298,6 +300,8 @@ object ImmutableObjectStorageSpec {
         leadingChunk +: thingsInChunks(chunkSizes.tail, remainder)
       } else Seq.empty
   }
+
+  case object theOneAndOnlyStandaloneObjectExample
 
   object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
     override protected val tranchesImplementationName: String =
