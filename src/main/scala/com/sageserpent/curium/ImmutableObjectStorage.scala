@@ -34,6 +34,7 @@ import java.lang.reflect.Modifier
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
 import scala.ref.WeakReference
+import scala.reflect.runtime.currentMirror
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.Using.Releasable
 import scala.util.hashing.MurmurHash3
@@ -847,10 +848,16 @@ trait ImmutableObjectStorage[TrancheId] {
         { clazz =>
           require(!isProxyClazz(clazz))
 
+          val clazzIsForAStandaloneOrSingletonObject = currentMirror
+            .reflectClass(currentMirror.classSymbol(clazz))
+            .symbol
+            .isModuleClass
+
           val clazzShouldNotBeProxiedAtAll =
-            kryoClosureMarkerClazz.isAssignableFrom(clazz) || !useReferences(
-              clazz
-            ) || isExcludedFromBeingProxied(clazz)
+            clazzIsForAStandaloneOrSingletonObject ||
+              kryoClosureMarkerClazz.isAssignableFrom(clazz) || !useReferences(
+                clazz
+              ) || isExcludedFromBeingProxied(clazz)
 
           if (!clazzShouldNotBeProxiedAtAll)
             if (shouldNotBeProxiedAsItsOwnType(clazz))

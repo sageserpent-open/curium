@@ -161,9 +161,5 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
   object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
     override protected val tranchesImplementationName: String =
       classOf[RocksDbTranches].getSimpleName
-
-    override protected def isExcludedFromBeingProxied(
-        clazz: Class[_]
-    ): Boolean = clazz.getName.contains("BTNil")
   }
 }
