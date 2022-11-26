@@ -229,6 +229,8 @@ object ImmutableObjectStorage {
     }
   }
 
+  object standaloneExemplarToEnticeScalaKyro
+
 }
 
 trait ImmutableObjectStorage[TrancheId] {
@@ -250,6 +252,17 @@ trait ImmutableObjectStorage[TrancheId] {
           override def getRegistration(clazz: Class[_]): Registration =
             super.getRegistration(proxySupport.nonProxyClazzFor(clazz))
         }
+
+        // NASTY HACK - treat `ScalaKryo` as a whitebox and pull out the shared
+        // instance of `ScalaObjectSerializer` that it maintains. Then tell it
+        // that, yes, it can perform a copy by simply yielding the original
+        // immutable instance. Finally, submit a pull request to:
+        // https://github.com/altoo-ag/akka-kryo-serialization .
+        result
+          .getDefaultSerializer(
+            classOf[standaloneExemplarToEnticeScalaKyro.type]
+          )
+          .setImmutable(true)
 
         result.setRegistrationRequired(false)
         result.setInstantiatorStrategy(
@@ -290,26 +303,6 @@ trait ImmutableObjectStorage[TrancheId] {
       intersessionState: IntersessionState[TrancheId]
   ): Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
     unsafeRun(session, intersessionState)
-
-  def runToYieldTrancheId(
-      session: Session[TrancheId],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
-    unsafeRun(session, intersessionState)
-
-  def runForEffectsOnly(
-      session: Session[Unit],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
-    unsafeRun(session, intersessionState)
-
-  def runToYieldResult[Result](
-      session: Session[Result],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Result] =
-    (unsafeRun(session, intersessionState)(_)).andThen(result =>
-      result.map(serializationFacade.copy)
-    )
 
   private def unsafeRun[Result](
       session: Session[Result],
@@ -759,6 +752,26 @@ trait ImmutableObjectStorage[TrancheId] {
   private def useReferences(clazz: Class[_]): Boolean =
     !Util.isWrapperClass(clazz) &&
       clazz != classOf[String]
+
+  def runToYieldTrancheId(
+      session: Session[TrancheId],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
+    unsafeRun(session, intersessionState)
+
+  def runForEffectsOnly(
+      session: Session[Unit],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
+    unsafeRun(session, intersessionState)
+
+  def runToYieldResult[Result](
+      session: Session[Result],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[Result] =
+    (unsafeRun(session, intersessionState)(_)).andThen(result =>
+      result.map(serializationFacade.copy)
+    )
 
   protected def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = false
 
