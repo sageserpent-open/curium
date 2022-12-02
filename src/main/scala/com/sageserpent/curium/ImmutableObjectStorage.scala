@@ -311,12 +311,6 @@ trait ImmutableObjectStorage[TrancheId] {
   ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
     unsafeRun(session, intersessionState)
 
-  def runForEffectsOnly(
-      session: Session[Unit],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
-    unsafeRun(session, intersessionState)
-
   private def unsafeRun[Result](
       session: Session[Result],
       intersessionState: IntersessionState[TrancheId]
@@ -764,7 +758,14 @@ trait ImmutableObjectStorage[TrancheId] {
 
   private def useReferences(clazz: Class[_]): Boolean =
     !Util.isWrapperClass(clazz) &&
-      clazz != classOf[String]
+      clazz != classOf[String] &&
+      clazz != classOf[Array[Int]] // NASTY HACK - exploratory, for now ...
+
+  def runForEffectsOnly(
+      session: Session[Unit],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
+    unsafeRun(session, intersessionState)
 
   def runToYieldResult[Result](
       session: Session[Result],
