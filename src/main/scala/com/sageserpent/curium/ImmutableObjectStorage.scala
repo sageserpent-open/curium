@@ -568,10 +568,12 @@ trait ImmutableObjectStorage[TrancheId] {
         def noteTrancheId(trancheId: TrancheId) = {
           referenceIdToLocalObjectMap.forEach {
             (objectReferenceId, immutableObject) =>
-              intersessionState.noteReferenceId(
-                immutableObject,
-                trancheId -> objectReferenceId
-              )
+              if (proxySupport.canBeProxied(immutableObject.getClass)) {
+                intersessionState.noteReferenceId(
+                  immutableObject,
+                  trancheId -> objectReferenceId
+                )
+              }
           }
         }
 
@@ -686,13 +688,17 @@ trait ImmutableObjectStorage[TrancheId] {
             case None =>
           }
 
-          val canonicalObjectReferenceId =
-            trancheId -> objectReferenceId
+          // NOTE: don't ask the object whether it is a proxy - proxies are
+          // *never* serialized!
+          if (proxySupport.canBeProxied(immutableObject.getClass)) {
+            val canonicalObjectReferenceId =
+              trancheId -> objectReferenceId
 
-          intersessionState.noteReferenceId(
-            immutableObject,
-            canonicalObjectReferenceId
-          )
+            intersessionState.noteReferenceId(
+              immutableObject,
+              canonicalObjectReferenceId
+            )
+          }
         }
 
         override def getReadObject(
@@ -710,22 +716,21 @@ trait ImmutableObjectStorage[TrancheId] {
             )
 
             intersessionState.proxyFor(canonicalObjectReferenceId).getOrElse {
-              if (proxySupport.canBeProxied(clazz)) {
-                val proxy =
-                  proxySupport.createProxy(
-                    clazz,
-                    new AcquiredState(
-                      canonicalObjectReferenceId
-                    )
+              require(proxySupport.canBeProxied(clazz))
+
+              val proxy =
+                proxySupport.createProxy(
+                  clazz,
+                  new AcquiredState(
+                    canonicalObjectReferenceId
                   )
+                )
 
-                intersessionState.noteProxy(canonicalObjectReferenceId, proxy)
-                intersessionState
-                  .noteReferenceId(proxy, canonicalObjectReferenceId)
+              intersessionState.noteProxy(canonicalObjectReferenceId, proxy)
+              intersessionState
+                .noteReferenceId(proxy, canonicalObjectReferenceId)
 
-                proxy
-              } else
-                retrieveUnderlying(canonicalObjectReferenceId)
+              proxy
             }
           }
         }
@@ -756,8 +761,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
   private def useReferences(clazz: Class[_]): Boolean =
     !Util.isWrapperClass(clazz) &&
-      clazz != classOf[String] &&
-      clazz != classOf[Array[Int]] // NASTY HACK - exploratory, for now ...
+      clazz != classOf[String]
 
   def runForEffectsOnly(
       session: Session[Unit],
@@ -852,8 +856,12 @@ trait ImmutableObjectStorage[TrancheId] {
               .reflectClass(currentMirror.classSymbol(clazz))
               .symbol
               .isModuleClass
-          ).recoverWith { case _: ScalaReflectionException =>
-            Success(false)
+          ).recoverWith {
+            case _: ScalaReflectionException => Success(false)
+            case _: AssertionError =>
+              Success(
+                false
+              ) // NASTY HACK: workaround for 'fresh' lambda instances that provoke this error when they have *not* been unpicked from Kryo.
           }.get
 
           val clazzShouldNotBeProxiedAtAll =
