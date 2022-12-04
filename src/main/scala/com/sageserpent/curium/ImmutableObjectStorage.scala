@@ -352,6 +352,39 @@ trait ImmutableObjectStorage[TrancheId] {
           .objectWithReferenceId(trancheLocalObjectReferenceId)
       }
 
+      def retrieveTrancheTopLevelObject[X](
+          trancheId: TrancheId,
+          clazz: Class[X]
+      ): EitherThrowableOr[X] =
+        for {
+          tranche <- tranches.retrieveTranche(trancheId)
+          result <- Try {
+            val trancheSpecificReferenceResolver =
+              new TrancheSpecificReadingReferenceResolver(
+                trancheId,
+                tranche.interTrancheObjectReferenceIdTranslation
+              ) with ReferenceResolverContracts
+
+            val deserialized =
+              sessionReferenceResolver.withValue(
+                Some(trancheSpecificReferenceResolver)
+              ) {
+                serializationFacade.fromBytes(tranche.payload)
+              }
+
+            intersessionState.noteCompletedOperation(
+              trancheId,
+              new CompleteOperationImplementation(
+                deserialized,
+                trancheSpecificReferenceResolver,
+                tranche.payload.length
+              )
+            )
+
+            clazz.cast(deserialized)
+          }.toEither
+        } yield result
+
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
           case Store(immutableObject) =>
@@ -392,39 +425,6 @@ trait ImmutableObjectStorage[TrancheId] {
                 }.toEither
               )
         }
-
-      def retrieveTrancheTopLevelObject[X](
-          trancheId: TrancheId,
-          clazz: Class[X]
-      ): EitherThrowableOr[X] =
-        for {
-          tranche <- tranches.retrieveTranche(trancheId)
-          result <- Try {
-            val trancheSpecificReferenceResolver =
-              new TrancheSpecificReadingReferenceResolver(
-                trancheId,
-                tranche.interTrancheObjectReferenceIdTranslation
-              ) with ReferenceResolverContracts
-
-            val deserialized =
-              sessionReferenceResolver.withValue(
-                Some(trancheSpecificReferenceResolver)
-              ) {
-                serializationFacade.fromBytes(tranche.payload)
-              }
-
-            intersessionState.noteCompletedOperation(
-              trancheId,
-              new CompleteOperationImplementation(
-                deserialized,
-                trancheSpecificReferenceResolver,
-                tranche.payload.length
-              )
-            )
-
-            clazz.cast(deserialized)
-          }.toEither
-        } yield result
 
       trait ReferenceResolverContracts extends ReferenceResolver {
 
@@ -710,9 +710,7 @@ trait ImmutableObjectStorage[TrancheId] {
             )
 
             intersessionState.proxyFor(canonicalObjectReferenceId).getOrElse {
-              if (
-                proxySupport.superClazzAndInterfacesToProxy(clazz).isDefined
-              ) {
+              if (proxySupport.canBeProxied(clazz)) {
                 val proxy =
                   proxySupport.createProxy(
                     clazz,
@@ -889,8 +887,8 @@ trait ImmutableObjectStorage[TrancheId] {
         }
       )
 
-    def canBeProxied[Result](immutableObject: AnyRef) =
-      superClazzAndInterfacesToProxy(immutableObject.getClass).isDefined
+    def canBeProxied(clazz: Class[_]) =
+      superClazzAndInterfacesToProxy(clazz).isDefined
 
     def createProxy(clazz: Class[_], acquiredState: AcquiredState): AnyRef = {
       val proxyClassInstantiator =
