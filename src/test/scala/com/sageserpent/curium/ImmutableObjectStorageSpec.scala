@@ -1,7 +1,10 @@
 package com.sageserpent.curium
 
+import cats.effect.IO
+import cats.effect.unsafe.implicits.global
 import cats.free.FreeT
 import cats.implicits._
+import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.sageserpent.americium.Trials
 import com.sageserpent.americium.java.CasesLimitStrategy
 import com.sageserpent.curium.ImmutableObjectStorage._
@@ -12,7 +15,7 @@ import org.scalatest.matchers.should.Matchers
 import java.time.Duration
 import java.util.UUID
 import scala.collection.mutable.{Map => MutableMap}
-import scala.util.Try
+import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
 
@@ -311,6 +314,15 @@ object ImmutableObjectStorageSpec {
   object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
     override protected val tranchesImplementationName: String =
       classOf[FakeTranches].getSimpleName
+  }
+
+  object immutableObjectStorageForSets
+      extends ImmutableObjectStorage[TrancheId] {
+    override protected val tranchesImplementationName: String =
+      s"${classOf[FakeTranches].getSimpleName}_specialised_for_sets"
+
+    override protected def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
+      (clazz.getName contains "BitmapIndexed") || (clazz.getName contains "HashCollision") // What goes on behind the scenes for the `HashSet` implementation.
   }
 
   case object alien
@@ -919,4 +931,57 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           )
         )
       }
+
+  "dealing with sets that increase in size" should "not cause problems" in {
+    val intersessionState = new IntersessionState[TrancheId] {
+      override protected def finalCustomisationForTrancheCaching(
+          caffeine: Caffeine[Any, Any]
+      ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
+        caffeine
+          .maximumSize(100L)
+          .build[TrancheId, CompletedOperation[TrancheId]]
+      }
+    }
+
+    val tranches = new FakeTranches
+
+    val numberOfIterations = 10000
+
+    val initialSession = for {
+      trancheId <- immutableObjectStorageForSets.store(Set.empty)
+    } yield trancheId
+
+    val Right(initialTrancheId) = immutableObjectStorageForSets
+      .runToYieldTrancheId(initialSession, intersessionState)(tranches)
+
+    val randomBehaviour = new Random(73473L)
+
+    val activity = (0 until numberOfIterations).foldLeft(
+      IO.pure(initialTrancheId)
+    )((priorActivity, index) =>
+      priorActivity.flatMap { trancheId =>
+        val session = for {
+          aSet <- immutableObjectStorageForSets.retrieve[Set[Int]](trancheId)
+          anUpdatedSet = randomBehaviour.nextInt(3) match {
+            case 0 => aSet + index
+            case 1 => aSet ++ aSet.map(3 * _)
+            case 2 => aSet - randomBehaviour.nextInt(index)
+          }
+          trancheId <- immutableObjectStorageForSets.store(anUpdatedSet)
+        } yield trancheId -> anUpdatedSet
+
+        IO {
+          val Right((trancheIdForUpdate, anUpdatedSet)) =
+            immutableObjectStorageForSets
+              .runToYieldResult(session, intersessionState)(tranches)
+
+          println(anUpdatedSet)
+
+          trancheIdForUpdate
+        }
+      }
+    )
+
+    activity.unsafeRunSync()
+  }
 }
