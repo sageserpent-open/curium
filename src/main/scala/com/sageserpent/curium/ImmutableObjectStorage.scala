@@ -716,8 +716,6 @@ trait ImmutableObjectStorage[TrancheId] {
             )
 
             intersessionState.proxyFor(canonicalObjectReferenceId).getOrElse {
-              require(proxySupport.canBeProxied(clazz))
-
               val proxy =
                 proxySupport.createProxy(
                   clazz,
