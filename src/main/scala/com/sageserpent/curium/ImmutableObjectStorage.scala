@@ -305,12 +305,6 @@ trait ImmutableObjectStorage[TrancheId] {
   ): Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
     unsafeRun(session, intersessionState)
 
-  def runToYieldTrancheId(
-      session: Session[TrancheId],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
-    unsafeRun(session, intersessionState)
-
   private def unsafeRun[Result](
       session: Session[Result],
       intersessionState: IntersessionState[TrancheId]
@@ -568,7 +562,7 @@ trait ImmutableObjectStorage[TrancheId] {
         def noteTrancheId(trancheId: TrancheId) = {
           referenceIdToLocalObjectMap.forEach {
             (objectReferenceId, immutableObject) =>
-              if (proxySupport.canBeProxied(immutableObject.getClass)) {
+              if (!immutableObject.getClass.isArray) {
                 intersessionState.noteReferenceId(
                   immutableObject,
                   trancheId -> objectReferenceId
@@ -688,9 +682,7 @@ trait ImmutableObjectStorage[TrancheId] {
             case None =>
           }
 
-          // NOTE: don't ask the object whether it is a proxy - proxies are
-          // *never* serialized!
-          if (proxySupport.canBeProxied(immutableObject.getClass)) {
+          if (!immutableObject.getClass.isArray) {
             val canonicalObjectReferenceId =
               trancheId -> objectReferenceId
 
@@ -716,19 +708,27 @@ trait ImmutableObjectStorage[TrancheId] {
             )
 
             intersessionState.proxyFor(canonicalObjectReferenceId).getOrElse {
-              val proxy =
-                proxySupport.createProxy(
-                  clazz,
-                  new AcquiredState(
-                    canonicalObjectReferenceId
+              if (proxySupport.canBeProxied(clazz)) {
+                val proxy =
+                  proxySupport.createProxy(
+                    clazz,
+                    new AcquiredState(
+                      canonicalObjectReferenceId
+                    )
                   )
-                )
 
-              intersessionState.noteProxy(canonicalObjectReferenceId, proxy)
-              intersessionState
-                .noteReferenceId(proxy, canonicalObjectReferenceId)
+                intersessionState.noteProxy(canonicalObjectReferenceId, proxy)
+                // TODO: this is worrying: given that the underlying object will
+                // also be noted by `intersessionState` using the *same*
+                // canonical object reference id, then this means that sometimes
+                // reference resolution will pick up the proxy, and sometimes
+                // the underlying object. That feels wrong...
+                intersessionState
+                  .noteReferenceId(proxy, canonicalObjectReferenceId)
 
-              proxy
+                proxy
+              } else
+                retrieveUnderlying(canonicalObjectReferenceId)
             }
           }
         }
@@ -760,6 +760,12 @@ trait ImmutableObjectStorage[TrancheId] {
   private def useReferences(clazz: Class[_]): Boolean =
     !Util.isWrapperClass(clazz) &&
       clazz != classOf[String]
+
+  def runToYieldTrancheId(
+      session: Session[TrancheId],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
+    unsafeRun(session, intersessionState)
 
   def runForEffectsOnly(
       session: Session[Unit],
@@ -854,12 +860,8 @@ trait ImmutableObjectStorage[TrancheId] {
               .reflectClass(currentMirror.classSymbol(clazz))
               .symbol
               .isModuleClass
-          ).recoverWith {
-            case _: ScalaReflectionException => Success(false)
-            case _: AssertionError =>
-              Success(
-                false
-              ) // NASTY HACK: workaround for 'fresh' lambda instances that provoke this error when they have *not* been unpicked from Kryo.
+          ).recoverWith { case _: ScalaReflectionException =>
+            Success(false)
           }.get
 
           val clazzShouldNotBeProxiedAtAll =
