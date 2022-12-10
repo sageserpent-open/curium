@@ -305,6 +305,12 @@ trait ImmutableObjectStorage[TrancheId] {
   ): Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
     unsafeRun(session, intersessionState)
 
+  def runToYieldTrancheId(
+      session: Session[TrancheId],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
+    unsafeRun(session, intersessionState)
+
   private def unsafeRun[Result](
       session: Session[Result],
       intersessionState: IntersessionState[TrancheId]
@@ -346,39 +352,6 @@ trait ImmutableObjectStorage[TrancheId] {
           .objectWithReferenceId(trancheLocalObjectReferenceId)
       }
 
-      def retrieveTrancheTopLevelObject[X](
-          trancheId: TrancheId,
-          clazz: Class[X]
-      ): EitherThrowableOr[X] =
-        for {
-          tranche <- tranches.retrieveTranche(trancheId)
-          result <- Try {
-            val trancheSpecificReferenceResolver =
-              new TrancheSpecificReadingReferenceResolver(
-                trancheId,
-                tranche.interTrancheObjectReferenceIdTranslation
-              ) with ReferenceResolverContracts
-
-            val deserialized =
-              sessionReferenceResolver.withValue(
-                Some(trancheSpecificReferenceResolver)
-              ) {
-                serializationFacade.fromBytes(tranche.payload)
-              }
-
-            intersessionState.noteCompletedOperation(
-              trancheId,
-              new CompleteOperationImplementation(
-                deserialized,
-                trancheSpecificReferenceResolver,
-                tranche.payload.length
-              )
-            )
-
-            clazz.cast(deserialized)
-          }.toEither
-        } yield result
-
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
           case Store(immutableObject) =>
@@ -419,6 +392,39 @@ trait ImmutableObjectStorage[TrancheId] {
                 }.toEither
               )
         }
+
+      def retrieveTrancheTopLevelObject[X](
+          trancheId: TrancheId,
+          clazz: Class[X]
+      ): EitherThrowableOr[X] =
+        for {
+          tranche <- tranches.retrieveTranche(trancheId)
+          result <- Try {
+            val trancheSpecificReferenceResolver =
+              new TrancheSpecificReadingReferenceResolver(
+                trancheId,
+                tranche.interTrancheObjectReferenceIdTranslation
+              ) with ReferenceResolverContracts
+
+            val deserialized =
+              sessionReferenceResolver.withValue(
+                Some(trancheSpecificReferenceResolver)
+              ) {
+                serializationFacade.fromBytes(tranche.payload)
+              }
+
+            intersessionState.noteCompletedOperation(
+              trancheId,
+              new CompleteOperationImplementation(
+                deserialized,
+                trancheSpecificReferenceResolver,
+                tranche.payload.length
+              )
+            )
+
+            clazz.cast(deserialized)
+          }.toEither
+        } yield result
 
       trait ReferenceResolverContracts extends ReferenceResolver {
 
@@ -562,7 +568,7 @@ trait ImmutableObjectStorage[TrancheId] {
         def noteTrancheId(trancheId: TrancheId) = {
           referenceIdToLocalObjectMap.forEach {
             (objectReferenceId, immutableObject) =>
-              if (!immutableObject.getClass.isArray) {
+              if (allowInterTrancheReferences(immutableObject)) {
                 intersessionState.noteReferenceId(
                   immutableObject,
                   trancheId -> objectReferenceId
@@ -682,7 +688,7 @@ trait ImmutableObjectStorage[TrancheId] {
             case None =>
           }
 
-          if (!immutableObject.getClass.isArray) {
+          if (allowInterTrancheReferences(immutableObject)) {
             val canonicalObjectReferenceId =
               trancheId -> objectReferenceId
 
@@ -761,11 +767,9 @@ trait ImmutableObjectStorage[TrancheId] {
     !Util.isWrapperClass(clazz) &&
       clazz != classOf[String]
 
-  def runToYieldTrancheId(
-      session: Session[TrancheId],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
-    unsafeRun(session, intersessionState)
+  protected def allowInterTrancheReferences(immutableObject: AnyRef) = {
+    !immutableObject.getClass.isArray
+  }
 
   def runForEffectsOnly(
       session: Session[Unit],
