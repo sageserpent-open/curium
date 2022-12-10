@@ -25,11 +25,9 @@ class ExampleSpec
 
   "storing and retrieving a series of immutable of objects that share structure" should "work" in {
     // Start by obtaining a tranches object that provides backend storage and
-    // retrieval of tranche data.
-    // Use the one provided by the testing support - it spins up a temporary H2
-    // database and uses that
-    // for its implementation; the database is torn down when the resource is
-    // relinquished.
+    // retrieval of tranche data. Use the one provided by the testing support -
+    // it spins up a temporary H2 database and uses that for its implementation;
+    // the database is torn down when the resource is relinquished.
     tranchesResource
       .use(tranches =>
         IO {
@@ -52,10 +50,8 @@ class ExampleSpec
             } yield trancheId
 
             // Nothing has actually taken place yet - we have to run the session
-            // to
-            // make imperative changes, in this case storing the initial map.
-            // This
-            // gives us back the tranche id.
+            // to make imperative changes, in this case storing the initial map.
+            // This gives us back the tranche id.
             immutableObjectStorage
               .runToYieldTrancheId(session, intersessionState)(tranches)
           }
@@ -82,8 +78,7 @@ class ExampleSpec
           // Let's verify what was stored.
           {
             // A session in which we retrieve the two objects from the previous
-            // sessions
-            // and verify that they contain the correct data...
+            // sessions and verify that they contain the correct data...
             val session = for {
               initialMap <- immutableObjectStorage
                 .retrieve[Map[Set[String], List[Int]]](firstTrancheId)
