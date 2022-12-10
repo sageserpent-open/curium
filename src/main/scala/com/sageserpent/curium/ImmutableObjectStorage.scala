@@ -13,7 +13,7 @@ import com.esotericsoftware.kryo.{
   Registration
 }
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
-import com.google.common.collect.{BiMap, BiMapFactory}
+import com.google.common.collect.{BiMap, BiMapFactory, Sets}
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
@@ -32,7 +32,11 @@ import org.objenesis.strategy.StdInstantiatorStrategy
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.Modifier
 import scala.collection.mutable
-import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
+import scala.jdk.CollectionConverters.{
+  MapHasAsJava,
+  MapHasAsScala,
+  SetHasAsScala
+}
 import scala.ref.WeakReference
 import scala.reflect.runtime.currentMirror
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
@@ -290,6 +294,12 @@ trait ImmutableObjectStorage[TrancheId] {
   private val outputPool: Pool[Output] = new Pool[Output](true, false) {
     override def create(): Output = new Output(new ByteArrayOutputStream())
   }
+  private val commonSingletons: collection.Set[Any] = {
+    val mutableSet = Sets.newIdentityHashSet[Any]()
+    mutableSet.add(Set.empty)
+    mutableSet.add(Map.empty)
+    mutableSet.asScala
+  }
 
   def store[X](immutableObject: X): Session[TrancheId] =
     FreeT.liftF[Operation, EitherThrowableOr, TrancheId](Store(immutableObject))
@@ -352,6 +362,39 @@ trait ImmutableObjectStorage[TrancheId] {
           .objectWithReferenceId(trancheLocalObjectReferenceId)
       }
 
+      def retrieveTrancheTopLevelObject[X](
+          trancheId: TrancheId,
+          clazz: Class[X]
+      ): EitherThrowableOr[X] =
+        for {
+          tranche <- tranches.retrieveTranche(trancheId)
+          result <- Try {
+            val trancheSpecificReferenceResolver =
+              new TrancheSpecificReadingReferenceResolver(
+                trancheId,
+                tranche.interTrancheObjectReferenceIdTranslation
+              ) with ReferenceResolverContracts
+
+            val deserialized =
+              sessionReferenceResolver.withValue(
+                Some(trancheSpecificReferenceResolver)
+              ) {
+                serializationFacade.fromBytes(tranche.payload)
+              }
+
+            intersessionState.noteCompletedOperation(
+              trancheId,
+              new CompleteOperationImplementation(
+                deserialized,
+                trancheSpecificReferenceResolver,
+                tranche.payload.length
+              )
+            )
+
+            clazz.cast(deserialized)
+          }.toEither
+        } yield result
+
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
           case Store(immutableObject) =>
@@ -392,39 +435,6 @@ trait ImmutableObjectStorage[TrancheId] {
                 }.toEither
               )
         }
-
-      def retrieveTrancheTopLevelObject[X](
-          trancheId: TrancheId,
-          clazz: Class[X]
-      ): EitherThrowableOr[X] =
-        for {
-          tranche <- tranches.retrieveTranche(trancheId)
-          result <- Try {
-            val trancheSpecificReferenceResolver =
-              new TrancheSpecificReadingReferenceResolver(
-                trancheId,
-                tranche.interTrancheObjectReferenceIdTranslation
-              ) with ReferenceResolverContracts
-
-            val deserialized =
-              sessionReferenceResolver.withValue(
-                Some(trancheSpecificReferenceResolver)
-              ) {
-                serializationFacade.fromBytes(tranche.payload)
-              }
-
-            intersessionState.noteCompletedOperation(
-              trancheId,
-              new CompleteOperationImplementation(
-                deserialized,
-                trancheSpecificReferenceResolver,
-                tranche.payload.length
-              )
-            )
-
-            clazz.cast(deserialized)
-          }.toEither
-        } yield result
 
       trait ReferenceResolverContracts extends ReferenceResolver {
 
@@ -768,7 +778,9 @@ trait ImmutableObjectStorage[TrancheId] {
       clazz != classOf[String]
 
   protected def allowInterTrancheReferences(immutableObject: AnyRef) = {
-    !immutableObject.getClass.isArray
+    !immutableObject.getClass.isArray && !commonSingletons.contains(
+      immutableObject
+    )
   }
 
   def runForEffectsOnly(
