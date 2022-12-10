@@ -951,22 +951,31 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       trancheId <- immutableObjectStorageForSets.store(Set.empty)
     } yield trancheId
 
-    val Right(initialTrancheId) = immutableObjectStorageForSets
+    val Right(initialTrancheIdForEmptySet) = immutableObjectStorageForSets
       .runToYieldTrancheId(initialSession, intersessionState)(tranches)
 
-    val randomBehaviour = new Random(73473L)
+    class StatefulUpdateProcess {
+      private val randomBehaviour = new Random(73473L)
+
+      def updateSet(aSet: Set[TrancheLocalObjectReferenceId], index: Int) = {
+        randomBehaviour.nextInt(3) match {
+          case 0 => aSet + index
+          case 1 => aSet ++ aSet.map(3 * _)
+          case 2 => aSet - randomBehaviour.nextInt(index)
+        }
+      }
+    }
+
+    object sessionUpdate  extends StatefulUpdateProcess
+    object exemplarUpdate extends StatefulUpdateProcess
 
     val activity = (0 until numberOfIterations).foldLeft(
-      IO.pure(initialTrancheId)
+      IO.pure(initialTrancheIdForEmptySet -> Set.empty[Int])
     )((priorActivity, index) =>
-      priorActivity.flatMap { trancheId =>
+      priorActivity.flatMap { case (trancheId, exemplarSet) =>
         val session = for {
           aSet <- immutableObjectStorageForSets.retrieve[Set[Int]](trancheId)
-          anUpdatedSet = randomBehaviour.nextInt(3) match {
-            case 0 => aSet + index
-            case 1 => aSet ++ aSet.map(3 * _)
-            case 2 => aSet - randomBehaviour.nextInt(index)
-          }
+          anUpdatedSet = sessionUpdate.updateSet(aSet, index)
           trancheId <- immutableObjectStorageForSets.store(anUpdatedSet)
         } yield trancheId -> anUpdatedSet
 
@@ -977,11 +986,23 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
           println(anUpdatedSet)
 
-          trancheIdForUpdate
+          trancheIdForUpdate -> exemplarUpdate.updateSet(exemplarSet, index)
         }
       }
     )
 
-    activity.unsafeRunSync()
+    activity
+      .flatMap { case (finalTrancheId, exemplarSet) =>
+        IO {
+          val Right(retrievedSet) =
+            immutableObjectStorageForSets.runToYieldResult(
+              immutableObjectStorageForSets.retrieve[Set[Int]](finalTrancheId),
+              intersessionState
+            )(tranches)
+
+          retrievedSet shouldBe exemplarSet
+        }
+      }
+      .unsafeRunSync()
   }
 }
