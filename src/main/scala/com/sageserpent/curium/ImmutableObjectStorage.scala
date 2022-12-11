@@ -173,6 +173,13 @@ object ImmutableObjectStorage {
         .weakKeys()
         .build[AnyRef, CanonicalObjectReferenceId[TrancheId]]()
 
+    private val proxyToReferenceIdCache
+        : Cache[AnyRef, CanonicalObjectReferenceId[TrancheId]] =
+      caffeineBuilder()
+        .executor(_.run())
+        .weakKeys()
+        .build[AnyRef, CanonicalObjectReferenceId[TrancheId]]()
+
     private val referenceIdToProxyCache
         : Cache[CanonicalObjectReferenceId[TrancheId], AnyRef] =
       caffeineBuilder()
@@ -186,7 +193,7 @@ object ImmutableObjectStorage {
         caffeineBuilder().executor(_.run()).softValues
       )
 
-    def noteReferenceId(
+    def noteReferenceIdForNonProxy(
         immutableObject: AnyRef,
         objectReferenceId: CanonicalObjectReferenceId[TrancheId]
     ): Unit = {
@@ -196,13 +203,17 @@ object ImmutableObjectStorage {
     def referenceIdFor(
         immutableObject: AnyRef
     ): Option[CanonicalObjectReferenceId[TrancheId]] =
-      Option(objectToReferenceIdCache.getIfPresent(immutableObject))
+      Option(proxyToReferenceIdCache.getIfPresent(immutableObject))
+        .orElse(
+          Option(objectToReferenceIdCache.getIfPresent(immutableObject))
+        )
 
     def noteProxy(
         objectReferenceId: CanonicalObjectReferenceId[TrancheId],
         immutableObject: AnyRef
     ): Unit = {
       referenceIdToProxyCache.put(objectReferenceId, immutableObject)
+      proxyToReferenceIdCache.put(immutableObject, objectReferenceId)
     }
 
     def proxyFor(objectReferenceId: CanonicalObjectReferenceId[TrancheId]) =
@@ -575,11 +586,11 @@ trait ImmutableObjectStorage[TrancheId] {
             ]] =
           _interTrancheObjectReferenceIdTranslation.asScala.toMap
 
-        def noteTrancheId(trancheId: TrancheId) = {
+        def noteTrancheId(trancheId: TrancheId): Unit = {
           referenceIdToLocalObjectMap.forEach {
             (objectReferenceId, immutableObject) =>
               if (allowInterTrancheReferences(immutableObject)) {
-                intersessionState.noteReferenceId(
+                intersessionState.noteReferenceIdForNonProxy(
                   immutableObject,
                   trancheId -> objectReferenceId
                 )
@@ -702,7 +713,7 @@ trait ImmutableObjectStorage[TrancheId] {
             val canonicalObjectReferenceId =
               trancheId -> objectReferenceId
 
-            intersessionState.noteReferenceId(
+            intersessionState.noteReferenceIdForNonProxy(
               immutableObject,
               canonicalObjectReferenceId
             )
@@ -734,13 +745,6 @@ trait ImmutableObjectStorage[TrancheId] {
                   )
 
                 intersessionState.noteProxy(canonicalObjectReferenceId, proxy)
-                // TODO: this is worrying: given that the underlying object will
-                // also be noted by `intersessionState` using the *same*
-                // canonical object reference id, then this means that sometimes
-                // reference resolution will pick up the proxy, and sometimes
-                // the underlying object. That feels wrong...
-                intersessionState
-                  .noteReferenceId(proxy, canonicalObjectReferenceId)
 
                 proxy
               } else
