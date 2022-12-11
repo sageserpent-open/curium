@@ -781,11 +781,10 @@ trait ImmutableObjectStorage[TrancheId] {
     !Util.isWrapperClass(clazz) &&
       clazz != classOf[String]
 
-  protected def allowInterTrancheReferences(immutableObject: AnyRef) = {
-    !immutableObject.getClass.isArray && !commonSingletons.contains(
-      immutableObject
+  protected def allowInterTrancheReferences(immutableObject: AnyRef) =
+    proxySupport.canBeProxied(
+      immutableObject.getClass
     )
-  }
 
   def runForEffectsOnly(
       session: Session[Unit],
@@ -880,8 +879,10 @@ trait ImmutableObjectStorage[TrancheId] {
               .reflectClass(currentMirror.classSymbol(clazz))
               .symbol
               .isModuleClass
-          ).recoverWith { case _: ScalaReflectionException =>
-            Success(false)
+          ).recoverWith {
+            case _: ScalaReflectionException =>
+              Success(false)
+            case _: AssertionError => Success(false)
           }.get
 
           val clazzShouldNotBeProxiedAtAll =

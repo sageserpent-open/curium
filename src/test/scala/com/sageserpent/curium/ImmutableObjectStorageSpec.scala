@@ -14,6 +14,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.time.Duration
 import java.util.UUID
+import scala.collection.immutable.{AbstractMap, AbstractSet}
 import scala.collection.mutable.{Map => MutableMap}
 import scala.util.{Random, Try}
 
@@ -322,7 +323,12 @@ object ImmutableObjectStorageSpec {
       s"${classOf[FakeTranches].getSimpleName}_specialised_for_sets"
 
     override protected def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
-      (clazz.getName contains "BitmapIndexed") || (clazz.getName contains "HashCollision") // What goes on behind the scenes for the `HashSet` implementation.
+      // What goes on behind the scenes for the `HashMap` and `HashSet`
+      // implementations.
+      (clazz.getName contains "BitmapIndexed") || (clazz.getName contains "HashCollision") ||
+        (classOf[AbstractSet[_]] isAssignableFrom clazz) || (classOf[
+          AbstractMap[_, _]
+        ] isAssignableFrom clazz)
   }
 
   case object alien
