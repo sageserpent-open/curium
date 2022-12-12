@@ -13,7 +13,7 @@ import com.esotericsoftware.kryo.{
   Registration
 }
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
-import com.google.common.collect.{BiMap, BiMapFactory, Sets}
+import com.google.common.collect.{BiMap, BiMapFactory}
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
@@ -32,11 +32,7 @@ import org.objenesis.strategy.StdInstantiatorStrategy
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.Modifier
 import scala.collection.mutable
-import scala.jdk.CollectionConverters.{
-  MapHasAsJava,
-  MapHasAsScala,
-  SetHasAsScala
-}
+import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
 import scala.ref.WeakReference
 import scala.reflect.runtime.currentMirror
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
@@ -305,12 +301,6 @@ trait ImmutableObjectStorage[TrancheId] {
   private val outputPool: Pool[Output] = new Pool[Output](true, false) {
     override def create(): Output = new Output(new ByteArrayOutputStream())
   }
-  private val commonSingletons: collection.Set[Any] = {
-    val mutableSet = Sets.newIdentityHashSet[Any]()
-    mutableSet.add(Set.empty)
-    mutableSet.add(Map.empty)
-    mutableSet.asScala
-  }
 
   def store[X](immutableObject: X): Session[TrancheId] =
     FreeT.liftF[Operation, EitherThrowableOr, TrancheId](Store(immutableObject))
@@ -330,6 +320,12 @@ trait ImmutableObjectStorage[TrancheId] {
       session: Session[TrancheId],
       intersessionState: IntersessionState[TrancheId]
   ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
+    unsafeRun(session, intersessionState)
+
+  def runForEffectsOnly(
+      session: Session[Unit],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
     unsafeRun(session, intersessionState)
 
   private def unsafeRun[Result](
@@ -373,39 +369,6 @@ trait ImmutableObjectStorage[TrancheId] {
           .objectWithReferenceId(trancheLocalObjectReferenceId)
       }
 
-      def retrieveTrancheTopLevelObject[X](
-          trancheId: TrancheId,
-          clazz: Class[X]
-      ): EitherThrowableOr[X] =
-        for {
-          tranche <- tranches.retrieveTranche(trancheId)
-          result <- Try {
-            val trancheSpecificReferenceResolver =
-              new TrancheSpecificReadingReferenceResolver(
-                trancheId,
-                tranche.interTrancheObjectReferenceIdTranslation
-              ) with ReferenceResolverContracts
-
-            val deserialized =
-              sessionReferenceResolver.withValue(
-                Some(trancheSpecificReferenceResolver)
-              ) {
-                serializationFacade.fromBytes(tranche.payload)
-              }
-
-            intersessionState.noteCompletedOperation(
-              trancheId,
-              new CompleteOperationImplementation(
-                deserialized,
-                trancheSpecificReferenceResolver,
-                tranche.payload.length
-              )
-            )
-
-            clazz.cast(deserialized)
-          }.toEither
-        } yield result
-
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
           case Store(immutableObject) =>
@@ -446,6 +409,39 @@ trait ImmutableObjectStorage[TrancheId] {
                 }.toEither
               )
         }
+
+      def retrieveTrancheTopLevelObject[X](
+          trancheId: TrancheId,
+          clazz: Class[X]
+      ): EitherThrowableOr[X] =
+        for {
+          tranche <- tranches.retrieveTranche(trancheId)
+          result <- Try {
+            val trancheSpecificReferenceResolver =
+              new TrancheSpecificReadingReferenceResolver(
+                trancheId,
+                tranche.interTrancheObjectReferenceIdTranslation
+              ) with ReferenceResolverContracts
+
+            val deserialized =
+              sessionReferenceResolver.withValue(
+                Some(trancheSpecificReferenceResolver)
+              ) {
+                serializationFacade.fromBytes(tranche.payload)
+              }
+
+            intersessionState.noteCompletedOperation(
+              trancheId,
+              new CompleteOperationImplementation(
+                deserialized,
+                trancheSpecificReferenceResolver,
+                tranche.payload.length
+              )
+            )
+
+            clazz.cast(deserialized)
+          }.toEither
+        } yield result
 
       trait ReferenceResolverContracts extends ReferenceResolver {
 
@@ -786,12 +782,6 @@ trait ImmutableObjectStorage[TrancheId] {
       immutableObject.getClass
     )
 
-  def runForEffectsOnly(
-      session: Session[Unit],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
-    unsafeRun(session, intersessionState)
-
   def runToYieldResult[Result](
       session: Session[Result],
       intersessionState: IntersessionState[TrancheId]
@@ -882,7 +872,10 @@ trait ImmutableObjectStorage[TrancheId] {
           ).recoverWith {
             case _: ScalaReflectionException =>
               Success(false)
-            case _: AssertionError => Success(false)
+            case _: AssertionError =>
+              // TODO: finesse this - probably misusing the Scala reflection API
+              // here...
+              Success(false)
           }.get
 
           val clazzShouldNotBeProxiedAtAll =
@@ -982,15 +975,18 @@ trait ImmutableObjectStorage[TrancheId] {
           superClazzAndInterfaces.superClazz,
           ConstructorStrategy.Default.NO_CONSTRUCTORS
         )
-        .method(ElementMatchers.isPublic())
-        .intercept(
-          MethodDelegation
-            .withDefaultConfiguration()
-            .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
-            .to(proxyDelayedLoading)
-        )
         .implement(superClazzAndInterfaces.interfaces: _*)
-        .method(ElementMatchers.isPublic())
+        .method(
+          ElementMatchers
+            .isPublic() // TODO: make this configurable.
+            .and(
+              ElementMatchers.not(
+                ElementMatchers
+                  .takesArgument(0, classOf[IterableOnce[_]])
+                  .and(ElementMatchers.nameContains("$plus$plus"))
+              )
+            )
+        )
         .intercept(
           MethodDelegation
             .withDefaultConfiguration()
