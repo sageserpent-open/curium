@@ -19,7 +19,6 @@ import scala.collection.mutable.{Map => MutableMap}
 import scala.util.{Random, Try}
 
 object ImmutableObjectStorageSpec {
-
   type TrancheId      = FakeTranches#TrancheId
   type PartGrowthStep = Vector[Part] => Part
   val aThing = "Foo"
@@ -1016,6 +1015,45 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       .unsafeRunSync()
   }
 
+  "a class with an inherited final method" should "be able to be proxied" in {
+    val tranches = new FakeTranches
+
+    val example =
+      HasAFinalMethodAndOneThatCanBeProxied("example")
+
+    val intersessionState = new IntersessionState[TrancheId]
+
+    val Right(trancheIdForFiveEntries) =
+      immutableObjectStorageForSetsAndMaps.runToYieldTrancheId(
+        immutableObjectStorageForSetsAndMaps.store(example),
+        intersessionState
+      )(tranches)
+
+    val sessionWrappingFiveEntriesInAList: Session[TrancheId] =
+      for {
+        exampleFromStorage <- immutableObjectStorageForSetsAndMaps
+          .retrieve[HasAFinalMethodAndOneThatCanBeProxied](
+            trancheIdForFiveEntries
+          )
+        trancheId <- immutableObjectStorageForSetsAndMaps.store(
+          List(exampleFromStorage, 2, exampleFromStorage)
+        )
+      } yield trancheId
+
+    val Right(trancheIdForList) =
+      immutableObjectStorageForSetsAndMaps.runToYieldTrancheId(
+        sessionWrappingFiveEntriesInAList,
+        intersessionState
+      )(tranches)
+
+    val Right(list) = immutableObjectStorageForSetsAndMaps.runToYieldResult(
+      immutableObjectStorageForSetsAndMaps.retrieve[List[_]](trancheIdForList),
+      intersessionState
+    )(tranches)
+
+    list should be(List(example, 2, example))
+  }
+
   "a hash map" should "be able to be proxied" in {
     val tranches = new FakeTranches
 
@@ -1052,4 +1090,10 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
     list should be(List(fiveEntries, 2, fiveEntries))
   }
+}
+
+case class HasAFinalMethodAndOneThatCanBeProxied(wrapped: String) {
+  final def finalMethod(): String = s"That's final - $wrapped!"
+
+  def canBeProxied(): String = s"The buck stops here - $wrapped."
 }
