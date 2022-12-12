@@ -5,7 +5,7 @@ import sbt.Keys.libraryDependencies
 lazy val settings = Seq(
   organization := "com.sageserpent",
   name         := "curium",
-  scalaVersion := "2.13.8",
+  scalaVersion := "2.13.10",
   scalacOptions += s"-target:jvm-${javaVersion}",
   javacOptions ++= Seq("-source", javaVersion, "-target", javaVersion),
   libraryDependencies += "org.typelevel" %% "cats-core"      % "2.7.0",
