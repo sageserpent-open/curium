@@ -971,10 +971,18 @@ trait ImmutableObjectStorage[TrancheId] {
         )
         .defineField("acquiredState", classOf[AcquiredState])
         .implement(stateAcquisitionClazz)
-        .method(ElementMatchers.named("acquire"))
+        .method(
+          ElementMatchers
+            .named("acquire")
+            .and(ElementMatchers.isDeclaredBy(stateAcquisitionClazz))
+        )
         .intercept(FieldAccessor.ofField("acquiredState"))
         .implement(kryoCopyableClazz)
-        .method(ElementMatchers.named("copy"))
+        .method(
+          ElementMatchers
+            .named("copy")
+            .and(ElementMatchers.isDeclaredBy(kryoCopyableClazz))
+        )
         .intercept(MethodDelegation.to(proxyCopying))
         .make
         .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
