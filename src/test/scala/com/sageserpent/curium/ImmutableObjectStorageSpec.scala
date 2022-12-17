@@ -222,10 +222,15 @@ object ImmutableObjectStorageSpec {
 
   case class Leaf(id: Int, labelString: String) extends Part {
     val problematicClosure: Any => String = (_: Any) => aThing + aThing
-
-    val referenceToStandalone = theOneAndOnlyStandaloneObjectExample
+    val referenceToStandalone             = theOneAndOnlyStandaloneObjectExample
+    val referenceToStandaloneButInANonStaticContext =
+      standaloneButInANonStaticContext
 
     override def useProblematicClosure: String = problematicClosure()
+
+    object standaloneButInANonStaticContext {
+      def referenceContext = id
+    }
   }
 
   case class Fork(left: Part, id: Int, right: Part, labelString: String)
