@@ -554,6 +554,84 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         )
       }
 
+  it should "not exhibit a bug when a case class's copy method is called" in
+    partGrowthLeadingToRootForkTrials(allowDuplicates = true)
+      .and(
+        api
+          .integers(0, maximumNumberOfPermutationsToChooseFrom - 1, 0)
+          .map(_.toDouble / maximumNumberOfPermutationsToChooseFrom)
+      )
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+        complexityLimit = complexityLimit
+      )
+      .supplyTo { (partGrowth, permutationScale) =>
+        val expectedParts = partGrowth.parts()
+
+        val intersessionState = new IntersessionState[TrancheId]
+
+        val tranches = new FakeTranches
+
+        val trancheIds =
+          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+
+        val permutedIndicesCandidates = Vector
+          .tabulate(trancheIds.size)(identity)
+          .permutations
+          .take(maximumNumberOfPermutationsToChooseFrom)
+          .toSeq
+
+        val forwardPermutation: Map[Int, Int] = permutedIndicesCandidates(
+          (permutationScale * permutedIndicesCandidates.size).toInt
+        ).zipWithIndex.toMap
+
+        val backwardsPermutation = forwardPermutation.map(_.swap)
+
+        // NOTE: as long as we have a complete chain of tranches, it shouldn't
+        // matter in what order tranche ids are submitted for retrieval.
+        val permutedTrancheIds = Vector(
+          trancheIds.indices map (index =>
+            trancheIds(forwardPermutation(index))
+          ): _*
+        )
+
+        val retrievalSession: Session[IndexedSeq[Part]] =
+          for {
+            permutedRetrievedParts <- permutedTrancheIds.traverse(
+              immutableObjectStorage.retrieve[Part]
+            )
+
+          } yield permutedRetrievedParts.indices map (index =>
+            permutedRetrievedParts(backwardsPermutation(index))
+          ) map {
+            // Make copies inside the session - this should be supported.
+            case leaf: Leaf => leaf.copy()
+            case fork: Fork => fork.copy()
+          }
+
+        // Let the retrieved parts escape the session...
+        val Right(retrievedCopiedParts) =
+          immutableObjectStorage.runToYieldResult(
+            retrievalSession,
+            intersessionState
+          )(
+            tranches
+          )
+
+        retrievedCopiedParts should contain theSameElementsInOrderAs expectedParts
+
+        retrievedCopiedParts.map(_.useProblematicClosure) should equal(
+          expectedParts.map(_.useProblematicClosure)
+        )
+
+        Inspectors.forAll(retrievedCopiedParts)(retrievedPart =>
+          Inspectors.forAll(expectedParts)(expectedPart =>
+            retrievedPart should not be theSameInstanceAs(expectedPart)
+          )
+        )
+      }
+
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
       .withStrategy(
