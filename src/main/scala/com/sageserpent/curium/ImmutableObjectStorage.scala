@@ -305,6 +305,26 @@ trait ImmutableObjectStorage[TrancheId] {
   ): Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
     unsafeRun(session, intersessionState)
 
+  def runToYieldTrancheId(
+      session: Session[TrancheId],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
+    unsafeRun(session, intersessionState)
+
+  def runForEffectsOnly(
+      session: Session[Unit],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
+    unsafeRun(session, intersessionState)
+
+  def runToYieldResult[Result](
+      session: Session[Result],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[Result] =
+    (unsafeRun(session, intersessionState)(_)).andThen(result =>
+      result.map(serializationFacade.copy)
+    )
+
   private def unsafeRun[Result](
       session: Session[Result],
       intersessionState: IntersessionState[TrancheId]
@@ -754,26 +774,6 @@ trait ImmutableObjectStorage[TrancheId] {
     !Util.isWrapperClass(clazz) &&
       clazz != classOf[String]
 
-  def runToYieldTrancheId(
-      session: Session[TrancheId],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
-    unsafeRun(session, intersessionState)
-
-  def runForEffectsOnly(
-      session: Session[Unit],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
-    unsafeRun(session, intersessionState)
-
-  def runToYieldResult[Result](
-      session: Session[Result],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Result] =
-    (unsafeRun(session, intersessionState)(_)).andThen(result =>
-      result.map(serializationFacade.copy)
-    )
-
   protected def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = false
 
   // NOTE: this is a potential danger area when an override is defined -
@@ -985,7 +985,10 @@ trait ImmutableObjectStorage[TrancheId] {
 
   private object referenceResolver extends ReferenceResolver {
     override def setKryo(kryo: Kryo): Unit = {
-      sessionReferenceResolver.value.get.setKryo(kryo)
+      // NASTY HACK: when copying an object that is escaping the `Session`
+      // monad, there won't be a session, but it doesn't matter - it won't be
+      // used, so no need to do anything with the `Kryo` instance here.
+      sessionReferenceResolver.value.foreach(_.setKryo(kryo))
     }
 
     override def getWrittenId(
@@ -1022,8 +1025,14 @@ trait ImmutableObjectStorage[TrancheId] {
       // a storage or retrieval operation completes.
     }
 
-    override def useReferences(clazz: Class[_]): Boolean =
-      sessionReferenceResolver.value.get.useReferences(clazz)
+    override def useReferences(clazz: Class[_]): Boolean = {
+      // NASTY HACK: when copying an object that is escaping the `Session`
+      // monad, there won't be a session, but it doesn't matter - just delegate
+      // to the storage anyway.
+      sessionReferenceResolver.value.fold(ifEmpty =
+        storage.useReferences(clazz)
+      )(_.useReferences(clazz))
+    }
 
   }
 }
