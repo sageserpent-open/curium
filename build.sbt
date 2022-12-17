@@ -19,7 +19,7 @@ lazy val settings = Seq(
     exclude ("com.esotericsoftware.kryo", "kryo")
     exclude ("com.twitter", "chill-java"),
   libraryDependencies += "com.google.guava" % "guava" % "28.0-jre",
-  libraryDependencies += "com.github.ben-manes.caffeine" % "caffeine" % "3.0.4",
+  libraryDependencies += "com.github.ben-manes.caffeine" % "caffeine" % "3.1.2",
   libraryDependencies += "org.scalikejdbc" %% "scalikejdbc" % "3.5.0",
   libraryDependencies += "com.h2database"   % "h2"          % "1.4.200",
   libraryDependencies += "org.rocksdb"      % "rocksdbjni"  % "7.4.5",
