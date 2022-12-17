@@ -945,7 +945,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
     val tranches = new FakeTranches
 
-    val numberOfIterations = 10000
+    val numberOfIterations = 1400
 
     val initialSession = for {
       trancheId <- immutableObjectStorageForSets.store(Set.empty)
