@@ -38,7 +38,7 @@ import scala.reflect.runtime.currentMirror
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.Using.Releasable
 import scala.util.hashing.MurmurHash3
-import scala.util.{DynamicVariable, Try, Using}
+import scala.util.{DynamicVariable, Success, Try, Using}
 
 object ImmutableObjectStorage {
   type TrancheLocalObjectReferenceId = Int
@@ -316,14 +316,6 @@ trait ImmutableObjectStorage[TrancheId] {
       intersessionState: IntersessionState[TrancheId]
   ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
     unsafeRun(session, intersessionState)
-
-  def runToYieldResult[Result](
-      session: Session[Result],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Result] =
-    (unsafeRun(session, intersessionState)(_)).andThen(result =>
-      result.map(serializationFacade.copy)
-    )
 
   private def unsafeRun[Result](
       session: Session[Result],
@@ -774,6 +766,14 @@ trait ImmutableObjectStorage[TrancheId] {
     !Util.isWrapperClass(clazz) &&
       clazz != classOf[String]
 
+  def runToYieldResult[Result](
+      session: Session[Result],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[Result] =
+    (unsafeRun(session, intersessionState)(_)).andThen(result =>
+      result.map(serializationFacade.copy)
+    )
+
   protected def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = false
 
   // NOTE: this is a potential danger area when an override is defined -
@@ -848,10 +848,14 @@ trait ImmutableObjectStorage[TrancheId] {
         { clazz =>
           require(!isProxyClazz(clazz))
 
-          val clazzIsForAStandaloneOrSingletonObject = currentMirror
-            .reflectClass(currentMirror.classSymbol(clazz))
-            .symbol
-            .isModuleClass
+          val clazzIsForAStandaloneOrSingletonObject = Try(
+            currentMirror
+              .reflectClass(currentMirror.classSymbol(clazz))
+              .symbol
+              .isModuleClass
+          ).recoverWith { case _: ScalaReflectionException =>
+            Success(false)
+          }.get
 
           val clazzShouldNotBeProxiedAtAll =
             clazzIsForAStandaloneOrSingletonObject ||
