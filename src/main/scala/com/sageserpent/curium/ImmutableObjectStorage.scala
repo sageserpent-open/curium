@@ -270,7 +270,25 @@ trait ImmutableObjectStorage[TrancheId] {
   ): Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
     unsafeRun(session, intersessionState)
 
-  def unsafeRun[Result](
+  def runToYieldTrancheId(
+      session: Session[TrancheId],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
+    unsafeRun(session, intersessionState)
+
+  def runForEffectsOnly(
+      session: Session[Unit],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
+    unsafeRun(session, intersessionState)
+
+  def runToYieldResult[Result](
+      session: Session[Result],
+      intersessionState: IntersessionState[TrancheId]
+  ): Tranches[TrancheId] => EitherThrowableOr[Result] =
+    unsafeRun(session, intersessionState)
+
+  private def unsafeRun[Result](
       session: Session[Result],
       intersessionState: IntersessionState[TrancheId]
   )(tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
@@ -718,18 +736,6 @@ trait ImmutableObjectStorage[TrancheId] {
   private def useReferences(clazz: Class[_]): Boolean =
     !Util.isWrapperClass(clazz) &&
       clazz != classOf[String]
-
-  def runToYieldTrancheId(
-      session: Session[TrancheId],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
-    unsafeRun(session, intersessionState)
-
-  def runForEffectsOnly(
-      session: Session[Unit],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
-    unsafeRun(session, intersessionState)
 
   protected def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = false
 

@@ -193,6 +193,10 @@ object ImmutableObjectStorageSpec {
     val tranchesById: MutableMap[TrancheId, TrancheOfData[TrancheId]] =
       MutableMap.empty
 
+    def clear(): Unit = {
+      tranchesById.clear()
+    }
+
     def purgeTranche(trancheId: TrancheId): Unit = {
       tranchesById -= trancheId
     }
@@ -242,7 +246,7 @@ object ImmutableObjectStorageSpec {
     }
 
     def parts(): Vector[Part] =
-      (Vector.empty[Part] /: steps) { case (parts, partGrowthStep) =>
+      steps.foldLeft(Vector.empty[Part]) { case (parts, partGrowthStep) =>
         parts :+ partGrowthStep(parts)
       }
 
@@ -403,21 +407,101 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val trancheIds =
           partGrowth.storeViaMultipleSessions(intersessionState, tranches)
 
-        val permutatedIndicesCandidates = Vector
+        val permutedIndicesCandidates = Vector
           .tabulate(trancheIds.size)(identity)
           .permutations
           .take(maximumNumberOfPermutationsToChooseFrom)
           .toSeq
 
-        val forwardPermutation: Map[Int, Int] = permutatedIndicesCandidates(
-          (permutationScale * permutatedIndicesCandidates.size).toInt
+        val forwardPermutation: Map[Int, Int] = permutedIndicesCandidates(
+          (permutationScale * permutedIndicesCandidates.size).toInt
         ).zipWithIndex.toMap
 
         val backwardsPermutation = forwardPermutation.map(_.swap)
 
         // NOTE: as long as we have a complete chain of tranches, it shouldn't
-        // matter
-        // in what order tranche ids are submitted for retrieval.
+        // matter in what order tranche ids are submitted for retrieval.
+        val permutedTrancheIds = Vector(
+          trancheIds.indices map (index =>
+            trancheIds(forwardPermutation(index))
+          ): _*
+        )
+
+        val retrievalSession: Session[Unit] =
+          for {
+            permutedRetrievedParts <- permutedTrancheIds.traverse(
+              immutableObjectStorage.retrieve[Part]
+            )
+
+            retrievedPartsInOriginalOrder = permutedRetrievedParts.indices map (
+              index => permutedRetrievedParts(backwardsPermutation(index))
+            )
+          } yield {
+            // Verify test expectations *inside* the session; we are testing use
+            // of the retrieved parts as part of the session without letting
+            // them escape.
+            retrievedPartsInOriginalOrder should contain theSameElementsInOrderAs expectedParts
+
+            retrievedPartsInOriginalOrder.map(
+              _.useProblematicClosure
+            ) should equal(
+              expectedParts.map(_.useProblematicClosure)
+            )
+
+            Inspectors.forAll(retrievedPartsInOriginalOrder)(retrievedPart =>
+              Inspectors.forAll(expectedParts)(expectedPart =>
+                retrievedPart should not be theSameInstanceAs(expectedPart)
+              )
+            )
+          }
+
+        val result =
+          immutableObjectStorage.runForEffectsOnly(
+            retrievalSession,
+            intersessionState
+          )(
+            tranches
+          )
+
+        result should be(Right(()))
+      }
+
+  it should "yield an object that is equal to what was stored - with a twist" in
+    partGrowthLeadingToRootForkTrials(allowDuplicates = true)
+      .and(
+        api
+          .integers(0, maximumNumberOfPermutationsToChooseFrom - 1, 0)
+          .map(_.toDouble / maximumNumberOfPermutationsToChooseFrom)
+      )
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+        complexityLimit = complexityLimit
+      )
+      .supplyTo { (partGrowth, permutationScale) =>
+        val expectedParts = partGrowth.parts()
+
+        val intersessionState = new IntersessionState[TrancheId]
+
+        val tranches = new FakeTranches
+
+        val trancheIds =
+          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+
+        val permutedIndicesCandidates = Vector
+          .tabulate(trancheIds.size)(identity)
+          .permutations
+          .take(maximumNumberOfPermutationsToChooseFrom)
+          .toSeq
+
+        val forwardPermutation: Map[Int, Int] = permutedIndicesCandidates(
+          (permutationScale * permutedIndicesCandidates.size).toInt
+        ).zipWithIndex.toMap
+
+        val backwardsPermutation = forwardPermutation.map(_.swap)
+
+        // NOTE: as long as we have a complete chain of tranches, it shouldn't
+        // matter in what order tranche ids are submitted for retrieval.
         val permutedTrancheIds = Vector(
           trancheIds.indices map (index =>
             trancheIds(forwardPermutation(index))
@@ -434,10 +518,21 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
             permutedRetrievedParts(backwardsPermutation(index))
           )
 
+        // Let the retrieved parts escape the session...
         val Right(retrievedParts) =
-          immutableObjectStorage.unsafeRun(retrievalSession, intersessionState)(
+          immutableObjectStorage.runToYieldResult(
+            retrievalSession,
+            intersessionState
+          )(
             tranches
           )
+
+        // ... here's the twist - pull the rug out from under `retrievedParts`.
+        // This simulates client code holding on to and then using items that
+        // escape a session, when the machinery backing any proxied references
+        // has been torn down in the meantime.
+        intersessionState.clear()
+        tranches.clear()
 
         retrievedParts should contain theSameElementsInOrderAs expectedParts
 
