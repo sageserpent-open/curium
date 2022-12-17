@@ -315,10 +315,8 @@ object ImmutableObjectStorageSpec {
         exclusiveLimit: Int
     ): Trials[LazyList[Int]] = {
       // NOTE: need that mapping of `distinct` as the lazy lists yielded by
-      // `several`
-      // can (and will because it does not terminate) contain duplicates even
-      // though
-      // the base choices are unique.
+      // `several` can (and will because it does not terminate) contain
+      // duplicates even though the base choices are unique.
       api
         .choose(0 until exclusiveLimit)
         .several[LazyList[Int]]
@@ -793,5 +791,49 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
             intersessionState
           )(tranches) shouldBe a[Right[_, _]]
         }
+      }
+
+  "yielding an object whose state is not stored" should "be supported" in
+    partGrowthLeadingToRootForkTrials(allowDuplicates = true)
+      .and(
+        api
+          .integers(0, maximumNumberOfPermutationsToChooseFrom - 1, 0)
+          .map(_.toDouble / maximumNumberOfPermutationsToChooseFrom)
+      )
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+        complexityLimit = complexityLimit
+      )
+      .supplyTo { (partGrowth, permutationScale) =>
+        val expectedParts = partGrowth.parts()
+
+        val intersessionState = new IntersessionState[TrancheId]
+
+        val tranches = new FakeTranches
+
+        val retrievalSession: Session[Vector[Part]] =
+          expectedParts.pure[Session]
+
+        // Let the retrieved parts escape the session...
+        val Right(retrievedParts) =
+          immutableObjectStorage.runToYieldResult(
+            retrievalSession,
+            intersessionState
+          )(
+            tranches
+          )
+
+        retrievedParts should contain theSameElementsInOrderAs expectedParts
+
+        retrievedParts.map(_.useProblematicClosure) should equal(
+          expectedParts.map(_.useProblematicClosure)
+        )
+
+        Inspectors.forAll(retrievedParts)(retrievedPart =>
+          Inspectors.forAll(expectedParts)(expectedPart =>
+            retrievedPart should not be theSameInstanceAs(expectedPart)
+          )
+        )
       }
 }
