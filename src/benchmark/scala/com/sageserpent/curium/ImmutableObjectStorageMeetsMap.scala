@@ -28,10 +28,21 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                 caffeine: Caffeine[Any, Any]
             ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
               caffeine
-                .maximumSize(30000L)
+                .maximumSize(10000L)
                 .build[TrancheId, CompletedOperation[TrancheId]]
             }
           }
+
+          val intersessionStateForQueries = new IntersessionState[TrancheId] {
+            protected override def finalCustomisationForTrancheCaching(
+                caffeine: Caffeine[Any, Any]
+            ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
+              caffeine
+                .maximumSize(100L)
+                .build[TrancheId, CompletedOperation[TrancheId]]
+            }
+          }
+
           val Right(initialTrancheId: TrancheId) = {
             val session: Session[TrancheId] =
               immutableObjectStorage.store(AvlMap.empty[Int, AvlSet[String]])
@@ -56,22 +67,26 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
           val lookbackLimit = 10000000
 
-          val batchSize = 200
+          val batchSize = 100
 
           for (step <- 0 until (1000000000, batchSize)) {
             if (0 < step && step % 5000 == 0) {
-              val currentTime = Deadline.now
+              val postUpdatesTime = Deadline.now
 
-              val duration = currentTime - startTime
+              val Right(contentsAtPreviousStep) =
+                immutableObjectStorage.runToYieldResult(
+                  immutableObjectStorage
+                    .retrieve[AvlMap[Int, AvlSet[String]]](trancheId)
+                    .map(_.get(step - 1).getOrElse(AvlSet.empty).toScalaSet),
+                  intersessionStateForQueries
+                )(tranches)
 
-              val Right(retrievedMap) = immutableObjectStorage.runToYieldResult(
-                immutableObjectStorage
-                  .retrieve[AvlMap[Int, AvlSet[String]]](trancheId),
-                intersessionState
-              )(tranches)
+              val duration = postUpdatesTime - startTime
+
+              val queryDuration = Deadline.now - postUpdatesTime
 
               println(
-                s"Step: $step, duration: ${duration.toMillis} milliseconds, minimum update duration: ${minimumUpdateDuration.toMillis} milliseconds, maximum update duration: ${maximumUpdateDuration.toMillis} milliseconds, average update duration: ${updateDurations
+                s"Step: $step, duration to before query: ${duration.toMillis} milliseconds, query duration: ${queryDuration.toMillis} milliseconds, minimum update duration: ${minimumUpdateDuration.toMillis} milliseconds, maximum update duration: ${maximumUpdateDuration.toMillis} milliseconds, average update duration: ${updateDurations
                     .map(_.toMillis)
                     .sum / updateDurations.size}, update durations: ${updateDurations
                     .map(_.toMillis)
@@ -80,7 +95,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                     .map { case (duration, group) =>
                       group.size -> duration
                     }
-                    .sortBy(_._1)} ,contents at previous step: ${retrievedMap.get(step - 1).getOrElse(AvlSet.empty).toScalaSet}"
+                    .sortBy(_._1)} ,contents at previous step: $contentsAtPreviousStep"
               )
 
               maximumUpdateDuration = Duration.Zero
