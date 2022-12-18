@@ -76,7 +76,7 @@ class ExampleSpec
           }
 
           // Let's verify what was stored.
-          {
+          val Right((initialMap, biggerMap)) = {
             // A session in which we retrieve the two objects from the previous
             // sessions and verify that they contain the correct data...
             val session = for {
@@ -85,20 +85,22 @@ class ExampleSpec
               biggerMap <- immutableObjectStorage
                 .retrieve[Map[Set[String], List[Int]]](secondTrancheId)
             } yield {
-              initialMap should be(
-                Map(Set("Huey, Duey, Louie") -> List(1, 2, 3, -1, -2, -3))
-              )
-              biggerMap should be(
-                Map(
-                  Set("Huey, Duey, Louie") -> List(1, 2, 3, -1, -2, -3),
-                  Set("Bystander")         -> List.empty
-                )
-              )
-            }: Unit
+              initialMap -> biggerMap
+            }
 
             immutableObjectStorage
-              .runForEffectsOnly(session, intersessionState)(tranches)
+              .runToYieldResult(session, intersessionState)(tranches)
           }
+
+          initialMap should be(
+            Map(Set("Huey, Duey, Louie") -> List(1, 2, 3, -1, -2, -3))
+          )
+          biggerMap should be(
+            Map(
+              Set("Huey, Duey, Louie") -> List(1, 2, 3, -1, -2, -3),
+              Set("Bystander")         -> List.empty
+            )
+          )
         }
       )
       .unsafeRunSync()
