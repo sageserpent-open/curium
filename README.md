@@ -264,5 +264,5 @@ Take a look at `FakeTranches` and `TranchesContracts` for guidance.
 
 True, but there is a notion of canonical object identity that subsumes Kryo's object identity; the canonical object
 identity spans across tranches - this allows the number of objects stored over a sequence of tranches to comfortably
-exceed `Integer.MAX_VALUE`. As long as the client code doesn't try to store more than many new objects into a single
+exceed `Integer.MAX_VALUE`. As long as the client code doesn't try to store more than that many new objects into a single
 tranche at a time, then you're good.
