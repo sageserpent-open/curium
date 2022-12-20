@@ -34,8 +34,8 @@ lazy val settings = Seq(
     "org.scalameter.ScalaMeterFramework"
   ),
   Benchmark / fork := true,
-  Benchmark / javaOptions += "-Xmx8G",
-  Benchmark / javaOptions += "-Xms8G",
+  Benchmark / javaOptions += "-Xmx14G",
+  Benchmark / javaOptions += "-Xms14G",
   Benchmark / javaOptions += "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005",
   Test / parallelExecution := false,
   publishMavenStyle        := true,

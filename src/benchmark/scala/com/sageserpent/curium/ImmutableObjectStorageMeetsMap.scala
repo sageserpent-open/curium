@@ -11,6 +11,7 @@ import com.sageserpent.curium.ImmutableObjectStorage.{
   Session
 }
 
+import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.duration.{Deadline, Duration}
@@ -28,7 +29,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                 caffeine: Caffeine[Any, Any]
             ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
               caffeine
-                .maximumSize(10000L)
+                .expireAfterWrite(100, TimeUnit.SECONDS)
                 .build[TrancheId, CompletedOperation[TrancheId]]
             }
           }
