@@ -165,28 +165,25 @@ object ImmutableObjectStorage {
     private val objectToReferenceIdCache
         : Cache[AnyRef, CanonicalObjectReferenceId[TrancheId]] =
       caffeineBuilder()
-        .executor(_.run())
         .weakKeys()
         .build[AnyRef, CanonicalObjectReferenceId[TrancheId]]()
 
     private val proxyToReferenceIdCache
         : Cache[AnyRef, CanonicalObjectReferenceId[TrancheId]] =
       caffeineBuilder()
-        .executor(_.run())
         .weakKeys()
         .build[AnyRef, CanonicalObjectReferenceId[TrancheId]]()
 
     private val referenceIdToProxyCache
         : Cache[CanonicalObjectReferenceId[TrancheId], AnyRef] =
       caffeineBuilder()
-        .executor(_.run())
         .weakValues()
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
     private val trancheIdToCompletedOperationCache
         : Cache[TrancheId, CompletedOperation[TrancheId]] =
       finalCustomisationForTrancheCaching(
-        caffeineBuilder().executor(_.run()).softValues
+        caffeineBuilder().softValues()
       )
 
     def noteReferenceIdForNonProxy(
