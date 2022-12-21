@@ -29,7 +29,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                 caffeine: Caffeine[Any, Any]
             ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
               caffeine
-                .expireAfterWrite(100, TimeUnit.SECONDS)
+                .expireAfterAccess(500, TimeUnit.MILLISECONDS)
                 .build[TrancheId, CompletedOperation[TrancheId]]
             }
           }
@@ -68,7 +68,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
           val lookbackLimit = 10000000
 
-          val batchSize = 30
+          val batchSize = 5
 
           for (step <- 0 until (1000000000, batchSize)) {
             if (0 < step && step % 5000 == 0) {
@@ -96,7 +96,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                     .map { case (duration, group) =>
                       group.size -> duration
                     }
-                    .sortBy(_._1)} ,contents at previous step: $contentsAtPreviousStep"
+                    .sortBy { case (count, duration) => count -> -duration }} ,contents at previous step: $contentsAtPreviousStep"
               )
 
               maximumUpdateDuration = Duration.Zero
