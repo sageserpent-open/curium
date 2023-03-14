@@ -152,8 +152,7 @@ object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
 
 ## Storage Backends ##
 
-There are two tranches implementations as of version 0.1.0 - both use an H2 database to store tranche data, one via
-RocksDB and the other via ScalikeJDBC, although neither technology is visible from the point of view of the tranches API
+There are two tranches implementations as of version 0.1.0 - one uses RocksDB and the other H2 via ScalikeJDBC, although neither technology is visible from the point of view of the tranches API
 used by Curium.
 
 The ScalikeJDBC implementation is currently the recommended one to use - class `H2ViaScalikeJdbcTranches`. Take a look
