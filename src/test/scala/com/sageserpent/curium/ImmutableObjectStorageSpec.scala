@@ -939,12 +939,12 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   "dealing with sets that increase in size" should "not cause problems" in {
     val intersessionState = new IntersessionState[TrancheId] {
-      override protected def finalCustomisationForTrancheCaching(
+      override protected def finalCustomisationForTopLevelObjectCaching(
           caffeine: Caffeine[Any, Any]
-      ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
+      ): Cache[TrancheId, Any] = {
         caffeine
           .maximumSize(100L)
-          .build[TrancheId, CompletedOperation[TrancheId]]
+          .build[TrancheId, Any]
       }
     }
 

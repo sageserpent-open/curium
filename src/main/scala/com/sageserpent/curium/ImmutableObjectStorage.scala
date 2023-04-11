@@ -31,6 +31,7 @@ import org.objenesis.strategy.StdInstantiatorStrategy
 
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.Modifier
+import java.util.concurrent.TimeUnit
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
 import scala.ref.WeakReference
@@ -47,16 +48,6 @@ object ImmutableObjectStorage {
   type EitherThrowableOr[X] = Either[Throwable, X]
   type Session[X]           = FreeT[Operation, EitherThrowableOr, X]
   val maximumObjectReferenceId: TrancheLocalObjectReferenceId = Int.MaxValue
-
-  trait CompletedOperation[TrancheId] {
-    def topLevelObject: Any
-
-    def objectWithReferenceId(
-        objectReferenceId: TrancheLocalObjectReferenceId
-    ): AnyRef
-
-    def payloadSize: Int
-  }
 
   trait Tranches[TrancheIdImplementation] {
     type TrancheId = TrancheIdImplementation
@@ -168,6 +159,12 @@ object ImmutableObjectStorage {
         .weakKeys()
         .build[AnyRef, CanonicalObjectReferenceId[TrancheId]]()
 
+    private val referenceIdToObjectCache
+        : Cache[CanonicalObjectReferenceId[TrancheId], AnyRef] =
+      caffeineBuilder()
+        .weakValues()
+        .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
+
     private val proxyToReferenceIdCache
         : Cache[AnyRef, CanonicalObjectReferenceId[TrancheId]] =
       caffeineBuilder()
@@ -180,10 +177,9 @@ object ImmutableObjectStorage {
         .weakValues()
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
-    private val trancheIdToCompletedOperationCache
-        : Cache[TrancheId, CompletedOperation[TrancheId]] =
-      finalCustomisationForTrancheCaching(
-        caffeineBuilder().softValues()
+    private val trancheIdToTopLevelObjectCache: Cache[TrancheId, Any] =
+      finalCustomisationForTopLevelObjectCaching(
+        caffeineBuilder()
       )
 
     def noteReferenceIdForNonProxy(
@@ -191,6 +187,7 @@ object ImmutableObjectStorage {
         objectReferenceId: CanonicalObjectReferenceId[TrancheId]
     ): Unit = {
       objectToReferenceIdCache.put(immutableObject, objectReferenceId)
+      referenceIdToObjectCache.put(objectReferenceId, immutableObject)
     }
 
     def referenceIdFor(
@@ -200,6 +197,9 @@ object ImmutableObjectStorage {
         .orElse(
           Option(objectToReferenceIdCache.getIfPresent(immutableObject))
         )
+
+    def nonProxyFor(objectReferenceId: CanonicalObjectReferenceId[TrancheId]) =
+      Option(referenceIdToObjectCache.getIfPresent(objectReferenceId))
 
     def noteProxy(
         objectReferenceId: CanonicalObjectReferenceId[TrancheId],
@@ -212,29 +212,29 @@ object ImmutableObjectStorage {
     def proxyFor(objectReferenceId: CanonicalObjectReferenceId[TrancheId]) =
       Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
-    def noteCompletedOperation(
+    def noteTopLevelObject(
         trancheId: TrancheId,
-        completedOperation: CompletedOperation[TrancheId]
+        topLevelObject: Any
     ): Unit = {
-      trancheIdToCompletedOperationCache.put(trancheId, completedOperation)
+      trancheIdToTopLevelObjectCache.put(trancheId, topLevelObject)
     }
 
-    def completedOperationFor(
+    def topLevelObjectFor(
         trancheId: TrancheId
-    ): Option[CompletedOperation[TrancheId]] =
-      Option(trancheIdToCompletedOperationCache.getIfPresent(trancheId))
+    ): Option[Any] =
+      Option(trancheIdToTopLevelObjectCache.getIfPresent(trancheId))
 
     def clear(): Unit = {
       objectToReferenceIdCache.invalidateAll()
       referenceIdToProxyCache.invalidateAll()
-      trancheIdToCompletedOperationCache.invalidateAll()
+      trancheIdToTopLevelObjectCache.invalidateAll()
     }
 
-    protected def finalCustomisationForTrancheCaching(
+    protected def finalCustomisationForTopLevelObjectCaching(
         caffeine: Caffeine[Any, Any]
-    ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
+    ): Cache[TrancheId, Any] = {
       caffeine
-        .build[TrancheId, CompletedOperation[TrancheId]]
+        .build[TrancheId, Any]
     }
   }
 
@@ -342,29 +342,23 @@ trait ImmutableObjectStorage[TrancheId] {
 
       def retrieveUnderlying(
           canonicalObjectReferenceId: CanonicalObjectReferenceId[TrancheId]
-      ): AnyRef = {
-        val (
-          trancheIdForExternalObjectReference,
-          trancheLocalObjectReferenceId
-        ) = canonicalObjectReferenceId
-
-        intersessionState
-          .completedOperationFor(trancheIdForExternalObjectReference)
-          .orElse {
-            val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
-            val Right(_) =
-              retrieveTrancheTopLevelObject(
-                trancheIdForExternalObjectReference,
-                placeholderClazzForTopLevelTrancheObject
-              )
-
-            intersessionState.completedOperationFor(
-              trancheIdForExternalObjectReference
+      ): AnyRef = intersessionState
+        .nonProxyFor(canonicalObjectReferenceId)
+        .orElse {
+          val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
+          val trancheIdForExternalObjectReference =
+            canonicalObjectReferenceId._1
+          val Right(_) =
+            retrieveTrancheTopLevelObject(
+              trancheIdForExternalObjectReference,
+              placeholderClazzForTopLevelTrancheObject
             )
-          }
-          .get
-          .objectWithReferenceId(trancheLocalObjectReferenceId)
-      }
+
+          intersessionState.nonProxyFor(
+            canonicalObjectReferenceId
+          )
+        }
+        .get
 
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
@@ -390,8 +384,7 @@ trait ImmutableObjectStorage[TrancheId] {
 
           case Retrieve(trancheId, clazz) =>
             intersessionState
-              .completedOperationFor(trancheId)
-              .map(_.topLevelObject)
+              .topLevelObjectFor(trancheId)
               .fold {
                 for {
                   topLevelObject <- retrieveTrancheTopLevelObject[X](
@@ -427,14 +420,7 @@ trait ImmutableObjectStorage[TrancheId] {
                 serializationFacade.fromBytes(tranche.payload)
               }
 
-            intersessionState.noteCompletedOperation(
-              trancheId,
-              new CompleteOperationImplementation(
-                deserialized,
-                trancheSpecificReferenceResolver,
-                tranche.payload.length
-              )
-            )
+            intersessionState.noteTopLevelObject(trancheId, deserialized)
 
             clazz.cast(deserialized)
           }.toEither
@@ -536,18 +522,6 @@ trait ImmutableObjectStorage[TrancheId] {
             : TrancheLocalObjectReferenceId =
           maximumObjectReferenceId - _interTrancheObjectReferenceIdTranslation
             .size()
-      }
-
-      class CompleteOperationImplementation(
-          override val topLevelObject: Any,
-          trancheSpecificReferenceResolver: AbstractTrancheSpecificReferenceResolver,
-          override val payloadSize: Int
-      ) extends CompletedOperation[TrancheId] {
-        override def objectWithReferenceId(
-            objectReferenceId: TrancheLocalObjectReferenceId
-        ): AnyRef =
-          trancheSpecificReferenceResolver
-            .objectWithReferenceId(objectReferenceId)
       }
 
       class AcquiredState(

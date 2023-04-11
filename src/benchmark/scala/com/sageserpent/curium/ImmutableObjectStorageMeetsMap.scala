@@ -6,7 +6,6 @@ import cats.effect.unsafe.implicits.global
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage.{
-  CompletedOperation,
   IntersessionState,
   Session
 }
@@ -25,22 +24,22 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
       .use(tranches =>
         IO {
           val intersessionState = new IntersessionState[TrancheId] {
-            protected override def finalCustomisationForTrancheCaching(
+            protected override def finalCustomisationForTopLevelObjectCaching(
                 caffeine: Caffeine[Any, Any]
-            ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
+            ): Cache[TrancheId, Any] = {
               caffeine
                 .expireAfterAccess(500, TimeUnit.MILLISECONDS)
-                .build[TrancheId, CompletedOperation[TrancheId]]
+                .build[TrancheId, Any]
             }
           }
 
           val intersessionStateForQueries = new IntersessionState[TrancheId] {
-            protected override def finalCustomisationForTrancheCaching(
+            protected override def finalCustomisationForTopLevelObjectCaching(
                 caffeine: Caffeine[Any, Any]
-            ): Cache[TrancheId, CompletedOperation[TrancheId]] = {
+            ): Cache[TrancheId, Any] = {
               caffeine
                 .maximumSize(100L)
-                .build[TrancheId, CompletedOperation[TrancheId]]
+                .build[TrancheId, Any]
             }
           }
 
