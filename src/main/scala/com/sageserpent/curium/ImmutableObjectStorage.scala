@@ -6,23 +6,14 @@ import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, Pool, Util}
-import com.esotericsoftware.kryo.{
-  Kryo,
-  KryoCopyable,
-  ReferenceResolver,
-  Registration
-}
-import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
+import com.esotericsoftware.kryo.{Kryo, KryoCopyable, ReferenceResolver, Registration}
+import com.github.benmanes.caffeine.cache.{Cache, Caffeine, Scheduler}
 import com.google.common.collect.{BiMap, BiMapFactory}
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
-import net.bytebuddy.implementation.bind.annotation.{
-  FieldValue,
-  Pipe,
-  RuntimeType
-}
+import net.bytebuddy.implementation.bind.annotation.{FieldValue, Pipe, RuntimeType}
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
@@ -156,30 +147,40 @@ object ImmutableObjectStorage {
     private val objectToReferenceIdCache
         : Cache[AnyRef, CanonicalObjectReferenceId[TrancheId]] =
       caffeineBuilder()
+        .scheduler(Scheduler.systemScheduler())
+        .executor(_.run())
         .weakKeys()
         .build[AnyRef, CanonicalObjectReferenceId[TrancheId]]()
 
     private val referenceIdToObjectCache
         : Cache[CanonicalObjectReferenceId[TrancheId], AnyRef] =
       caffeineBuilder()
-        .weakValues()
+        .scheduler(Scheduler.systemScheduler())
+        .executor(_.run())
+        .expireAfterWrite(1, TimeUnit.MINUTES)  // NASTY HACK - leave it here for now while experimenting.
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
     private val proxyToReferenceIdCache
         : Cache[AnyRef, CanonicalObjectReferenceId[TrancheId]] =
       caffeineBuilder()
+        .scheduler(Scheduler.systemScheduler())
+        .executor(_.run())
         .weakKeys()
         .build[AnyRef, CanonicalObjectReferenceId[TrancheId]]()
 
     private val referenceIdToProxyCache
         : Cache[CanonicalObjectReferenceId[TrancheId], AnyRef] =
       caffeineBuilder()
+        .scheduler(Scheduler.systemScheduler())
+        .executor(_.run())
         .weakValues()
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
     private val trancheIdToTopLevelObjectCache: Cache[TrancheId, Any] =
       finalCustomisationForTopLevelObjectCaching(
         caffeineBuilder()
+          .scheduler(Scheduler.systemScheduler())
+          .executor(_.run())
       )
 
     def noteReferenceIdForNonProxy(
@@ -226,6 +227,7 @@ object ImmutableObjectStorage {
 
     def clear(): Unit = {
       objectToReferenceIdCache.invalidateAll()
+      referenceIdToObjectCache.invalidateAll()
       referenceIdToProxyCache.invalidateAll()
       trancheIdToTopLevelObjectCache.invalidateAll()
     }
