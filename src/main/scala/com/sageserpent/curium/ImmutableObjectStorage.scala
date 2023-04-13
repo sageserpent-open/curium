@@ -6,14 +6,23 @@ import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, Pool, Util}
-import com.esotericsoftware.kryo.{Kryo, KryoCopyable, ReferenceResolver, Registration}
+import com.esotericsoftware.kryo.{
+  Kryo,
+  KryoCopyable,
+  ReferenceResolver,
+  Registration
+}
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine, Scheduler}
 import com.google.common.collect.{BiMap, BiMapFactory}
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
-import net.bytebuddy.implementation.bind.annotation.{FieldValue, Pipe, RuntimeType}
+import net.bytebuddy.implementation.bind.annotation.{
+  FieldValue,
+  Pipe,
+  RuntimeType
+}
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
@@ -157,7 +166,10 @@ object ImmutableObjectStorage {
       caffeineBuilder()
         .scheduler(Scheduler.systemScheduler())
         .executor(_.run())
-        .expireAfterWrite(1, TimeUnit.MINUTES)  // NASTY HACK - leave it here for now while experimenting.
+        .expireAfterWrite(
+          1,
+          TimeUnit.MINUTES
+        ) // NASTY HACK - leave it here for now while experimenting.
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
     private val proxyToReferenceIdCache
@@ -422,6 +434,8 @@ trait ImmutableObjectStorage[TrancheId] {
                 serializationFacade.fromBytes(tranche.payload)
               }
 
+            trancheSpecificReferenceResolver.noteTrancheId(trancheId)
+
             intersessionState.noteTopLevelObject(trancheId, deserialized)
 
             clazz.cast(deserialized)
@@ -506,6 +520,18 @@ trait ImmutableObjectStorage[TrancheId] {
           BiMapFactory.usingIdentityForInverse()
         protected var _numberOfLocalObjects: Int = 0
 
+        def noteTrancheId(trancheId: TrancheId): Unit = {
+          referenceIdToLocalObjectMap.forEach {
+            (objectReferenceId, immutableObject) =>
+              if (allowInterTrancheReferences(immutableObject)) {
+                intersessionState.noteReferenceIdForNonProxy(
+                  immutableObject,
+                  trancheId -> objectReferenceId
+                )
+              }
+          }
+        }
+
         def objectWithReferenceId(
             objectReferenceId: TrancheLocalObjectReferenceId
         ): AnyRef =
@@ -554,18 +580,6 @@ trait ImmutableObjectStorage[TrancheId] {
               TrancheId
             ]] =
           _interTrancheObjectReferenceIdTranslation.asScala.toMap
-
-        def noteTrancheId(trancheId: TrancheId): Unit = {
-          referenceIdToLocalObjectMap.forEach {
-            (objectReferenceId, immutableObject) =>
-              if (allowInterTrancheReferences(immutableObject)) {
-                intersessionState.noteReferenceIdForNonProxy(
-                  immutableObject,
-                  trancheId -> objectReferenceId
-                )
-              }
-          }
-        }
 
         override def getWrittenId(
             immutableObject: AnyRef
