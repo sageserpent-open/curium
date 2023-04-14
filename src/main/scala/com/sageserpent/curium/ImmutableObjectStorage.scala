@@ -342,14 +342,10 @@ trait ImmutableObjectStorage[TrancheId] {
       ): AnyRef = intersessionState
         .nonProxyFor(canonicalObjectReferenceId)
         .orElse {
-          val placeholderClazzForTopLevelTrancheObject = classOf[AnyRef]
           val trancheIdForExternalObjectReference =
             canonicalObjectReferenceId._1
           val Right(_) =
-            retrieveTrancheTopLevelObject(
-              trancheIdForExternalObjectReference,
-              placeholderClazzForTopLevelTrancheObject
-            )
+            loadTranche(trancheIdForExternalObjectReference)
 
           intersessionState.nonProxyFor(
             canonicalObjectReferenceId
@@ -387,22 +383,18 @@ trait ImmutableObjectStorage[TrancheId] {
                 }.toEither
 
               case None =>
-                for {
-                  topLevelObject <- retrieveTrancheTopLevelObject[X](
-                    trancheId,
-                    clazz
+                loadTranche(trancheId)
+                  .flatMap(topLevelObject =>
+                    Try {
+                      clazz.cast(topLevelObject)
+                    }.toEither
                   )
-                } yield {
-                  topLevelObjectsByTrancheId += (trancheId -> topLevelObject)
-                  topLevelObject
-                }
             }
         }
 
-      def retrieveTrancheTopLevelObject[X](
-          trancheId: TrancheId,
-          clazz: Class[X]
-      ): EitherThrowableOr[X] =
+      def loadTranche(
+          trancheId: TrancheId
+      ): EitherThrowableOr[Any] =
         for {
           tranche <- tranches.retrieveTranche(trancheId)
           result <- Try {
@@ -419,9 +411,11 @@ trait ImmutableObjectStorage[TrancheId] {
                 serializationFacade.fromBytes(tranche.payload)
               }
 
+            topLevelObjectsByTrancheId += (trancheId -> deserialized)
+
             trancheSpecificReferenceResolver.noteTrancheId(trancheId)
 
-            clazz.cast(deserialized)
+            deserialized
           }.toEither
         } yield result
 
