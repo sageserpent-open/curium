@@ -187,6 +187,13 @@ object ImmutableObjectStorage {
         .weakValues()
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
+
+    val trancheIdToStuffCache: Cache[TrancheId, (Any, ObjectLookup)] = caffeineBuilder()
+      .scheduler(Scheduler.systemScheduler())
+      .executor(_.run())
+      .maximumSize(1000) // NASTY HACK - leave it here for now while experimenting.
+      .build[TrancheId, (Any, ObjectLookup)]()
+
     def noteReferenceIdForNonProxy(
         immutableObject: AnyRef,
         objectReferenceId: CanonicalObjectReferenceId[TrancheId]
@@ -223,13 +230,6 @@ object ImmutableObjectStorage {
       objectToReferenceIdCache.invalidateAll()
       referenceIdToObjectCache.invalidateAll()
       referenceIdToProxyCache.invalidateAll()
-    }
-
-    protected def finalCustomisationForTopLevelObjectCaching(
-        caffeine: Caffeine[Any, Any]
-    ): Cache[TrancheId, Any] = {
-      caffeine
-        .build[TrancheId, Any]
     }
   }
 
@@ -358,9 +358,6 @@ trait ImmutableObjectStorage[TrancheId] {
       session: Session[Result],
       intersessionState: IntersessionState[TrancheId]
   )(tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
-    val topLevelObjectsByTrancheId
-        : mutable.Map[TrancheId, (Any, ObjectLookup)] = mutable.Map.empty
-
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
 
@@ -417,7 +414,7 @@ trait ImmutableObjectStorage[TrancheId] {
       def loadTranche(
           trancheId: TrancheId
       ): EitherThrowableOr[(Any, ObjectLookup)] =
-        topLevelObjectsByTrancheId.get(trancheId) match {
+        Option(intersessionState.trancheIdToStuffCache.getIfPresent(trancheId)) match {
           case Some(payload) => Right(payload)
 
           case None =>
@@ -437,7 +434,7 @@ trait ImmutableObjectStorage[TrancheId] {
                     serializationFacade.fromBytes(tranche.payload)
                   }
 
-                topLevelObjectsByTrancheId += (trancheId -> (topLevelObject, trancheSpecificReferenceResolver.objectLookup()))
+                intersessionState.trancheIdToStuffCache.put(trancheId, topLevelObject -> trancheSpecificReferenceResolver.objectLookup())
 
                 trancheSpecificReferenceResolver.noteTrancheId(trancheId)
 
@@ -689,12 +686,7 @@ trait ImmutableObjectStorage[TrancheId] {
       }
     }
 
-    try { session.foldMap(sessionInterpreter) }
-    finally {
-      // This really shouldn't be necessary....
-      topLevelObjectsByTrancheId.values.foreach{case (_, objectLookup: ObjectLookup) => objectLookup.clear()}
-      topLevelObjectsByTrancheId.clear()
-    }
+    session.foldMap(sessionInterpreter)
   }
 
   private def useReferences(clazz: Class[_]): Boolean =

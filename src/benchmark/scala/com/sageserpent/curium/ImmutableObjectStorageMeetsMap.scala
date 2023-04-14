@@ -23,25 +23,9 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
     tranchesResource
       .use(tranches =>
         IO {
-          val intersessionState = new IntersessionState[TrancheId] {
-            protected override def finalCustomisationForTopLevelObjectCaching(
-                caffeine: Caffeine[Any, Any]
-            ): Cache[TrancheId, Any] = {
-              caffeine
-                .expireAfterAccess(500, TimeUnit.MILLISECONDS)
-                .build[TrancheId, Any]
-            }
-          }
+          val intersessionState = new IntersessionState[TrancheId]
 
-          val intersessionStateForQueries = new IntersessionState[TrancheId] {
-            protected override def finalCustomisationForTopLevelObjectCaching(
-                caffeine: Caffeine[Any, Any]
-            ): Cache[TrancheId, Any] = {
-              caffeine
-                .maximumSize(100L)
-                .build[TrancheId, Any]
-            }
-          }
+          val intersessionStateForQueries = new IntersessionState[TrancheId]
 
           val Right(initialTrancheId: TrancheId) = {
             val session: Session[TrancheId] =
