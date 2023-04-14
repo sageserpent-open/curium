@@ -188,13 +188,6 @@ object ImmutableObjectStorage {
         .weakValues()
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
-    private val trancheIdToTopLevelObjectCache: Cache[TrancheId, Any] =
-      finalCustomisationForTopLevelObjectCaching(
-        caffeineBuilder()
-          .scheduler(Scheduler.systemScheduler())
-          .executor(_.run())
-      )
-
     def noteReferenceIdForNonProxy(
         immutableObject: AnyRef,
         objectReferenceId: CanonicalObjectReferenceId[TrancheId]
@@ -225,23 +218,10 @@ object ImmutableObjectStorage {
     def proxyFor(objectReferenceId: CanonicalObjectReferenceId[TrancheId]) =
       Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
-    def noteTopLevelObject(
-        trancheId: TrancheId,
-        topLevelObject: Any
-    ): Unit = {
-      trancheIdToTopLevelObjectCache.put(trancheId, topLevelObject)
-    }
-
-    def topLevelObjectFor(
-        trancheId: TrancheId
-    ): Option[Any] =
-      Option(trancheIdToTopLevelObjectCache.getIfPresent(trancheId))
-
     def clear(): Unit = {
       objectToReferenceIdCache.invalidateAll()
       referenceIdToObjectCache.invalidateAll()
       referenceIdToProxyCache.invalidateAll()
-      trancheIdToTopLevelObjectCache.invalidateAll()
     }
 
     protected def finalCustomisationForTopLevelObjectCaching(
@@ -348,6 +328,9 @@ trait ImmutableObjectStorage[TrancheId] {
 
       val notYetWritten = -1
 
+      val topLevelObjectsByTrancheId: mutable.Map[TrancheId, Any] =
+        mutable.Map.empty
+
       def decodePlaceholder(placeholderOrActualObject: AnyRef): AnyRef =
         placeholderOrActualObject match {
           case AssociatedValueForAlias(immutableObject) => immutableObject
@@ -397,21 +380,23 @@ trait ImmutableObjectStorage[TrancheId] {
             } yield trancheId
 
           case Retrieve(trancheId, clazz) =>
-            intersessionState
-              .topLevelObjectFor(trancheId)
-              .fold {
+            topLevelObjectsByTrancheId.get(trancheId) match {
+              case Some(topLevelObject) =>
+                Try {
+                  clazz.cast(topLevelObject)
+                }.toEither
+
+              case None =>
                 for {
                   topLevelObject <- retrieveTrancheTopLevelObject[X](
                     trancheId,
                     clazz
                   )
-                } yield topLevelObject
-
-              }(topLevelObject =>
-                Try {
-                  clazz.cast(topLevelObject)
-                }.toEither
-              )
+                } yield {
+                  topLevelObjectsByTrancheId += (trancheId -> topLevelObject)
+                  topLevelObject
+                }
+            }
         }
 
       def retrieveTrancheTopLevelObject[X](
@@ -435,8 +420,6 @@ trait ImmutableObjectStorage[TrancheId] {
               }
 
             trancheSpecificReferenceResolver.noteTrancheId(trancheId)
-
-            intersessionState.noteTopLevelObject(trancheId, deserialized)
 
             clazz.cast(deserialized)
           }.toEither
