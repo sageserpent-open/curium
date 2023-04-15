@@ -167,7 +167,7 @@ object ImmutableObjectStorage {
       caffeineBuilder()
         .scheduler(Scheduler.systemScheduler())
         .executor(_.run())
-        .expireAfterWrite(30, TimeUnit.SECONDS)
+        .weakValues()
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
     private val proxyToReferenceIdCache
