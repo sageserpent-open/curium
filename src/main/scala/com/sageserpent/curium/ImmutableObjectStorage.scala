@@ -6,14 +6,23 @@ import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, Pool, Util}
-import com.esotericsoftware.kryo.{Kryo, KryoCopyable, ReferenceResolver, Registration}
-import com.github.benmanes.caffeine.cache.{Cache, Caffeine, Scheduler}
+import com.esotericsoftware.kryo.{
+  Kryo,
+  KryoCopyable,
+  ReferenceResolver,
+  Registration
+}
+import com.github.benmanes.caffeine.cache.{Cache, Scheduler}
 import com.google.common.collect.{BiMap, BiMapFactory}
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
-import net.bytebuddy.implementation.bind.annotation.{FieldValue, Pipe, RuntimeType}
+import net.bytebuddy.implementation.bind.annotation.{
+  FieldValue,
+  Pipe,
+  RuntimeType
+}
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
@@ -158,7 +167,7 @@ object ImmutableObjectStorage {
       caffeineBuilder()
         .scheduler(Scheduler.systemScheduler())
         .executor(_.run())
-        .expireAfterWrite(20, TimeUnit.SECONDS)
+        .expireAfterWrite(30, TimeUnit.SECONDS)
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
     private val proxyToReferenceIdCache
@@ -177,12 +186,15 @@ object ImmutableObjectStorage {
         .weakValues()
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
-
-    val trancheIdToStuffCache: Cache[TrancheId, (Any, ObjectLookup)] = caffeineBuilder()
-      .scheduler(Scheduler.systemScheduler())
-      .executor(_.run())
-      .maximumSize(100) // NASTY HACK - leave it here for now while experimenting.
-      .build[TrancheId, (Any, ObjectLookup)]()
+    val trancheIdToStuffCache: Cache[TrancheId, (Any, ObjectLookup)] =
+      caffeineBuilder()
+        .scheduler(Scheduler.systemScheduler())
+        .executor(_.run())
+        .expireAfterWrite(
+          5,
+          TimeUnit.MINUTES
+        ) // NASTY HACK - leave it here for now while experimenting.
+        .build[TrancheId, (Any, ObjectLookup)]()
 
     def noteReferenceIdForNonProxy(
         immutableObject: AnyRef,
@@ -245,12 +257,6 @@ object ImmutableObjectStorage {
       Option(referenceIdToLocalObjectMap.get(objectReferenceId))
         .map(decodePlaceholder)
         .get
-
-    // NASTY HACK..
-    def clear(): Unit = {
-      referenceIdToLocalObjectMap.clear()
-    }
-
   }
 
   case class StandaloneObjectLookup(
@@ -389,7 +395,14 @@ trait ImmutableObjectStorage[TrancheId] {
                     trancheSpecificReferenceResolver.interTrancheObjectReferenceIdTranslation
                   )
                 )
-              _ = trancheSpecificReferenceResolver.noteTrancheId(trancheId)
+              _ = {
+                intersessionState.trancheIdToStuffCache.put(
+                  trancheId,
+                  immutableObject -> trancheSpecificReferenceResolver
+                    .objectLookup()
+                )
+                trancheSpecificReferenceResolver.noteTrancheId(trancheId)
+              }
             } yield trancheId
 
           case Retrieve(trancheId, clazz) =>
@@ -404,7 +417,9 @@ trait ImmutableObjectStorage[TrancheId] {
       def loadTranche(
           trancheId: TrancheId
       ): EitherThrowableOr[(Any, ObjectLookup)] =
-        Option(intersessionState.trancheIdToStuffCache.getIfPresent(trancheId)) match {
+        Option(
+          intersessionState.trancheIdToStuffCache.getIfPresent(trancheId)
+        ) match {
           case Some(payload) => Right(payload)
 
           case None =>
@@ -424,7 +439,11 @@ trait ImmutableObjectStorage[TrancheId] {
                     serializationFacade.fromBytes(tranche.payload)
                   }
 
-                intersessionState.trancheIdToStuffCache.put(trancheId, topLevelObject -> trancheSpecificReferenceResolver.objectLookup())
+                intersessionState.trancheIdToStuffCache.put(
+                  trancheId,
+                  topLevelObject -> trancheSpecificReferenceResolver
+                    .objectLookup()
+                )
 
                 trancheSpecificReferenceResolver.noteTrancheId(trancheId)
 
@@ -434,18 +453,22 @@ trait ImmutableObjectStorage[TrancheId] {
         }
 
       trait AbstractTrancheSpecificReferenceResolver
-        extends ReferenceResolver
+          extends ReferenceResolver
           with ObjectLookup {
         protected val _interTrancheObjectReferenceIdTranslation
-        : BiMap[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId[
-          TrancheId
-        ]] =
+            : BiMap[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId[
+              TrancheId
+            ]] =
           BiMapFactory.empty()
 
         protected val referenceIdToLocalObjectMap
-        : BiMap[TrancheLocalObjectReferenceId, AnyRef] =
+            : BiMap[TrancheLocalObjectReferenceId, AnyRef] =
           BiMapFactory.usingIdentityForInverse()
         protected var _numberOfLocalObjects: Int = 0
+
+        def objectLookup(): ObjectLookup = StandaloneObjectLookup(
+          referenceIdToLocalObjectMap
+        )
 
         def noteTrancheId(trancheId: TrancheId): Unit = {
           referenceIdToLocalObjectMap.forEach {
@@ -467,7 +490,7 @@ trait ImmutableObjectStorage[TrancheId] {
           storage.useReferences(clazz)
 
         protected def minimumInterTrancheObjectReferenceId
-        : TrancheLocalObjectReferenceId =
+            : TrancheLocalObjectReferenceId =
           maximumObjectReferenceId - _interTrancheObjectReferenceIdTranslation
             .size()
       }
@@ -514,23 +537,21 @@ trait ImmutableObjectStorage[TrancheId] {
 
         private def interTrancheObjectReferenceIdFor(
             canonicalReference: CanonicalObjectReferenceId[TrancheId]
-        ): TrancheLocalObjectReferenceId = {
-          val numberOfInterTrancheReferences =
-            _interTrancheObjectReferenceIdTranslation.size()
-
+        ): TrancheLocalObjectReferenceId =
           _interTrancheObjectReferenceIdTranslation
             .inverse()
             .computeIfAbsent(
-              canonicalReference,
-              _ => {
+              canonicalReference, {_ =>
                 require(
                   minimumInterTrancheObjectReferenceId > _numberOfLocalObjects
                 )
 
+                val numberOfInterTrancheReferences =
+                  _interTrancheObjectReferenceIdTranslation.size()
+
                 maximumObjectReferenceId - numberOfInterTrancheReferences
               }
             )
-        }
 
         override def addWrittenObject(
             immutableObject: AnyRef
@@ -580,8 +601,6 @@ trait ImmutableObjectStorage[TrancheId] {
         private val notImplementedError = new NotImplementedError(
           s"`${getClass.getSimpleName}` does not support writing operations."
         )
-
-        def objectLookup(): ObjectLookup = StandaloneObjectLookup(referenceIdToLocalObjectMap)
 
         override def nextReadId(
             clazz: Class[_]
@@ -765,55 +784,57 @@ trait ImmutableObjectStorage[TrancheId] {
     def superClazzAndInterfacesToProxy(
         clazz: Class[_]
     ): Option[SuperClazzAndInterfaces] =
-      superClazzAndInterfacesCache.get(
-        clazz,
-        { clazz =>
-          require(!isProxyClazz(clazz))
+      superClazzAndInterfacesCache.get(clazz, _superClazzAndInterfacesToProxy)
 
-          val clazzIsForAStandaloneOrSingletonObject = Try(
-            currentMirror
-              .reflectClass(currentMirror.classSymbol(clazz))
-              .symbol
-              .isModuleClass
-          ).recoverWith {
-            case _: ScalaReflectionException =>
-              Success(false)
-            case _: AssertionError =>
-              // TODO: finesse this - probably misusing the Scala reflection API
-              // here...
-              Success(false)
-          }.get
+    private def _superClazzAndInterfacesToProxy(
+        clazz: Class[_]
+    ): Option[SuperClazzAndInterfaces] = {
+      require(!isProxyClazz(clazz))
 
-          val clazzShouldNotBeProxiedAtAll =
-            clazzIsForAStandaloneOrSingletonObject ||
-              kryoClosureMarkerClazz.isAssignableFrom(clazz) || !useReferences(
-                clazz
-              ) || isExcludedFromBeingProxied(clazz)
+      val clazzIsForAStandaloneOrSingletonObject = Try(
+        currentMirror
+          .reflectClass(currentMirror.classSymbol(clazz))
+          .symbol
+          .isModuleClass
+      ).recoverWith {
+        case _: ScalaReflectionException =>
+          Success(false)
+        case _: AssertionError =>
+          // TODO: finesse this - probably misusing the Scala reflection API
+          // here...
+          Success(false)
+      }.get
 
-          if (!clazzShouldNotBeProxiedAtAll)
-            if (shouldNotBeProxiedAsItsOwnType(clazz))
-              if (canBeProxiedViaSuperTypes(clazz)) {
-                val superClazz = clazz.getSuperclass
-                if (shouldNotBeProxiedAsItsOwnType(superClazz))
-                  superClazzAndInterfacesToProxy(superClazz).map(
-                    superClazzAndInterfaces =>
-                      superClazzAndInterfaces.copy(
-                        interfaces =
-                          superClazzAndInterfaces.interfaces ++ clazz.getInterfaces
-                      )
+      val clazzShouldNotBeProxiedAtAll =
+        clazzIsForAStandaloneOrSingletonObject ||
+          kryoClosureMarkerClazz.isAssignableFrom(clazz) || !useReferences(
+            clazz
+          ) || isExcludedFromBeingProxied(clazz)
+
+      if (!clazzShouldNotBeProxiedAtAll)
+        if (shouldNotBeProxiedAsItsOwnType(clazz))
+          if (canBeProxiedViaSuperTypes(clazz)) {
+            val superClazz = clazz.getSuperclass
+            if (shouldNotBeProxiedAsItsOwnType(superClazz))
+              superClazzAndInterfacesToProxy(superClazz).map(
+                superClazzAndInterfaces =>
+                  superClazzAndInterfaces.copy(
+                    interfaces =
+                      superClazzAndInterfaces.interfaces ++ clazz.getInterfaces
                   )
-                else
-                  Some(
-                    SuperClazzAndInterfaces(
-                      clazz.getSuperclass,
-                      clazz.getInterfaces
-                    )
-                  )
-              } else None
-            else Some(SuperClazzAndInterfaces(clazz, Seq.empty))
-          else None
-        }
-      )
+              )
+            else
+              Some(
+                SuperClazzAndInterfaces(
+                  clazz.getSuperclass,
+                  clazz.getInterfaces
+                )
+              )
+          } else None
+        else Some(SuperClazzAndInterfaces(clazz, Seq.empty))
+      else None
+
+    }
 
     def canBeProxied(clazz: Class[_]) =
       superClazzAndInterfacesToProxy(clazz).isDefined
