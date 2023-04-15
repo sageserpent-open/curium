@@ -6,23 +6,14 @@ import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, Pool, Util}
-import com.esotericsoftware.kryo.{
-  Kryo,
-  KryoCopyable,
-  ReferenceResolver,
-  Registration
-}
+import com.esotericsoftware.kryo.{Kryo, KryoCopyable, ReferenceResolver, Registration}
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine, Scheduler}
 import com.google.common.collect.{BiMap, BiMapFactory}
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
-import net.bytebuddy.implementation.bind.annotation.{
-  FieldValue,
-  Pipe,
-  RuntimeType
-}
+import net.bytebuddy.implementation.bind.annotation.{FieldValue, Pipe, RuntimeType}
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
@@ -31,6 +22,7 @@ import org.objenesis.strategy.StdInstantiatorStrategy
 
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.Modifier
+import java.util.concurrent.TimeUnit
 import java.util.{Map => JavaMap}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
@@ -166,9 +158,7 @@ object ImmutableObjectStorage {
       caffeineBuilder()
         .scheduler(Scheduler.systemScheduler())
         .executor(_.run())
-        .maximumSize(
-          10000
-        ) // NASTY HACK - leave it here for now while experimenting.
+        .expireAfterWrite(20, TimeUnit.SECONDS)
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
     private val proxyToReferenceIdCache
@@ -191,7 +181,7 @@ object ImmutableObjectStorage {
     val trancheIdToStuffCache: Cache[TrancheId, (Any, ObjectLookup)] = caffeineBuilder()
       .scheduler(Scheduler.systemScheduler())
       .executor(_.run())
-      .maximumSize(1000) // NASTY HACK - leave it here for now while experimenting.
+      .maximumSize(100) // NASTY HACK - leave it here for now while experimenting.
       .build[TrancheId, (Any, ObjectLookup)]()
 
     def noteReferenceIdForNonProxy(
