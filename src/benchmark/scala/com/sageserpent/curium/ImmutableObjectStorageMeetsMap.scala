@@ -3,7 +3,7 @@ package com.sageserpent.curium
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import com.sageserpent.americium.randomEnrichment._
-import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session}
+import com.sageserpent.curium.ImmutableObjectStorage.Session
 
 import scala.annotation.tailrec
 import scala.collection.immutable.{AbstractMap, AbstractSet}
@@ -18,16 +18,18 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
     tranchesResource
       .use(tranches =>
         IO {
-          val intersessionState = new IntersessionState[TrancheId]
+          val immutableObjectStorage =
+            ImmutableObjectStorage(configuration, tranches)
 
-          val intersessionStateForQueries = new IntersessionState[TrancheId]
+          val immutableObjectStorageForQueries =
+            ImmutableObjectStorage(configuration, tranches)
 
           val Right(initialTrancheId: TrancheId) = {
             val session: Session[TrancheId] =
               immutableObjectStorage.store(Map.empty[Int, Set[String]])
 
             immutableObjectStorage
-              .runToYieldTrancheId(session, intersessionState)(tranches)
+              .runToYieldTrancheId(session)
           }
 
           val randomBehaviour = new Random(53278953)
@@ -56,9 +58,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                 immutableObjectStorage.runToYieldResult(
                   immutableObjectStorage
                     .retrieve[Map[Int, Set[String]]](trancheId)
-                    .map(_.get(step - 1).getOrElse(Set.empty)),
-                  intersessionStateForQueries
-                )(tranches)
+                    .map(_.get(step - 1).getOrElse(Set.empty)))
 
               val duration = postUpdatesTime - startTime
 
@@ -130,7 +130,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
               val updateStartTime = Deadline.now
 
               trancheId = immutableObjectStorage
-                .runToYieldTrancheId(session, intersessionState)(tranches)
+                .runToYieldTrancheId(session)
                 .right
                 .get
 
@@ -159,8 +159,8 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
     evaluate(seed, 0)
   }
 
-  object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
-    override protected val tranchesImplementationName: String =
+  object configuration extends ImmutableObjectStorage.Configuration {
+    override val tranchesImplementationName: String =
       classOf[RocksDbTranches].getSimpleName
 
     override def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =

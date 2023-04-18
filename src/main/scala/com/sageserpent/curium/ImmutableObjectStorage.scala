@@ -144,7 +144,124 @@ object ImmutableObjectStorage {
       s"TrancheOfData(payload hash: ${MurmurHash3.bytesHash(payload)}, inter-tranche object reference id translation: $interTrancheObjectReferenceIdTranslation)"
   }
 
-  class IntersessionState[TrancheId] {
+  object standaloneExemplarToEnticeScalaKyro
+
+  case class AssociatedValueForAlias(immutableObject: AnyRef) extends AnyRef
+
+  def decodePlaceholder(placeholderOrActualObject: AnyRef): AnyRef =
+    placeholderOrActualObject match {
+      case AssociatedValueForAlias(immutableObject) => immutableObject
+      case immutableObject @ _                      => immutableObject
+    }
+
+  trait ObjectLookup {
+    protected val referenceIdToLocalObjectMap: JavaMap[
+      TrancheLocalObjectReferenceId,
+      AnyRef
+    ]
+
+    def objectWithReferenceId(
+        objectReferenceId: TrancheLocalObjectReferenceId
+    ): AnyRef =
+      Option(referenceIdToLocalObjectMap.get(objectReferenceId))
+        .map(decodePlaceholder)
+        .get
+  }
+
+  case class StandaloneObjectLookup(
+      override protected val referenceIdToLocalObjectMap: JavaMap[
+        TrancheLocalObjectReferenceId,
+        AnyRef
+      ]
+  ) extends ObjectLookup
+
+  trait Configuration {
+    val tranchesImplementationName: String
+    def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = false
+
+    // NOTE: this is a potential danger area when an override is defined -
+    // returning true indicates that all uses of a proxied object can be
+    // performed via the supertype and / or interfaces. Obvious examples where
+    // this is not true would include a final class that doesn't extend an
+    // interface and only has 'AnyRef' as a superclass - how would client code
+    // do something useful with it? Scala case classes that are declared as
+    // final and form a union type hierarchy that pattern matching is performed
+    // on will also fail. The reason why this exists at all is to provide as an
+    // escape hatch for the multitude of Scala case classes declared as final
+    // that are actually used as part of an object-oriented interface hierarchy
+    // - the collection classes being the main offenders in that regard.
+    def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean = false
+  }
+
+  def apply[TrancheId](
+      configuration: Configuration,
+      tranches: Tranches[TrancheId]
+  ): ImmutableObjectStorage[TrancheId] =
+    new ImmutableObjectStorage(configuration, tranches)
+}
+
+class ImmutableObjectStorage[TrancheId](
+    configuration: ImmutableObjectStorage.Configuration,
+    tranches: ImmutableObjectStorage.Tranches[TrancheId]
+) {
+  storage =>
+
+  import ImmutableObjectStorage._
+
+  private val sessionReferenceResolver
+      : DynamicVariable[Option[ReferenceResolver]] =
+    new DynamicVariable(None)
+  private val kryoPool: Pool[Kryo] =
+    new Pool[Kryo](true, false) {
+      override def create(): Kryo = {
+        val result = new ScalaKryo(
+          classResolver = new DefaultClassResolver,
+          referenceResolver = referenceResolver
+        ) {
+          override def getRegistration(clazz: Class[_]): Registration =
+            super.getRegistration(proxySupport.nonProxyClazzFor(clazz))
+        }
+
+        // NASTY HACK - treat `ScalaKryo` as a whitebox and pull out the shared
+        // instance of `ScalaObjectSerializer` that it maintains. Then tell it
+        // that, yes, it can perform a copy by simply yielding the original
+        // immutable instance. Finally, submit a pull request to:
+        // https://github.com/altoo-ag/akka-kryo-serialization .
+        result
+          .getDefaultSerializer(
+            classOf[standaloneExemplarToEnticeScalaKyro.type]
+          )
+          .setImmutable(true)
+
+        result.setRegistrationRequired(false)
+        result.setInstantiatorStrategy(
+          new org.objenesis.strategy.StdInstantiatorStrategy
+        )
+
+        result.register(
+          proxySupport.kryoClosureMarkerClazz,
+          new ClosureCleaningSerializer()
+        )
+
+        result.setAutoReset(
+          true
+        ) // Kryo should reset its *own* state (but not the states of the reference resolvers) after a tranche has been stored or retrieved.
+
+        result
+      }
+    }
+
+  private val inputPool: Pool[Input] = new Pool[Input](true, false) {
+    override def create(): Input = new Input()
+  }
+
+  private val outputPool: Pool[Output] = new Pool[Output](true, false) {
+    override def create(): Output = new Output(new ByteArrayOutputStream())
+  }
+
+  val intersessionState: IntersessionState = new IntersessionState
+
+  class IntersessionState {
     private val objectToReferenceIdCache
         : Cache[AnyRef, CanonicalObjectReferenceId[TrancheId]] =
       caffeineBuilder()
@@ -211,93 +328,8 @@ object ImmutableObjectStorage {
     }
   }
 
-  object standaloneExemplarToEnticeScalaKyro
-
-  case class AssociatedValueForAlias(immutableObject: AnyRef) extends AnyRef
-
-  def decodePlaceholder(placeholderOrActualObject: AnyRef): AnyRef =
-    placeholderOrActualObject match {
-      case AssociatedValueForAlias(immutableObject) => immutableObject
-      case immutableObject @ _                      => immutableObject
-    }
-
-  trait ObjectLookup {
-    protected val referenceIdToLocalObjectMap: JavaMap[
-      TrancheLocalObjectReferenceId,
-      AnyRef
-    ]
-
-    def objectWithReferenceId(
-        objectReferenceId: TrancheLocalObjectReferenceId
-    ): AnyRef =
-      Option(referenceIdToLocalObjectMap.get(objectReferenceId))
-        .map(decodePlaceholder)
-        .get
-  }
-
-  case class StandaloneObjectLookup(
-      override protected val referenceIdToLocalObjectMap: JavaMap[
-        TrancheLocalObjectReferenceId,
-        AnyRef
-      ]
-  ) extends ObjectLookup
-}
-
-trait ImmutableObjectStorage[TrancheId] {
-  storage =>
-
-  import ImmutableObjectStorage._
-
-  protected val tranchesImplementationName: String
-  private val sessionReferenceResolver
-      : DynamicVariable[Option[ReferenceResolver]] =
-    new DynamicVariable(None)
-  private val kryoPool: Pool[Kryo] =
-    new Pool[Kryo](true, false) {
-      override def create(): Kryo = {
-        val result = new ScalaKryo(
-          classResolver = new DefaultClassResolver,
-          referenceResolver = referenceResolver
-        ) {
-          override def getRegistration(clazz: Class[_]): Registration =
-            super.getRegistration(proxySupport.nonProxyClazzFor(clazz))
-        }
-
-        // NASTY HACK - treat `ScalaKryo` as a whitebox and pull out the shared
-        // instance of `ScalaObjectSerializer` that it maintains. Then tell it
-        // that, yes, it can perform a copy by simply yielding the original
-        // immutable instance. Finally, submit a pull request to:
-        // https://github.com/altoo-ag/akka-kryo-serialization .
-        result
-          .getDefaultSerializer(
-            classOf[standaloneExemplarToEnticeScalaKyro.type]
-          )
-          .setImmutable(true)
-
-        result.setRegistrationRequired(false)
-        result.setInstantiatorStrategy(
-          new org.objenesis.strategy.StdInstantiatorStrategy
-        )
-
-        result.register(
-          proxySupport.kryoClosureMarkerClazz,
-          new ClosureCleaningSerializer()
-        )
-
-        result.setAutoReset(
-          true
-        ) // Kryo should reset its *own* state (but not the states of the reference resolvers) after a tranche has been stored or retrieved.
-
-        result
-      }
-    }
-
-  private val inputPool: Pool[Input] = new Pool[Input](true, false) {
-    override def create(): Input = new Input()
-  }
-
-  private val outputPool: Pool[Output] = new Pool[Output](true, false) {
-    override def create(): Output = new Output(new ByteArrayOutputStream())
+  def clear(): Unit = {
+    intersessionState.clear()
   }
 
   def store[X](immutableObject: X): Session[TrancheId] =
@@ -309,27 +341,23 @@ trait ImmutableObjectStorage[TrancheId] {
     )
 
   def runToYieldTrancheIds(
-      session: Session[Vector[TrancheId]],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Vector[TrancheId]] =
-    unsafeRun(session, intersessionState)
+      session: Session[Vector[TrancheId]]
+  ): EitherThrowableOr[Vector[TrancheId]] =
+    unsafeRun(session)
 
   def runToYieldTrancheId(
-      session: Session[TrancheId],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[TrancheId] =
-    unsafeRun(session, intersessionState)
+      session: Session[TrancheId]
+  ): EitherThrowableOr[TrancheId] =
+    unsafeRun(session)
 
   def runForEffectsOnly(
-      session: Session[Unit],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Unit] =
-    unsafeRun(session, intersessionState)
+      session: Session[Unit]
+  ): EitherThrowableOr[Unit] =
+    unsafeRun(session)
 
   private def unsafeRun[Result](
-      session: Session[Result],
-      intersessionState: IntersessionState[TrancheId]
-  )(tranches: Tranches[TrancheId]): EitherThrowableOr[Result] = {
+      session: Session[Result]
+  ): EitherThrowableOr[Result] = {
     object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
       thisSessionInterpreter =>
 
@@ -682,27 +710,9 @@ trait ImmutableObjectStorage[TrancheId] {
     )
 
   def runToYieldResult[Result](
-      session: Session[Result],
-      intersessionState: IntersessionState[TrancheId]
-  ): Tranches[TrancheId] => EitherThrowableOr[Result] =
-    (unsafeRun(session, intersessionState)(_)).andThen(result =>
-      result.map(serializationFacade.copy)
-    )
-
-  protected def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = false
-
-  // NOTE: this is a potential danger area when an override is defined -
-  // returning true indicates that all uses of a proxied object can be performed
-  // via the supertype and / or interfaces. Obvious examples where this is not
-  // true would include a final class that doesn't extend an interface and only
-  // has 'AnyRef' as a superclass - how would client code do something useful
-  // with it? Scala case classes that are declared as final and form a union
-  // type hierarchy that pattern matching is performed on will also fail. The
-  // reason why this exists at all is to provide as an escape hatch for the
-  // multitude of Scala case classes declared as final that are actually used as
-  // part of an object-oriented interface hierarchy - the collection classes
-  // being the main offenders in that regard.
-  protected def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean = false
+      session: Session[Result]
+  ): EitherThrowableOr[Result] =
+    unsafeRun(session).map(serializationFacade.copy)
 
   case class Store[X](immutableObject: X) extends Operation[TrancheId]
 
@@ -751,7 +761,7 @@ trait ImmutableObjectStorage[TrancheId] {
       caffeineBuilder().build()
     val proxiedClazzCache: Cache[Class[_], Class[_]] = caffeineBuilder().build()
     private val proxySuffix =
-      s"delayedLoadProxyFor${tranchesImplementationName}"
+      s"delayedLoadProxyFor${configuration.tranchesImplementationName}"
     private val superClazzBag: mutable.Map[TypeDescription, Int] =
       mutable.Map.empty
 
@@ -783,11 +793,11 @@ trait ImmutableObjectStorage[TrancheId] {
         clazzIsForAStandaloneOrSingletonObject ||
           kryoClosureMarkerClazz.isAssignableFrom(clazz) || !useReferences(
             clazz
-          ) || isExcludedFromBeingProxied(clazz)
+          ) || configuration.isExcludedFromBeingProxied(clazz)
 
       if (!clazzShouldNotBeProxiedAtAll)
         if (shouldNotBeProxiedAsItsOwnType(clazz))
-          if (canBeProxiedViaSuperTypes(clazz)) {
+          if (configuration.canBeProxiedViaSuperTypes(clazz)) {
             val superClazz = clazz.getSuperclass
             if (shouldNotBeProxiedAsItsOwnType(superClazz))
               superClazzAndInterfacesToProxy(superClazz).map(

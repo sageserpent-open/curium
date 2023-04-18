@@ -260,8 +260,7 @@ object ImmutableObjectStorageSpec {
       }
 
     def storeViaMultipleSessions(
-        intersessionState: IntersessionState[TrancheId],
-        tranches: FakeTranches
+        immutableObjectStorage: ImmutableObjectStorage[TrancheId]
     ): Vector[TrancheId] = {
       val chunks: Seq[Vector[PartGrowthStep]] =
         thingsInChunks(chunkSizes, steps)
@@ -286,10 +285,7 @@ object ImmutableObjectStorageSpec {
 
         val Right(trancheIdsForChunk) =
           immutableObjectStorage
-            .runToYieldTrancheIds(
-              retrievalAndStorageSession,
-              intersessionState
-            )(tranches)
+            .runToYieldTrancheIds(retrievalAndStorageSession)
 
         trancheIdsSoFar ++= trancheIdsForChunk
       }
@@ -310,17 +306,17 @@ object ImmutableObjectStorageSpec {
 
   case object theOneAndOnlyStandaloneObjectExample
 
-  object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
-    override protected val tranchesImplementationName: String =
+  object configuration extends ImmutableObjectStorage.Configuration {
+    override val tranchesImplementationName: String =
       classOf[FakeTranches].getSimpleName
   }
 
-  object immutableObjectStorageForSetsAndMaps
-      extends ImmutableObjectStorage[TrancheId] {
-    override protected val tranchesImplementationName: String =
+  object configurationForSetsAndMaps
+      extends ImmutableObjectStorage.Configuration {
+    override val tranchesImplementationName: String =
       s"${classOf[FakeTranches].getSimpleName}_specialised_for_sets_and_maps"
 
-    override protected def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
+    override def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
       // What goes on behind the scenes for the `HashSet` and `HashMap`
       // implementations.
       (clazz.getName contains "BitmapIndexed") || (clazz.getName contains "HashCollision") ||
@@ -395,17 +391,17 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
 
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
+
         val trancheIds =
-          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+          partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         trancheIds should contain theSameElementsAs trancheIds.toSet
 
         tranches.tranchesById.keys should contain theSameElementsAs trancheIds
-
       }
 
   private val maximumNumberOfPermutationsToChooseFrom = 200
@@ -425,12 +421,13 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       .supplyTo { (partGrowth, permutationScale) =>
         val expectedParts = partGrowth.parts()
 
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
 
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
+
         val trancheIds =
-          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+          partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         val permutedIndicesCandidates = Vector
           .tabulate(trancheIds.size)(identity)
@@ -481,12 +478,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           }
 
         val result =
-          immutableObjectStorage.runForEffectsOnly(
-            retrievalSession,
-            intersessionState
-          )(
-            tranches
-          )
+          immutableObjectStorage.runForEffectsOnly(retrievalSession)
 
         result shouldBe a[Right[_, _]]
       }
@@ -506,12 +498,13 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       .supplyTo { (partGrowth, permutationScale) =>
         val expectedParts = partGrowth.parts()
 
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
 
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
+
         val trancheIds =
-          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+          partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         val permutedIndicesCandidates = Vector
           .tabulate(trancheIds.size)(identity)
@@ -545,18 +538,13 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
         // Let the retrieved parts escape the session...
         val Right(retrievedParts) =
-          immutableObjectStorage.runToYieldResult(
-            retrievalSession,
-            intersessionState
-          )(
-            tranches
-          )
+          immutableObjectStorage.runToYieldResult(retrievalSession)
 
         // ... here's the twist - pull the rug out from under `retrievedParts`.
         // This simulates client code holding on to and then using items that
         // escape a session, when the machinery backing any proxied references
         // has been torn down in the meantime.
-        intersessionState.clear()
+        immutableObjectStorage.clear()
         tranches.clear()
 
         retrievedParts should contain theSameElementsInOrderAs expectedParts
@@ -587,12 +575,13 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       .supplyTo { (partGrowth, permutationScale) =>
         val expectedParts = partGrowth.parts()
 
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
 
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
+
         val trancheIds =
-          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+          partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         val permutedIndicesCandidates = Vector
           .tabulate(trancheIds.size)(identity)
@@ -630,12 +619,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
         // Let the retrieved parts escape the session...
         val Right(retrievedCopiedParts) =
-          immutableObjectStorage.runToYieldResult(
-            retrievalSession,
-            intersessionState
-          )(
-            tranches
-          )
+          immutableObjectStorage.runToYieldResult(retrievalSession)
 
         retrievedCopiedParts should contain theSameElementsInOrderAs expectedParts
 
@@ -658,12 +642,13 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
 
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
+
         val trancheIds =
-          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+          partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         val referenceParts = partGrowth.parts()
 
@@ -683,10 +668,8 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
             ) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
           } yield ()
 
-          immutableObjectStorage.runForEffectsOnly(
-            samplingSession,
-            intersessionState
-          )(tranches) shouldBe a[Left[_, _]]
+          immutableObjectStorage
+            .runForEffectsOnly(samplingSession) shouldBe a[Left[_, _]]
         }
       }
 
@@ -698,12 +681,13 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
 
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
+
         val trancheIds =
-          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+          partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         for (idOfCorruptedTranche <- trancheIds) {
           tranches.tranchesById(idOfCorruptedTranche) = {
@@ -717,21 +701,22 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
           val rootTrancheId = trancheIds.last
 
+          val freshImmutableObjectStorage =
+            ImmutableObjectStorage(configuration, tranches)
+
           val samplingSessionWithCorruptedTranche: Session[Unit] = for {
-            _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (
-              part =>
-                FreeT.liftT(Try {
-                  part.hashCode
-                }.toEither)
+            _ <- freshImmutableObjectStorage.retrieve[Fork](
+              rootTrancheId
+            ) flatMap (part =>
+              FreeT.liftT(Try {
+                part.hashCode
+              }.toEither)
             ) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
           } yield ()
 
-          val freshIntersessionState = new IntersessionState[TrancheId]
-
-          immutableObjectStorage.runForEffectsOnly(
-            samplingSessionWithCorruptedTranche,
-            freshIntersessionState
-          )(tranches) shouldBe a[Left[_, _]]
+          freshImmutableObjectStorage.runForEffectsOnly(
+            samplingSessionWithCorruptedTranche
+          ) shouldBe a[Left[_, _]]
         }
       }
 
@@ -743,33 +728,35 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
 
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
+
         val trancheIds =
-          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+          partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         for (idOfMissingTranche <- trancheIds) {
           tranches.purgeTranche(idOfMissingTranche)
 
           val rootTrancheId = trancheIds.last
 
+          val freshImmutableObjectStorage =
+            ImmutableObjectStorage(configuration, tranches)
+
           val samplingSessionWithMissingTranche: Session[Unit] = for {
-            _ <- immutableObjectStorage.retrieve[Fork](rootTrancheId) flatMap (
-              part =>
-                FreeT.liftT(Try {
-                  part.hashCode
-                }.toEither)
+            _ <- freshImmutableObjectStorage.retrieve[Fork](
+              rootTrancheId
+            ) flatMap (part =>
+              FreeT.liftT(Try {
+                part.hashCode
+              }.toEither)
             ) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
           } yield ()
 
-          val freshIntersessionState = new IntersessionState[TrancheId]
-
-          immutableObjectStorage.runForEffectsOnly(
-            samplingSessionWithMissingTranche,
-            freshIntersessionState
-          )(tranches) shouldBe a[Left[_, _]]
+          freshImmutableObjectStorage.runForEffectsOnly(
+            samplingSessionWithMissingTranche
+          ) shouldBe a[Left[_, _]]
         }
       }
 
@@ -781,17 +768,17 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
 
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
+
         val Right(alienTrancheId) = immutableObjectStorage.runToYieldTrancheId(
-          immutableObjectStorage.store(alien),
-          intersessionState
-        )(tranches)
+          immutableObjectStorage.store(alien)
+        )
 
         val nonAlienTrancheIds =
-          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+          partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         for (idOfIncorrectlyTypedTranche <- nonAlienTrancheIds) {
           tranches.tranchesById(idOfIncorrectlyTypedTranche) =
@@ -799,9 +786,12 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
           val rootTrancheId = nonAlienTrancheIds.last
 
+          val freshImmutableObjectStorage =
+            ImmutableObjectStorage(configuration, tranches)
+
           val samplingSessionWithTrancheForIncompatibleType: Session[Unit] =
             for {
-              _ <- immutableObjectStorage.retrieve[Fork](
+              _ <- freshImmutableObjectStorage.retrieve[Fork](
                 rootTrancheId
               ) flatMap (part =>
                 FreeT.liftT(Try {
@@ -810,12 +800,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
               ) // Force all proxies to load (and therefore fail), as the hash calculation traverses the part structure.
             } yield ()
 
-          val freshIntersessionState = new IntersessionState[TrancheId]
-
-          immutableObjectStorage.runForEffectsOnly(
-            samplingSessionWithTrancheForIncompatibleType,
-            freshIntersessionState
-          )(tranches) shouldBe a[Left[_, _]]
+          freshImmutableObjectStorage.runForEffectsOnly(
+            samplingSessionWithTrancheForIncompatibleType
+          ) shouldBe a[Left[_, _]]
         }
       }
 
@@ -828,9 +815,10 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       )
       .supplyTo { partGrowth =>
         val isolatedSpokeTranche = {
-          val intersessionState = new IntersessionState[TrancheId]
-
           val isolatedSpokeTranches = new FakeTranches
+
+          val immutableObjectStorage =
+            ImmutableObjectStorage(configuration, isolatedSpokeTranches)
 
           val root = partGrowth.parts().last
 
@@ -839,19 +827,19 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
           val Right(isolatedTrancheId) =
             immutableObjectStorage.runToYieldTrancheId(
-              isolatedSpokeStorageSession,
-              intersessionState
-            )(isolatedSpokeTranches)
+              isolatedSpokeStorageSession
+            )
 
           isolatedSpokeTranches.tranchesById(isolatedTrancheId)
         }
 
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
 
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
+
         val trancheIds =
-          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+          partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         val rootTrancheId = trancheIds.last
 
@@ -868,12 +856,13 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
 
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
+
         val trancheIds =
-          partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+          partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         for (sampleTrancheId <- trancheIds) {
           val samplingSession: Session[Unit] = for {
@@ -887,10 +876,8 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
             retrievedPartTakeTwo should be theSameInstanceAs retrievedPartTakeOne
           }
 
-          immutableObjectStorage.runForEffectsOnly(
-            samplingSession,
-            intersessionState
-          )(tranches) shouldBe a[Right[_, _]]
+          immutableObjectStorage
+            .runForEffectsOnly(samplingSession) shouldBe a[Right[_, _]]
         }
       }
 
@@ -909,21 +896,17 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       .supplyTo { (partGrowth, permutationScale) =>
         val expectedParts = partGrowth.parts()
 
-        val intersessionState = new IntersessionState[TrancheId]
-
         val tranches = new FakeTranches
+
+        val immutableObjectStorage =
+          ImmutableObjectStorage(configuration, tranches)
 
         val retrievalSession: Session[Vector[Part]] =
           expectedParts.pure[Session]
 
         // Let the retrieved parts escape the session...
         val Right(retrievedParts) =
-          immutableObjectStorage.runToYieldResult(
-            retrievalSession,
-            intersessionState
-          )(
-            tranches
-          )
+          immutableObjectStorage.runToYieldResult(retrievalSession)
 
         retrievedParts should contain theSameElementsInOrderAs expectedParts
 
@@ -939,19 +922,20 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       }
 
   "dealing with sets that increase in size" should "not cause problems" in {
-    val intersessionState = new IntersessionState[TrancheId]
-
     val tranches = new FakeTranches
+
+    val immutableObjectStorage =
+      ImmutableObjectStorage(configurationForSetsAndMaps, tranches)
 
     val numberOfIterations = 1400
 
     val initialSession = for {
-      trancheId <- immutableObjectStorageForSetsAndMaps.store(Set.empty)
+      trancheId <- immutableObjectStorage.store(Set.empty)
     } yield trancheId
 
     val Right(initialTrancheIdForEmptySet) =
-      immutableObjectStorageForSetsAndMaps
-        .runToYieldTrancheId(initialSession, intersessionState)(tranches)
+      immutableObjectStorage
+        .runToYieldTrancheId(initialSession)
 
     class StatefulUpdateProcess {
       private val randomBehaviour = new Random(73473L)
@@ -973,17 +957,17 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     )((priorActivity, index) =>
       priorActivity.flatMap { case (trancheId, exemplarSet) =>
         val session = for {
-          aSet <- immutableObjectStorageForSetsAndMaps.retrieve[Set[Int]](
+          aSet <- immutableObjectStorage.retrieve[Set[Int]](
             trancheId
           )
           anUpdatedSet = sessionUpdate.updateSet(aSet, index)
-          trancheId <- immutableObjectStorageForSetsAndMaps.store(anUpdatedSet)
+          trancheId <- immutableObjectStorage.store(anUpdatedSet)
         } yield trancheId -> anUpdatedSet
 
         IO {
           val Right((trancheIdForUpdate, anUpdatedSet)) =
-            immutableObjectStorageForSetsAndMaps
-              .runToYieldResult(session, intersessionState)(tranches)
+            immutableObjectStorage
+              .runToYieldResult(session)
 
           println(anUpdatedSet)
 
@@ -996,11 +980,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       .flatMap { case (finalTrancheId, exemplarSet) =>
         IO {
           val Right(retrievedSet) =
-            immutableObjectStorageForSetsAndMaps.runToYieldResult(
-              immutableObjectStorageForSetsAndMaps
-                .retrieve[Set[Int]](finalTrancheId),
-              intersessionState
-            )(tranches)
+            immutableObjectStorage.runToYieldResult(
+              immutableObjectStorage.retrieve[Set[Int]](finalTrancheId)
+            )
 
           retrievedSet shouldBe exemplarSet
         }
@@ -1009,77 +991,76 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
   }
 
   "a class with an inherited final method" should "be able to be proxied" in {
-    val tranches = new FakeTranches
-
     val example =
       HasAFinalMethodAndOneThatCanBeProxied("example")
 
-    val intersessionState = new IntersessionState[TrancheId]
+    val tranches = new FakeTranches
+
+    val immutableObjectStorage =
+      ImmutableObjectStorage(configurationForSetsAndMaps, tranches)
 
     val Right(trancheIdForFiveEntries) =
-      immutableObjectStorageForSetsAndMaps.runToYieldTrancheId(
-        immutableObjectStorageForSetsAndMaps.store(example),
-        intersessionState
-      )(tranches)
+      immutableObjectStorage.runToYieldTrancheId(
+        immutableObjectStorage.store(example)
+      )
 
     val sessionWrappingFiveEntriesInAList: Session[TrancheId] =
       for {
-        exampleFromStorage <- immutableObjectStorageForSetsAndMaps
+        exampleFromStorage <- immutableObjectStorage
           .retrieve[HasAFinalMethodAndOneThatCanBeProxied](
             trancheIdForFiveEntries
           )
-        trancheId <- immutableObjectStorageForSetsAndMaps.store(
+        trancheId <- immutableObjectStorage.store(
           List(exampleFromStorage, 2, exampleFromStorage)
         )
       } yield trancheId
 
     val Right(trancheIdForList) =
-      immutableObjectStorageForSetsAndMaps.runToYieldTrancheId(
-        sessionWrappingFiveEntriesInAList,
-        intersessionState
-      )(tranches)
+      immutableObjectStorage.runToYieldTrancheId(
+        sessionWrappingFiveEntriesInAList
+      )
 
-    val Right(list) = immutableObjectStorageForSetsAndMaps.runToYieldResult(
-      immutableObjectStorageForSetsAndMaps.retrieve[List[_]](trancheIdForList),
-      intersessionState
-    )(tranches)
+    val Right(list) = immutableObjectStorage.runToYieldResult(
+      immutableObjectStorage.retrieve[List[_]](trancheIdForList)
+    )
 
     list should be(List(example, 2, example))
   }
 
   "a hash map" should "be able to be proxied" in {
-    val tranches = new FakeTranches
-
     val fiveEntries =
       HashMap(1 -> "One", 2 -> "Two", 3 -> "Three", 4 -> "Four", 5 -> "Five")
 
-    val intersessionState = new IntersessionState[TrancheId]
+    val example =
+      HasAFinalMethodAndOneThatCanBeProxied("example")
+
+    val tranches = new FakeTranches
+
+    val immutableObjectStorage =
+      ImmutableObjectStorage(configurationForSetsAndMaps, tranches)
 
     val Right(trancheIdForFiveEntries) =
-      immutableObjectStorageForSetsAndMaps.runToYieldTrancheId(
-        immutableObjectStorageForSetsAndMaps.store(fiveEntries),
-        intersessionState
-      )(tranches)
+      immutableObjectStorage.runToYieldTrancheId(
+        immutableObjectStorage.store(fiveEntries)
+      )
 
     val sessionWrappingFiveEntriesInAList: Session[TrancheId] =
       for {
-        fiveEntriesFromStorage <- immutableObjectStorageForSetsAndMaps
+        fiveEntriesFromStorage <- immutableObjectStorage
           .retrieve[HashMap[Int, String]](trancheIdForFiveEntries)
-        trancheId <- immutableObjectStorageForSetsAndMaps.store(
+        trancheId <- immutableObjectStorage.store(
           List(fiveEntriesFromStorage, 2, fiveEntriesFromStorage)
         )
       } yield trancheId
 
     val Right(trancheIdForList) =
-      immutableObjectStorageForSetsAndMaps.runToYieldTrancheId(
-        sessionWrappingFiveEntriesInAList,
-        intersessionState
-      )(tranches)
+      immutableObjectStorage.runToYieldTrancheId(
+        sessionWrappingFiveEntriesInAList
+      )
 
-    val Right(list) = immutableObjectStorageForSetsAndMaps.runToYieldResult(
-      immutableObjectStorageForSetsAndMaps.retrieve[List[_]](trancheIdForList),
-      intersessionState
-    )(tranches)
+    val Right(list) = immutableObjectStorage.runToYieldResult(
+      immutableObjectStorage.retrieve[List[_]](trancheIdForList)
+    )
 
     list should be(List(fiveEntries, 2, fiveEntries))
   }

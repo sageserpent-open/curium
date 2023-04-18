@@ -21,8 +21,10 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
       // case, so we have to switch to the Java form and dig one out via the
       // iterator support for JUnit.
       val partGrowthSteps: PartGrowth =
-      partGrowthLeadingToRootFork(allowDuplicates = true,
-        numberOfLeavesRequired = numberOfLeaves).javaTrials.withLimit(1).asIterator().next()
+        partGrowthLeadingToRootFork(
+          allowDuplicates = true,
+          numberOfLeavesRequired = numberOfLeaves
+        ).javaTrials.withLimit(1).asIterator().next()
 
       val axisName = "Number of steps"
 
@@ -31,8 +33,11 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
           Iterator(partGrowthSteps)
 
         override def dataset: Iterator[Parameters] =
-          Iterator(Parameters(
-            Parameter[PartGrowthStep](axisName) -> partGrowthSteps.steps.size))
+          Iterator(
+            Parameters(
+              Parameter[PartGrowthStep](axisName) -> partGrowthSteps.steps.size
+            )
+          )
 
         override def generate(params: Parameters): PartGrowth =
           partGrowthSteps // HACK: ignore the supplied parameters, as we are generating only one possible value.
@@ -43,27 +48,36 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
 
   performance of "Bookings" in {
     measure method "storeAndRetrieve" in {
-      using(partGrowthGenerator) config(exec.benchRuns := 5, exec.jvmflags := List(
-        "-Xmx3G")) in activity
+      using(
+        partGrowthGenerator
+      ) config (exec.benchRuns := 5, exec.jvmflags := List(
+        "-Xmx3G"
+      )) in activity
     }
   }
 
   def activity(partGrowth: PartGrowth): Unit = {
-    storeAndRetrieve(partGrowth, new IntersessionState, new FakeTranches)
+    storeAndRetrieve(
+      partGrowth,
+      ImmutableObjectStorage(
+        configuration = configuration,
+        tranches = new FakeTranches
+      )
+    )
   }
 
-  def storeAndRetrieve(partGrowth: PartGrowth,
-                       intersessionState: IntersessionState[TrancheId],
-                       tranches: FakeTranches): Unit = {
+  def storeAndRetrieve(
+      partGrowth: PartGrowth,
+      immutableObjectStorage: ImmutableObjectStorage[TrancheId]
+  ): Unit = {
     val trancheIds: Vector[TrancheId] =
-      partGrowth.storeViaMultipleSessions(intersessionState, tranches)
+      partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
     val retrievalSession: Session[Unit] =
       for (_ <- trancheIds.traverse(immutableObjectStorage.retrieve[Part]))
         yield ()
 
     val Right(()) =
-      immutableObjectStorage.runForEffectsOnly(retrievalSession,
-        intersessionState)(tranches)
+      immutableObjectStorage.runForEffectsOnly(retrievalSession)
   }
 }

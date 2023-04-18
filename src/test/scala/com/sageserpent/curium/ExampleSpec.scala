@@ -2,16 +2,14 @@ package com.sageserpent.curium
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import cats.implicits._
-import com.sageserpent.curium.ImmutableObjectStorage.IntersessionState
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 object ExampleSpec {
   type TrancheId = H2ViaScalikeJdbcTranches#TrancheId
 
-  object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
-    override protected val tranchesImplementationName: String =
+  object configuration extends ImmutableObjectStorage.Configuration {
+    override val tranchesImplementationName: String =
       classOf[H2ViaScalikeJdbcTranches].getSimpleName
   }
 }
@@ -35,7 +33,8 @@ class ExampleSpec
           // used by the immutable object storage to cache data between
           // sessions.
 
-          val intersessionState = new IntersessionState[TrancheId]
+          val immutableObjectStorage =
+            ImmutableObjectStorage(configuration, tranches)
 
           // Let's begin .. we shall store something and get back a tranche id
           // that we hold on to.
@@ -53,7 +52,7 @@ class ExampleSpec
             // to make imperative changes, in this case storing the initial map.
             // This gives us back the tranche id.
             immutableObjectStorage
-              .runToYieldTrancheId(session, intersessionState)(tranches)
+              .runToYieldTrancheId(session)
           }
 
           // OK, so let's do some pure functional work on our initial map and
@@ -72,7 +71,7 @@ class ExampleSpec
             // Again, nothing has actually taken place yet - so run the session,
             // etc.
             immutableObjectStorage
-              .runToYieldTrancheId(session, intersessionState)(tranches)
+              .runToYieldTrancheId(session)
           }
 
           // Let's verify what was stored.
@@ -89,7 +88,7 @@ class ExampleSpec
             }
 
             immutableObjectStorage
-              .runToYieldResult(session, intersessionState)(tranches)
+              .runToYieldResult(session)
           }
 
           initialMap should be(
