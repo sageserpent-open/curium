@@ -176,6 +176,11 @@ object ImmutableObjectStorage {
   ) extends ObjectLookup
 
   trait Configuration {
+    def build[TrancheId](
+        tranches: Tranches[TrancheId]
+    ): ImmutableObjectStorage[TrancheId] =
+      new ImmutableObjectStorage(this, tranches)
+
     val tranchesImplementationName: String
     def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = false
 
@@ -192,12 +197,6 @@ object ImmutableObjectStorage {
     // - the collection classes being the main offenders in that regard.
     def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean = false
   }
-
-  def apply[TrancheId](
-      configuration: Configuration,
-      tranches: Tranches[TrancheId]
-  ): ImmutableObjectStorage[TrancheId] =
-    new ImmutableObjectStorage(configuration, tranches)
 }
 
 class ImmutableObjectStorage[TrancheId](

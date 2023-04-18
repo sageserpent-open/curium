@@ -394,7 +394,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val trancheIds =
           partGrowth.storeViaMultipleSessions(immutableObjectStorage)
@@ -424,7 +424,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val trancheIds =
           partGrowth.storeViaMultipleSessions(immutableObjectStorage)
@@ -501,7 +501,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val trancheIds =
           partGrowth.storeViaMultipleSessions(immutableObjectStorage)
@@ -578,7 +578,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val trancheIds =
           partGrowth.storeViaMultipleSessions(immutableObjectStorage)
@@ -645,7 +645,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val trancheIds =
           partGrowth.storeViaMultipleSessions(immutableObjectStorage)
@@ -684,7 +684,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val trancheIds =
           partGrowth.storeViaMultipleSessions(immutableObjectStorage)
@@ -702,7 +702,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           val rootTrancheId = trancheIds.last
 
           val freshImmutableObjectStorage =
-            ImmutableObjectStorage(configuration, tranches)
+            configuration.build(tranches)
 
           val samplingSessionWithCorruptedTranche: Session[Unit] = for {
             _ <- freshImmutableObjectStorage.retrieve[Fork](
@@ -731,7 +731,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val trancheIds =
           partGrowth.storeViaMultipleSessions(immutableObjectStorage)
@@ -742,7 +742,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           val rootTrancheId = trancheIds.last
 
           val freshImmutableObjectStorage =
-            ImmutableObjectStorage(configuration, tranches)
+            configuration.build(tranches)
 
           val samplingSessionWithMissingTranche: Session[Unit] = for {
             _ <- freshImmutableObjectStorage.retrieve[Fork](
@@ -771,7 +771,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val Right(alienTrancheId) = immutableObjectStorage.runToYieldTrancheId(
           immutableObjectStorage.store(alien)
@@ -787,7 +787,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           val rootTrancheId = nonAlienTrancheIds.last
 
           val freshImmutableObjectStorage =
-            ImmutableObjectStorage(configuration, tranches)
+            configuration.build(tranches)
 
           val samplingSessionWithTrancheForIncompatibleType: Session[Unit] =
             for {
@@ -818,7 +818,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           val isolatedSpokeTranches = new FakeTranches
 
           val immutableObjectStorage =
-            ImmutableObjectStorage(configuration, isolatedSpokeTranches)
+            configuration.build(isolatedSpokeTranches)
 
           val root = partGrowth.parts().last
 
@@ -836,7 +836,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val trancheIds =
           partGrowth.storeViaMultipleSessions(immutableObjectStorage)
@@ -859,7 +859,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val trancheIds =
           partGrowth.storeViaMultipleSessions(immutableObjectStorage)
@@ -899,7 +899,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         val tranches = new FakeTranches
 
         val immutableObjectStorage =
-          ImmutableObjectStorage(configuration, tranches)
+          configuration.build(tranches)
 
         val retrievalSession: Session[Vector[Part]] =
           expectedParts.pure[Session]
@@ -925,7 +925,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     val tranches = new FakeTranches
 
     val immutableObjectStorage =
-      ImmutableObjectStorage(configurationForSetsAndMaps, tranches)
+      configurationForSetsAndMaps.build(tranches)
 
     val numberOfIterations = 1400
 
@@ -997,7 +997,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     val tranches = new FakeTranches
 
     val immutableObjectStorage =
-      ImmutableObjectStorage(configurationForSetsAndMaps, tranches)
+      configurationForSetsAndMaps.build(tranches)
 
     val Right(trancheIdForFiveEntries) =
       immutableObjectStorage.runToYieldTrancheId(
@@ -1031,13 +1031,10 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     val fiveEntries =
       HashMap(1 -> "One", 2 -> "Two", 3 -> "Three", 4 -> "Four", 5 -> "Five")
 
-    val example =
-      HasAFinalMethodAndOneThatCanBeProxied("example")
-
     val tranches = new FakeTranches
 
     val immutableObjectStorage =
-      ImmutableObjectStorage(configurationForSetsAndMaps, tranches)
+      configurationForSetsAndMaps.build(tranches)
 
     val Right(trancheIdForFiveEntries) =
       immutableObjectStorage.runToYieldTrancheId(

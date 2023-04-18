@@ -59,10 +59,7 @@ object ImmutableObjectStorageBenchmark extends Bench.ForkedTime {
   def activity(partGrowth: PartGrowth): Unit = {
     storeAndRetrieve(
       partGrowth,
-      ImmutableObjectStorage(
-        configuration = configuration,
-        tranches = new FakeTranches
-      )
+      configuration.build(new FakeTranches)
     )
   }
 

@@ -19,10 +19,10 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
       .use(tranches =>
         IO {
           val immutableObjectStorage =
-            ImmutableObjectStorage(configuration, tranches)
+            configuration.build(tranches)
 
           val immutableObjectStorageForQueries =
-            ImmutableObjectStorage(configuration, tranches)
+            configuration.build(tranches)
 
           val Right(initialTrancheId: TrancheId) = {
             val session: Session[TrancheId] =

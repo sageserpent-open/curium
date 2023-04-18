@@ -34,7 +34,7 @@ class ExampleSpec
           // sessions.
 
           val immutableObjectStorage =
-            ImmutableObjectStorage(configuration, tranches)
+            configuration.build(tranches)
 
           // Let's begin .. we shall store something and get back a tranche id
           // that we hold on to.
