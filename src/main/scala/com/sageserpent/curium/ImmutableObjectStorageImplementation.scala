@@ -278,346 +278,346 @@ class ImmutableObjectStorageImplementation[TrancheId](
   private def unsafeRun[Result](
       session: Session[Result]
   ): EitherThrowableOr[Result] = {
-    object sessionInterpreter extends FunctionK[Operation, EitherThrowableOr] {
-      thisSessionInterpreter =>
-
-      def retrieveUnderlying(
-          canonicalObjectReferenceId: CanonicalObjectReferenceId[TrancheId]
-      ): AnyRef =
-        canonicalObjectReferenceId match {
-          case (
-                trancheIdForExternalObjectReference,
-                trancheLocalObjectReferenceId
-              ) =>
-            val Right((_, trancheSpecificReferenceResolver)) =
-              loadTranche(trancheIdForExternalObjectReference)
-
-            trancheSpecificReferenceResolver.objectWithReferenceId(
-              trancheLocalObjectReferenceId
-            )
+    session.foldMap(sessionInterpreter)
         }
 
-      override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
-        operation match {
-          case Store(immutableObject) =>
-            val trancheSpecificReferenceResolver =
-              new TrancheSpecificWritingReferenceResolver
-                with ReferenceResolverContracts
-            val serializedRepresentation: Array[Byte] = sessionReferenceResolver
-              .withValue(Some(trancheSpecificReferenceResolver)) {
-                serializationFacade.toBytesWithClass(immutableObject)
-              }
+  private object sessionInterpreter
+      extends FunctionK[Operation, EitherThrowableOr] {
+    override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
+      operation match {
+        case Store(immutableObject) =>
+          val trancheSpecificReferenceResolver =
+            new TrancheSpecificWritingReferenceResolver
+              with ReferenceResolverContracts
+          val serializedRepresentation: Array[Byte] = sessionReferenceResolver
+            .withValue(Some(trancheSpecificReferenceResolver)) {
+              serializationFacade.toBytesWithClass(immutableObject)
+            }
 
-            for {
-              trancheId <- tranches
-                .createTrancheInStorage(
-                  TrancheOfData(
-                    serializedRepresentation,
-                    trancheSpecificReferenceResolver.interTrancheObjectReferenceIdTranslation
-                  )
+          for {
+            trancheId <- tranches
+              .createTrancheInStorage(
+                TrancheOfData(
+                  serializedRepresentation,
+                  trancheSpecificReferenceResolver.interTrancheObjectReferenceIdTranslation
                 )
-              _ = {
-                intersessionState.trancheIdToStuffCache.put(
-                  trancheId,
-                  immutableObject -> trancheSpecificReferenceResolver
-                    .objectLookup()
-                )
-                trancheSpecificReferenceResolver.noteTrancheId(trancheId)
-              }
-            } yield trancheId
-
-          case Retrieve(trancheId, clazz) =>
-            loadTranche(trancheId)
-              .flatMap { case (topLevelObject, _) =>
-                Try {
-                  clazz.cast(topLevelObject)
-                }.toEither
-              }
-        }
-
-      def loadTranche(
-          trancheId: TrancheId
-      ): EitherThrowableOr[(Any, ObjectLookup)] =
-        Option(
-          intersessionState.trancheIdToStuffCache.getIfPresent(trancheId)
-        ) match {
-          case Some(payload) => Right(payload)
-
-          case None =>
-            for {
-              tranche <- tranches.retrieveTranche(trancheId)
-              result <- Try {
-                val trancheSpecificReferenceResolver =
-                  new TrancheSpecificReadingReferenceResolver(
-                    trancheId,
-                    tranche.interTrancheObjectReferenceIdTranslation
-                  ) with ReferenceResolverContracts
-
-                val topLevelObject =
-                  sessionReferenceResolver.withValue(
-                    Some(trancheSpecificReferenceResolver)
-                  ) {
-                    serializationFacade.fromBytes(tranche.payload)
-                  }
-
-                intersessionState.trancheIdToStuffCache.put(
-                  trancheId,
-                  topLevelObject -> trancheSpecificReferenceResolver
-                    .objectLookup()
-                )
-
-                trancheSpecificReferenceResolver.noteTrancheId(trancheId)
-
-                topLevelObject -> trancheSpecificReferenceResolver
-              }.toEither
-            } yield result
-        }
-
-      trait AbstractTrancheSpecificReferenceResolver
-          extends ReferenceResolver
-          with ObjectLookup {
-        protected val _interTrancheObjectReferenceIdTranslation
-            : BiMap[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId[
-              TrancheId
-            ]] =
-          BiMapFactory.empty()
-
-        protected val referenceIdToLocalObjectMap
-            : BiMap[TrancheLocalObjectReferenceId, AnyRef] =
-          BiMapFactory.usingIdentityForInverse()
-        protected var _numberOfLocalObjects: Int = 0
-
-        def objectLookup(): ObjectLookup = StandaloneObjectLookup(
-          referenceIdToLocalObjectMap
-        )
-
-        def noteTrancheId(trancheId: TrancheId): Unit = {
-          referenceIdToLocalObjectMap.forEach {
-            (objectReferenceId, immutableObject) =>
-              if (allowInterTrancheReferences(immutableObject)) {
-                intersessionState.noteReferenceIdForNonProxy(
-                  immutableObject,
-                  trancheId -> objectReferenceId
-                )
-              }
-          }
-        }
-
-        override def setKryo(kryo: Kryo): Unit = {}
-
-        override def reset(): Unit = {}
-
-        override def useReferences(clazz: Class[_]): Boolean =
-          storage.useReferences(clazz)
-
-        protected def minimumInterTrancheObjectReferenceId
-            : TrancheLocalObjectReferenceId =
-          maximumObjectReferenceId - _interTrancheObjectReferenceIdTranslation
-            .size()
-      }
-
-      class AcquiredState(
-          canonicalObjectReferenceId: CanonicalObjectReferenceId[TrancheId]
-      ) extends proxySupport.AcquiredState {
-        private var _underlying: Option[WeakReference[AnyRef]] = None
-
-        override def underlying: AnyRef = _underlying match {
-          case Some(WeakReference(result)) => result
-          case _ =>
-            val result =
-              retrieveUnderlying(canonicalObjectReferenceId)
-
-            _underlying = Some(WeakReference(result))
-
-            result
-        }
-      }
-
-      class TrancheSpecificWritingReferenceResolver
-          extends AbstractTrancheSpecificReferenceResolver {
-        private val notImplementedError = new NotImplementedError(
-          s"``${getClass.getSimpleName}`` does not support reading operations."
-        )
-
-        def interTrancheObjectReferenceIdTranslation
-            : Map[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId[
-              TrancheId
-            ]] =
-          _interTrancheObjectReferenceIdTranslation.asScala.toMap
-
-        override def getWrittenId(
-            immutableObject: AnyRef
-        ): TrancheLocalObjectReferenceId =
-          intersessionState
-            .referenceIdFor(immutableObject)
-            .map(interTrancheObjectReferenceIdFor)
-            .orElse(
-              Option(referenceIdToLocalObjectMap.inverse().get(immutableObject))
-            )
-            .getOrElse(notYetWritten)
-
-        private def interTrancheObjectReferenceIdFor(
-            canonicalReference: CanonicalObjectReferenceId[TrancheId]
-        ): TrancheLocalObjectReferenceId =
-          _interTrancheObjectReferenceIdTranslation
-            .inverse()
-            .computeIfAbsent(
-              canonicalReference,
-              { _ =>
-                require(
-                  minimumInterTrancheObjectReferenceId > _numberOfLocalObjects
-                )
-
-                val numberOfInterTrancheReferences =
-                  _interTrancheObjectReferenceIdTranslation.size()
-
-                maximumObjectReferenceId - numberOfInterTrancheReferences
-              }
-            )
-
-        override def addWrittenObject(
-            immutableObject: AnyRef
-        ): TrancheLocalObjectReferenceId = {
-          require(minimumInterTrancheObjectReferenceId > _numberOfLocalObjects)
-
-          val result = _numberOfLocalObjects
-
-          val _ @None = Option(
-            referenceIdToLocalObjectMap
-              .put(result, immutableObject)
-          )
-
-          _numberOfLocalObjects += 1
-
-          result
-        }
-
-        override def nextReadId(
-            clazz: Class[_]
-        ): TrancheLocalObjectReferenceId = throw notImplementedError
-
-        override def setReadObject(
-            objectReferenceId: TrancheLocalObjectReferenceId,
-            immutableObject: AnyRef
-        ): Unit = throw notImplementedError
-
-        override def getReadObject(
-            clazz: Class[_],
-            objectReferenceId: TrancheLocalObjectReferenceId
-        ): AnyRef = throw notImplementedError
-      }
-
-      class TrancheSpecificReadingReferenceResolver(
-          trancheId: TrancheId,
-          interTrancheObjectReferenceIdTranslation: Map[
-            TrancheLocalObjectReferenceId,
-            CanonicalObjectReferenceId[TrancheId]
-          ]
-      ) extends AbstractTrancheSpecificReferenceResolver {
-        {
-          _interTrancheObjectReferenceIdTranslation.putAll(
-            interTrancheObjectReferenceIdTranslation.asJava
-          )
-        }
-
-        private val notImplementedError = new NotImplementedError(
-          s"`${getClass.getSimpleName}` does not support writing operations."
-        )
-
-        override def nextReadId(
-            clazz: Class[_]
-        ): TrancheLocalObjectReferenceId = {
-          require(minimumInterTrancheObjectReferenceId > _numberOfLocalObjects)
-
-          val nextObjectReferenceIdToAllocate = _numberOfLocalObjects
-
-          _numberOfLocalObjects += 1
-
-          nextObjectReferenceIdToAllocate
-        }
-
-        override def setReadObject(
-            objectReferenceId: TrancheLocalObjectReferenceId,
-            immutableObject: AnyRef
-        ): Unit = {
-          Option(
-            referenceIdToLocalObjectMap
-              .inverse()
-              .forcePut(immutableObject, objectReferenceId)
-          ) match {
-            case Some(aliasObjectReferenceId) =>
-              val associatedValueForAlias =
-                AssociatedValueForAlias(immutableObject)
-              val _ @None = Option(
-                referenceIdToLocalObjectMap
-                  .put(aliasObjectReferenceId, associatedValueForAlias)
               )
-            case None =>
-          }
+            _ = {
+              intersessionState.trancheIdToStuffCache.put(
+                trancheId,
+                immutableObject -> trancheSpecificReferenceResolver
+                  .objectLookup()
+              )
+              trancheSpecificReferenceResolver.noteTrancheId(trancheId)
+            }
+          } yield trancheId
 
+        case Retrieve(trancheId, clazz) =>
+          loadTranche(trancheId)
+            .flatMap { case (topLevelObject, _) =>
+              Try {
+                clazz.cast(topLevelObject)
+              }.toEither
+            }
+      }
+  }
+
+  private def retrieveUnderlying(
+      canonicalObjectReferenceId: CanonicalObjectReferenceId[TrancheId]
+  ): AnyRef =
+      canonicalObjectReferenceId match
+      {
+        case (
+              trancheIdForExternalObjectReference,
+              trancheLocalObjectReferenceId
+            ) =>
+          val Right((_, trancheSpecificReferenceResolver)) =
+            loadTranche(trancheIdForExternalObjectReference)
+
+          trancheSpecificReferenceResolver.objectWithReferenceId(
+            trancheLocalObjectReferenceId
+          )
+      }
+
+  private def loadTranche(
+      trancheId: TrancheId
+  ): EitherThrowableOr[(Any, ObjectLookup)] =
+    Option(
+      intersessionState.trancheIdToStuffCache.getIfPresent(trancheId)
+    ) match {
+      case Some(payload) => Right(payload)
+
+      case None =>
+        for {
+          tranche <- tranches.retrieveTranche(trancheId)
+          result <- Try {
+            val trancheSpecificReferenceResolver =
+              new TrancheSpecificReadingReferenceResolver(
+                trancheId,
+                tranche.interTrancheObjectReferenceIdTranslation
+              ) with ReferenceResolverContracts
+
+            val topLevelObject =
+              sessionReferenceResolver.withValue(
+                Some(trancheSpecificReferenceResolver)
+              ) {
+                serializationFacade.fromBytes(tranche.payload)
+              }
+
+            intersessionState.trancheIdToStuffCache.put(
+              trancheId,
+              topLevelObject -> trancheSpecificReferenceResolver
+                .objectLookup()
+            )
+
+            trancheSpecificReferenceResolver.noteTrancheId(trancheId)
+
+            topLevelObject -> trancheSpecificReferenceResolver
+          }.toEither
+        } yield result
+    }
+
+  private trait AbstractTrancheSpecificReferenceResolver
+      extends ReferenceResolver
+      with ObjectLookup {
+    protected val _interTrancheObjectReferenceIdTranslation
+        : BiMap[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId[
+          TrancheId
+        ]] =
+      BiMapFactory.empty()
+
+    protected val referenceIdToLocalObjectMap
+        : BiMap[TrancheLocalObjectReferenceId, AnyRef] =
+      BiMapFactory.usingIdentityForInverse()
+    protected var _numberOfLocalObjects: Int = 0
+
+    def objectLookup(): ObjectLookup = StandaloneObjectLookup(
+      referenceIdToLocalObjectMap
+    )
+
+    def noteTrancheId(trancheId: TrancheId): Unit = {
+      referenceIdToLocalObjectMap.forEach {
+        (objectReferenceId, immutableObject) =>
           if (allowInterTrancheReferences(immutableObject)) {
-            val canonicalObjectReferenceId =
-              trancheId -> objectReferenceId
-
             intersessionState.noteReferenceIdForNonProxy(
               immutableObject,
-              canonicalObjectReferenceId
+              trancheId -> objectReferenceId
             )
           }
-        }
-
-        override def getReadObject(
-            clazz: Class[_],
-            objectReferenceId: TrancheLocalObjectReferenceId
-        ): AnyRef = {
-          val yieldObjectLocalToTranche =
-            minimumInterTrancheObjectReferenceId > objectReferenceId
-
-          if (yieldObjectLocalToTranche)
-            objectWithReferenceId(objectReferenceId)
-          else {
-            val canonicalObjectReferenceId = canonicalReferenceFor(
-              objectReferenceId
-            )
-
-            intersessionState.proxyFor(canonicalObjectReferenceId).getOrElse {
-              if (proxySupport.canBeProxied(clazz)) {
-                val proxy =
-                  proxySupport.createProxy(
-                    clazz,
-                    new AcquiredState(
-                      canonicalObjectReferenceId
-                    )
-                  )
-
-                intersessionState.noteProxy(canonicalObjectReferenceId, proxy)
-
-                proxy
-              } else
-                retrieveUnderlying(canonicalObjectReferenceId)
-            }
-          }
-        }
-
-        private def canonicalReferenceFor(
-            objectReferenceId: TrancheLocalObjectReferenceId
-        ): CanonicalObjectReferenceId[TrancheId] = {
-          Option(
-            _interTrancheObjectReferenceIdTranslation.get(objectReferenceId)
-          ).get
-        }
-
-        override def getWrittenId(
-            immutableObject: AnyRef
-        ): TrancheLocalObjectReferenceId = throw notImplementedError
-
-        override def addWrittenObject(
-            immutableObject: AnyRef
-        ): TrancheLocalObjectReferenceId = throw notImplementedError
       }
     }
 
-    session.foldMap(sessionInterpreter)
+    override def setKryo(kryo: Kryo): Unit = {}
+
+    override def reset(): Unit = {}
+
+    override def useReferences(clazz: Class[_]): Boolean =
+      storage.useReferences(clazz)
+
+    protected def minimumInterTrancheObjectReferenceId
+        : TrancheLocalObjectReferenceId =
+      maximumObjectReferenceId - _interTrancheObjectReferenceIdTranslation
+        .size()
+  }
+
+  private class AcquiredState(
+      canonicalObjectReferenceId: CanonicalObjectReferenceId[TrancheId]
+  ) extends proxySupport.AcquiredState {
+    private var _underlying: Option[WeakReference[AnyRef]] = None
+
+    override def underlying: AnyRef = _underlying match {
+      case Some(WeakReference(result)) => result
+      case _ =>
+        val result =
+          retrieveUnderlying(canonicalObjectReferenceId)
+
+        _underlying = Some(WeakReference(result))
+
+        result
+    }
+  }
+
+  private class TrancheSpecificWritingReferenceResolver
+      extends AbstractTrancheSpecificReferenceResolver {
+    private val notImplementedError = new NotImplementedError(
+      s"``${getClass.getSimpleName}`` does not support reading operations."
+    )
+
+    def interTrancheObjectReferenceIdTranslation
+        : Map[TrancheLocalObjectReferenceId, CanonicalObjectReferenceId[
+          TrancheId
+        ]] =
+      _interTrancheObjectReferenceIdTranslation.asScala.toMap
+
+    override def getWrittenId(
+        immutableObject: AnyRef
+    ): TrancheLocalObjectReferenceId =
+      intersessionState
+        .referenceIdFor(immutableObject)
+        .map(interTrancheObjectReferenceIdFor)
+        .orElse(
+          Option(referenceIdToLocalObjectMap.inverse().get(immutableObject))
+        )
+        .getOrElse(notYetWritten)
+
+    private def interTrancheObjectReferenceIdFor(
+        canonicalReference: CanonicalObjectReferenceId[TrancheId]
+    ): TrancheLocalObjectReferenceId =
+      _interTrancheObjectReferenceIdTranslation
+        .inverse()
+        .computeIfAbsent(
+          canonicalReference,
+          { _ =>
+            require(
+              minimumInterTrancheObjectReferenceId > _numberOfLocalObjects
+            )
+
+            val numberOfInterTrancheReferences =
+              _interTrancheObjectReferenceIdTranslation.size()
+
+            maximumObjectReferenceId - numberOfInterTrancheReferences
+          }
+        )
+
+    override def addWrittenObject(
+        immutableObject: AnyRef
+    ): TrancheLocalObjectReferenceId = {
+      require(minimumInterTrancheObjectReferenceId > _numberOfLocalObjects)
+
+      val result = _numberOfLocalObjects
+
+      val _ @None = Option(
+        referenceIdToLocalObjectMap
+          .put(result, immutableObject)
+      )
+
+      _numberOfLocalObjects += 1
+
+      result
+    }
+
+    override def nextReadId(
+        clazz: Class[_]
+    ): TrancheLocalObjectReferenceId = throw notImplementedError
+
+    override def setReadObject(
+        objectReferenceId: TrancheLocalObjectReferenceId,
+        immutableObject: AnyRef
+    ): Unit = throw notImplementedError
+
+    override def getReadObject(
+        clazz: Class[_],
+        objectReferenceId: TrancheLocalObjectReferenceId
+    ): AnyRef = throw notImplementedError
+  }
+
+  private class TrancheSpecificReadingReferenceResolver(
+      trancheId: TrancheId,
+      interTrancheObjectReferenceIdTranslation: Map[
+        TrancheLocalObjectReferenceId,
+        CanonicalObjectReferenceId[TrancheId]
+      ]
+  ) extends AbstractTrancheSpecificReferenceResolver {
+    {
+      _interTrancheObjectReferenceIdTranslation.putAll(
+        interTrancheObjectReferenceIdTranslation.asJava
+      )
+    }
+
+    private val notImplementedError = new NotImplementedError(
+      s"`${getClass.getSimpleName}` does not support writing operations."
+    )
+
+    override def nextReadId(
+        clazz: Class[_]
+    ): TrancheLocalObjectReferenceId = {
+      require(minimumInterTrancheObjectReferenceId > _numberOfLocalObjects)
+
+      val nextObjectReferenceIdToAllocate = _numberOfLocalObjects
+
+      _numberOfLocalObjects += 1
+
+      nextObjectReferenceIdToAllocate
+    }
+
+    override def setReadObject(
+        objectReferenceId: TrancheLocalObjectReferenceId,
+        immutableObject: AnyRef
+    ): Unit = {
+      Option(
+        referenceIdToLocalObjectMap
+          .inverse()
+          .forcePut(immutableObject, objectReferenceId)
+      ) match {
+        case Some(aliasObjectReferenceId) =>
+          val associatedValueForAlias =
+            AssociatedValueForAlias(immutableObject)
+          val _ @None = Option(
+            referenceIdToLocalObjectMap
+              .put(aliasObjectReferenceId, associatedValueForAlias)
+          )
+        case None =>
+      }
+
+      if (allowInterTrancheReferences(immutableObject)) {
+        val canonicalObjectReferenceId =
+          trancheId -> objectReferenceId
+
+        intersessionState.noteReferenceIdForNonProxy(
+          immutableObject,
+          canonicalObjectReferenceId
+        )
+      }
+    }
+
+    override def getReadObject(
+        clazz: Class[_],
+        objectReferenceId: TrancheLocalObjectReferenceId
+    ): AnyRef = {
+      val yieldObjectLocalToTranche =
+        minimumInterTrancheObjectReferenceId > objectReferenceId
+
+      if (yieldObjectLocalToTranche)
+        objectWithReferenceId(objectReferenceId)
+      else {
+        val canonicalObjectReferenceId = canonicalReferenceFor(
+          objectReferenceId
+        )
+
+        intersessionState.proxyFor(canonicalObjectReferenceId).getOrElse {
+          if (proxySupport.canBeProxied(clazz)) {
+            val proxy =
+              proxySupport.createProxy(
+                clazz,
+                new AcquiredState(
+                  canonicalObjectReferenceId
+                )
+              )
+
+            intersessionState.noteProxy(canonicalObjectReferenceId, proxy)
+
+            proxy
+          } else
+            retrieveUnderlying(canonicalObjectReferenceId)
+        }
+      }
+    }
+
+    private def canonicalReferenceFor(
+        objectReferenceId: TrancheLocalObjectReferenceId
+    ): CanonicalObjectReferenceId[TrancheId] = {
+      Option(
+        _interTrancheObjectReferenceIdTranslation.get(objectReferenceId)
+      ).get
+    }
+
+    override def getWrittenId(
+        immutableObject: AnyRef
+    ): TrancheLocalObjectReferenceId = throw notImplementedError
+
+    override def addWrittenObject(
+        immutableObject: AnyRef
+    ): TrancheLocalObjectReferenceId = throw notImplementedError
   }
 
   private def useReferences(clazz: Class[_]): Boolean =
