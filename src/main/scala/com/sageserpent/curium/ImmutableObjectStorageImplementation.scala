@@ -630,7 +630,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
     )
 
   // Replacement for the now removed use of Chill's `KryoPool`...
-  object serializationFacade {
+  private object serializationFacade {
     def evidence[X](pool: Pool[X]): Releasable[X] = pool.free
 
     implicit val kryoEvidence: Releasable[Kryo]     = evidence(kryoPool)
@@ -661,7 +661,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
       Using.resource(kryoPool.obtain())(_.copy(immutableObject))
   }
 
-  object proxySupport extends ProxySupport {
+  private object proxySupport extends ProxySupport {
 
     val superClazzAndInterfacesCache
         : Cache[Class[_], Option[SuperClazzAndInterfaces]] =
@@ -840,9 +840,9 @@ class ImmutableObjectStorageImplementation[TrancheId](
     )
   }
 
-  val notYetWritten = -1
+  private val notYetWritten = -1
 
-  trait ReferenceResolverContracts extends ReferenceResolver {
+  private trait ReferenceResolverContracts extends ReferenceResolver {
 
     abstract override def getWrittenId(
         immutableObject: AnyRef
