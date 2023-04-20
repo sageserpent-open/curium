@@ -118,6 +118,8 @@ object ImmutableObjectStorageImplementation {
         AnyRef
       ]
   ) extends ObjectLookup
+
+  private val notYetWritten = -1
 }
 
 class ImmutableObjectStorageImplementation[TrancheId](
@@ -624,7 +626,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
     !Util.isWrapperClass(clazz) &&
       clazz != classOf[String]
 
-  private def allowInterTrancheReferences(immutableObject: AnyRef) =
+  private def allowInterTrancheReferences(immutableObject: AnyRef): Boolean =
     proxySupport.canBeProxied(
       immutableObject.getClass
     )
@@ -839,8 +841,6 @@ class ImmutableObjectStorageImplementation[TrancheId](
         interfaces: Seq[Class[_]]
     )
   }
-
-  private val notYetWritten = -1
 
   private trait ReferenceResolverContracts extends ReferenceResolver {
 
