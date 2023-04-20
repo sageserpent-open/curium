@@ -118,6 +118,8 @@ object ImmutableObjectStorageImplementation {
       ]
   ) extends ObjectLookup
 
+  case class TrancheLoadData(topLevelObject: Any, objectLookup: ObjectLookup)
+
   private val notYetWritten = -1
 }
 
@@ -211,7 +213,8 @@ class ImmutableObjectStorageImplementation[TrancheId](
         .weakValues()
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
-    val trancheIdToStuffCache: Cache[TrancheId, (Any, ObjectLookup)] =
+    private val trancheIdToTrancheLoadDataCache
+        : Cache[TrancheId, TrancheLoadData] =
       caffeineBuilder()
         .scheduler(Scheduler.systemScheduler())
         .executor(_.run())
@@ -219,7 +222,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
           30,
           TimeUnit.SECONDS
         ) // NASTY HACK - leave it here for now while experimenting.
-        .build[TrancheId, (Any, ObjectLookup)]()
+        .build[TrancheId, TrancheLoadData]()
 
     def noteReferenceIdForNonProxy(
         immutableObject: AnyRef,
@@ -247,11 +250,27 @@ class ImmutableObjectStorageImplementation[TrancheId](
     def proxyFor(objectReferenceId: CanonicalObjectReferenceId[TrancheId]) =
       Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
+    def loadTranche(
+        trancheId: TrancheId,
+        population: TrancheId => TrancheLoadData
+    ): TrancheLoadData =
+      trancheIdToTrancheLoadDataCache.get(
+        trancheId,
+        population(_)
+      )
+
+    def noteTranche(
+        trancheId: TrancheId,
+        trancheLoadData: TrancheLoadData
+    ): Unit = {
+      trancheIdToTrancheLoadDataCache.put(trancheId, trancheLoadData)
+    }
+
     def clear(): Unit = {
       objectToReferenceIdCache.invalidateAll()
       proxyToReferenceIdCache.invalidateAll()
       referenceIdToProxyCache.invalidateAll()
-      trancheIdToStuffCache.invalidateAll()
+      trancheIdToTrancheLoadDataCache.invalidateAll()
     }
   }
 
@@ -283,7 +302,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
       session: Session[Result]
   ): EitherThrowableOr[Result] = {
     session.foldMap(sessionInterpreter)
-        }
+  }
 
   private object sessionInterpreter
       extends FunctionK[Operation, EitherThrowableOr] {
@@ -307,79 +326,73 @@ class ImmutableObjectStorageImplementation[TrancheId](
                 )
               )
             _ = {
-              intersessionState.trancheIdToStuffCache.put(
+              intersessionState.noteTranche(
                 trancheId,
-                immutableObject -> trancheSpecificReferenceResolver
-                  .objectLookup()
+                TrancheLoadData(
+                  immutableObject,
+                  trancheSpecificReferenceResolver
+                    .standaloneObjectLookup()
+                )
               )
               trancheSpecificReferenceResolver.noteTrancheId(trancheId)
             }
           } yield trancheId
 
         case Retrieve(trancheId, clazz) =>
-          loadTranche(trancheId)
-            .flatMap { case (topLevelObject, _) =>
-              Try {
-                clazz.cast(topLevelObject)
-              }.toEither
-            }
+          Try {
+            val TrancheLoadData(topLevelObject, _) =
+              intersessionState.loadTranche(trancheId, loadTranche)
+            clazz.cast(topLevelObject)
+          }.toEither
       }
   }
 
   private def retrieveUnderlying(
       canonicalObjectReferenceId: CanonicalObjectReferenceId[TrancheId]
   ): AnyRef =
-      canonicalObjectReferenceId match
-      {
-        case (
-              trancheIdForExternalObjectReference,
-              trancheLocalObjectReferenceId
-            ) =>
-          val Right((_, trancheSpecificReferenceResolver)) =
-            loadTranche(trancheIdForExternalObjectReference)
-
-          trancheSpecificReferenceResolver.objectWithReferenceId(
+    canonicalObjectReferenceId match {
+      case (
+            trancheIdForExternalObjectReference,
             trancheLocalObjectReferenceId
+          ) =>
+        val TrancheLoadData(_, trancheSpecificReferenceResolver) =
+          intersessionState.loadTranche(
+            trancheIdForExternalObjectReference,
+            loadTranche
           )
-      }
+
+        trancheSpecificReferenceResolver.objectWithReferenceId(
+          trancheLocalObjectReferenceId
+        )
+    }
 
   private def loadTranche(
       trancheId: TrancheId
-  ): EitherThrowableOr[(Any, ObjectLookup)] =
-    Option(
-      intersessionState.trancheIdToStuffCache.getIfPresent(trancheId)
-    ) match {
-      case Some(payload) => Right(payload)
+  ): TrancheLoadData =
+    (for {
+      tranche <- tranches.retrieveTranche(trancheId).toTry
+      result <- Try {
+        val trancheSpecificReferenceResolver =
+          new TrancheSpecificReadingReferenceResolver(
+            trancheId,
+            tranche.interTrancheObjectReferenceIdTranslation
+          ) with ReferenceResolverContracts
 
-      case None =>
-        for {
-          tranche <- tranches.retrieveTranche(trancheId)
-          result <- Try {
-            val trancheSpecificReferenceResolver =
-              new TrancheSpecificReadingReferenceResolver(
-                trancheId,
-                tranche.interTrancheObjectReferenceIdTranslation
-              ) with ReferenceResolverContracts
+        val topLevelObject =
+          sessionReferenceResolver.withValue(
+            Some(trancheSpecificReferenceResolver)
+          ) {
+            serializationFacade.fromBytes(tranche.payload)
+          }
 
-            val topLevelObject =
-              sessionReferenceResolver.withValue(
-                Some(trancheSpecificReferenceResolver)
-              ) {
-                serializationFacade.fromBytes(tranche.payload)
-              }
+        trancheSpecificReferenceResolver.noteTrancheId(trancheId)
 
-            intersessionState.trancheIdToStuffCache.put(
-              trancheId,
-              topLevelObject -> trancheSpecificReferenceResolver
-                .objectLookup()
-            )
-
-            trancheSpecificReferenceResolver.noteTrancheId(trancheId)
-
-            topLevelObject -> trancheSpecificReferenceResolver
-          }.toEither
-        } yield result
-    }
+        TrancheLoadData(
+          topLevelObject,
+          trancheSpecificReferenceResolver.standaloneObjectLookup
+        )
+      }
+    } yield result).get // NASTY HACK: need to decide where exactly the boundary should lie between exception-throwing code and use of `Either/Try`...
 
   private trait AbstractTrancheSpecificReferenceResolver
       extends ReferenceResolver
@@ -395,7 +408,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
       BiMapFactory.usingIdentityForInverse()
     protected var _numberOfLocalObjects: Int = 0
 
-    def objectLookup(): ObjectLookup = StandaloneObjectLookup(
+    def standaloneObjectLookup(): ObjectLookup = StandaloneObjectLookup(
       referenceIdToLocalObjectMap
     )
 
