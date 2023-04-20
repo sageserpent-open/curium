@@ -27,8 +27,7 @@ import scala.collection.mutable
 import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
 import scala.ref.WeakReference
 import scala.reflect.runtime.currentMirror
-import scala.util.Using.Releasable
-import scala.util.{DynamicVariable, Success, Try, Using}
+import scala.util.{DynamicVariable, Success, Try}
 
 object ImmutableObjectStorageImplementation {
   import ImmutableObjectStorage._
@@ -181,6 +180,9 @@ class ImmutableObjectStorageImplementation[TrancheId](
   private val outputPool: Pool[Output] = new Pool[Output](true, false) {
     override def create(): Output = new Output(new ByteArrayOutputStream())
   }
+
+  private val serializationFacade =
+    new SerializationFacade(kryoPool, inputPool, outputPool)
 
   private val intersessionState: IntersessionState = new IntersessionState
 
@@ -630,38 +632,6 @@ class ImmutableObjectStorageImplementation[TrancheId](
     proxySupport.canBeProxied(
       immutableObject.getClass
     )
-
-  // Replacement for the now removed use of Chill's `KryoPool`...
-  private object serializationFacade {
-    def evidence[X](pool: Pool[X]): Releasable[X] = pool.free
-
-    implicit val kryoEvidence: Releasable[Kryo]     = evidence(kryoPool)
-    implicit val inputEvidence: Releasable[Input]   = evidence(inputPool)
-    implicit val outputEvidence: Releasable[Output] = evidence(outputPool)
-
-    def fromBytes(bytes: Array[Byte]): Any =
-      Using.resources(kryoPool.obtain(), inputPool.obtain()) { (kryo, input) =>
-        input.setBuffer(bytes)
-        kryo.readClassAndObject(input)
-      }
-
-    def toBytesWithClass(immutableObject: Any): Array[Byte] =
-      Using.resources(kryoPool.obtain(), outputPool.obtain()) {
-        (kryo, output) =>
-          val byteArrayOutputStream =
-            output.getOutputStream.asInstanceOf[ByteArrayOutputStream]
-          byteArrayOutputStream.reset()
-          output.reset()
-
-          kryo.writeClassAndObject(output, immutableObject)
-
-          output.flush()
-          byteArrayOutputStream.toByteArray
-      }
-
-    def copy[X](immutableObject: X): X =
-      Using.resource(kryoPool.obtain())(_.copy(immutableObject))
-  }
 
   private object proxySupport extends ProxySupport {
 
