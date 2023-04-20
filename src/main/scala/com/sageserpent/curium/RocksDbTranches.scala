@@ -7,7 +7,7 @@ import org.rocksdb._
 
 import java.lang.{Long => JavaLong}
 import scala.collection.mutable
-import scala.util.{Try, Using}
+import scala.util.Using
 
 object RocksDbTranches {
   val trancheIdKeyPayloadValueColumnFamilyName = "TrancheIdKeyPayloadValue"
@@ -42,44 +42,43 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
 
   override def createTrancheInStorage(
       tranche: TrancheOfData[TrancheId]
-  ): EitherThrowableOr[TrancheId] =
-    Try {
-      val trancheId = Using.resource(
-        rocksDb.newIterator(trancheIdKeyPayloadValueColumnFamily)
-      ) { iterator =>
-        iterator.seekToLast()
-        if (iterator.isValid) 1L + Longs.fromByteArray(iterator.key()) else 0L
-      }
+  ): TrancheId = {
+    val trancheId = Using.resource(
+      rocksDb.newIterator(trancheIdKeyPayloadValueColumnFamily)
+    ) { iterator =>
+      iterator.seekToLast()
+      if (iterator.isValid) 1L + Longs.fromByteArray(iterator.key()) else 0L
+    }
 
-      val trancheIdKey = Longs.toByteArray(trancheId)
+    val trancheIdKey = Longs.toByteArray(trancheId)
 
-      Using.resource(new WriteBatch()) { writeBatch =>
+    Using.resource(new WriteBatch()) { writeBatch =>
+      writeBatch.put(
+        trancheIdKeyPayloadValueColumnFamily,
+        trancheIdKey,
+        tranche.payload
+      )
+
+      for (
+        (trancheLocalObjectReferenceId, canonicalObjectReferenceId) <-
+          tranche.interTrancheObjectReferenceIdTranslation
+      ) {
         writeBatch.put(
-          trancheIdKeyPayloadValueColumnFamily,
-          trancheIdKey,
-          tranche.payload
+          augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamily,
+          byteArrayOf(trancheId -> trancheLocalObjectReferenceId),
+          byteArrayOf(canonicalObjectReferenceId)
         )
-
-        for (
-          (trancheLocalObjectReferenceId, canonicalObjectReferenceId) <-
-            tranche.interTrancheObjectReferenceIdTranslation
-        ) {
-          writeBatch.put(
-            augmentedTrancheLocalObjectReferenceIdKeyCanonicalObjectReferenceIdValueColumnFamily,
-            byteArrayOf(trancheId -> trancheLocalObjectReferenceId),
-            byteArrayOf(canonicalObjectReferenceId)
-          )
-        }
-
-        rocksDb.write(writeOptions, writeBatch)
       }
 
-      trancheId
-    }.toEither
+      rocksDb.write(writeOptions, writeBatch)
+    }
+
+    trancheId
+  }
 
   override def retrieveTranche(
       trancheId: TrancheId
-  ): EitherThrowableOr[TrancheOfData[TrancheId]] = Try {
+  ): TrancheOfData[TrancheId] = {
     val trancheIdKey = Longs.toByteArray(trancheId)
     val payload =
       rocksDb.get(trancheIdKeyPayloadValueColumnFamily, trancheIdKey)
@@ -122,7 +121,7 @@ class RocksDbTranches(rocksDb: RocksDB) extends Tranches[Long] {
       payload,
       interTrancheObjectReferenceIdTranslation.toMap
     )
-  }.toEither
+  }
 
   private def byteArrayOf(
       canonicalObjectReferenceId: CanonicalObjectReferenceId[TrancheId]

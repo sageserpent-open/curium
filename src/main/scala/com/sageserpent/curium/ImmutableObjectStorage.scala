@@ -19,11 +19,11 @@ object ImmutableObjectStorage {
 
     def createTrancheInStorage(
         tranche: TrancheOfData[TrancheId]
-    ): EitherThrowableOr[TrancheId]
+    ): TrancheId
 
     def retrieveTranche(
         trancheId: TrancheId
-    ): EitherThrowableOr[TrancheOfData[TrancheId]]
+    ): TrancheOfData[TrancheId]
   }
 
   case class TrancheOfData[TrancheId](

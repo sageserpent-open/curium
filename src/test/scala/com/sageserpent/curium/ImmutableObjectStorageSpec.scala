@@ -205,21 +205,17 @@ object ImmutableObjectStorageSpec {
 
     override def createTrancheInStorage(
         tranche: TrancheOfData[TrancheId]
-    ): EitherThrowableOr[TrancheId] =
-      Try {
-        val trancheId = UUID.randomUUID()
+    ): TrancheId = {
+      val trancheId = UUID.randomUUID()
 
-        tranchesById(trancheId) = tranche
+      tranchesById(trancheId) = tranche
 
-        trancheId
-      }.toEither
+      trancheId
+    }
 
     override def retrieveTranche(
         trancheId: TrancheId
-    ): scala.Either[scala.Throwable, TrancheOfData[TrancheId]] =
-      Try {
-        tranchesById(trancheId)
-      }.toEither
+    ): TrancheOfData[TrancheId] = tranchesById(trancheId)
   }
 
   case class Leaf(id: Int, labelString: String) extends Part {

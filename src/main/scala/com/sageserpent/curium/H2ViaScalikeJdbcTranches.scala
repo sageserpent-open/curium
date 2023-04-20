@@ -2,15 +2,8 @@ package com.sageserpent.curium
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import com.sageserpent.curium.ImmutableObjectStorage.{
-  EitherThrowableOr,
-  TrancheLocalObjectReferenceId,
-  TrancheOfData,
-  Tranches
-}
+import com.sageserpent.curium.ImmutableObjectStorage.{TrancheLocalObjectReferenceId, TrancheOfData, Tranches}
 import scalikejdbc._
-
-import scala.util.Try
 
 object H2ViaScalikeJdbcTranches {
   def setupDatabaseTables(connectionPool: ConnectionPool): IO[Unit] =
@@ -42,81 +35,77 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
     extends Tranches[Long] {
   override def createTrancheInStorage(
       tranche: TrancheOfData[TrancheId]
-  ): EitherThrowableOr[TrancheId] =
-    Try {
-      DBResource(connectionPool)
-        .use(db =>
-          IO {
-            db localTx { implicit session: DBSession =>
-              val trancheId: TrancheId =
-                sql"""
+  ): TrancheId =
+    DBResource(connectionPool)
+      .use(db =>
+        IO {
+          db localTx { implicit session: DBSession =>
+            val trancheId: TrancheId =
+              sql"""
           INSERT INTO Tranche(payload) VALUES (${tranche.payload})
        """.updateAndReturnGeneratedKey("trancheId")
-                  .apply()
+                .apply()
 
-              val _ =
-                sql"""
+            val _ =
+              sql"""
           INSERT INTO InterTrancheObjectReferenceIdTranslation(referringTrancheId, referringTrancheLocalObjectReferenceId, homeTrancheId, homeTrancheLocalObjectReferenceId) VALUES (?, ?, ?, ?)
          """.batch(
-                  tranche.interTrancheObjectReferenceIdTranslation.toSeq map {
-                    case (
-                          referringTrancheLocalObjectReferenceId,
-                          (homeTrancheId, homeTranceLocalObjectReferenceId)
-                        ) =>
-                      Seq(
-                        trancheId,
+                tranche.interTrancheObjectReferenceIdTranslation.toSeq map {
+                  case (
                         referringTrancheLocalObjectReferenceId,
-                        homeTrancheId,
-                        homeTranceLocalObjectReferenceId
-                      )
-                  }: _*
-                ).apply()
+                        (homeTrancheId, homeTranceLocalObjectReferenceId)
+                      ) =>
+                    Seq(
+                      trancheId,
+                      referringTrancheLocalObjectReferenceId,
+                      homeTrancheId,
+                      homeTranceLocalObjectReferenceId
+                    )
+                }: _*
+              ).apply()
 
-              trancheId
-            }
+            trancheId
           }
-        )
-        .unsafeRunSync()
-    }.toEither
+        }
+      )
+      .unsafeRunSync()
 
   override def retrieveTranche(
       trancheId: TrancheId
-  ): EitherThrowableOr[TrancheOfData[TrancheId]] =
-    Try {
-      DBResource(connectionPool)
-        .use(db =>
-          IO {
-            db localTx { implicit session: DBSession =>
-              (for {
-                payload <-
-                  sql"""
+  ): TrancheOfData[TrancheId] =
+    DBResource(connectionPool)
+      .use(db =>
+        IO {
+          db localTx { implicit session: DBSession =>
+            (for {
+              payload <-
+                sql"""
           SELECT payload FROM Tranche WHERE $trancheId = TrancheId
        """.map(_.bytes("payload")).single().apply()
 
-                interTrancheObjectReferenceIdTranslation =
-                  sql"""SELECT referringTrancheLocalObjectReferenceId, homeTrancheId, homeTrancheLocalObjectReferenceId FROM InterTrancheObjectReferenceIdTranslation WHERE referringTrancheId = $trancheId"""
-                    .map { resultSet =>
-                      val referringTrancheLocalObjectReferenceId
-                          : TrancheLocalObjectReferenceId =
-                        resultSet.int("referringTrancheLocalObjectReferenceId")
-                      val homeTrancheId: TrancheId =
-                        resultSet.long("homeTrancheId")
-                      val homeTrancheLocalObjectReferenceId =
-                        resultSet.int("homeTrancheLocalObjectReferenceId")
+              interTrancheObjectReferenceIdTranslation =
+                sql"""SELECT referringTrancheLocalObjectReferenceId, homeTrancheId, homeTrancheLocalObjectReferenceId FROM InterTrancheObjectReferenceIdTranslation WHERE referringTrancheId = $trancheId"""
+                  .map { resultSet =>
+                    val referringTrancheLocalObjectReferenceId
+                        : TrancheLocalObjectReferenceId =
+                      resultSet.int("referringTrancheLocalObjectReferenceId")
+                    val homeTrancheId: TrancheId =
+                      resultSet.long("homeTrancheId")
+                    val homeTrancheLocalObjectReferenceId =
+                      resultSet.int("homeTrancheLocalObjectReferenceId")
 
-                      referringTrancheLocalObjectReferenceId -> (homeTrancheId, homeTrancheLocalObjectReferenceId)
-                    }
-                    .toIterable()
-                    .apply()
-                    .toMap
-              } yield TrancheOfData(
-                payload = payload,
-                interTrancheObjectReferenceIdTranslation =
-                  interTrancheObjectReferenceIdTranslation
-              )).get
-            }
+                    referringTrancheLocalObjectReferenceId -> (homeTrancheId, homeTrancheLocalObjectReferenceId)
+                  }
+                  .toIterable()
+                  .apply()
+                  .toMap
+            } yield TrancheOfData(
+              payload = payload,
+              interTrancheObjectReferenceIdTranslation =
+                interTrancheObjectReferenceIdTranslation
+            )).get
           }
-        )
-        .unsafeRunSync()
-    }.toEither
+        }
+      )
+      .unsafeRunSync()
 }

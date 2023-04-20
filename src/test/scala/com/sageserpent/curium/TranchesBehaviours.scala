@@ -70,15 +70,12 @@ trait TranchesBehaviours[TrancheId] extends AnyFlatSpec with Matchers {
                 ) <-
                   payloadAndCountPairs
               ) {
-                val Right(trancheId) =
-                  for {
-                    trancheId <- tranches.createTrancheInStorage(
-                      TrancheOfData(
-                        payload,
-                        interTrancheObjectReferenceIdTranslation
-                      )
-                    )
-                  } yield trancheId
+                val trancheId = tranches.createTrancheInStorage(
+                  TrancheOfData(
+                    payload,
+                    interTrancheObjectReferenceIdTranslation
+                  )
+                )
 
                 trancheIds += trancheId
               }
@@ -104,24 +101,19 @@ trait TranchesBehaviours[TrancheId] extends AnyFlatSpec with Matchers {
                 ) <-
                   payloadAndCountPairs
               ) {
-                val Right((trancheId, tranche)) = {
-                  val tranche = TrancheOfData(
-                    payload,
-                    interTrancheObjectReferenceIdTranslation
-                  )
+                val tranche = TrancheOfData(
+                  payload,
+                  interTrancheObjectReferenceIdTranslation
+                )
 
-                  for {
-                    trancheId <- tranches
-                      .createTrancheInStorage(tranche)
-                  } yield trancheId -> tranche
-                }
+                val trancheId = tranches.createTrancheInStorage(tranche)
 
                 trancheIdToExpectedTrancheMapping += (trancheId -> tranche)
               }
 
               trancheIdToExpectedTrancheMapping.foreach {
                 case (trancheId, expectedTranche) =>
-                  val Right(tranche) = tranches.retrieveTranche(trancheId)
+                  val tranche = tranches.retrieveTranche(trancheId)
 
                   tranche shouldBe expectedTranche
               }

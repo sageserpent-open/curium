@@ -317,26 +317,27 @@ class ImmutableObjectStorageImplementation[TrancheId](
               serializationFacade.toBytesWithClass(immutableObject)
             }
 
-          for {
-            trancheId <- tranches
+          Try {
+            val trancheId = tranches
               .createTrancheInStorage(
                 TrancheOfData(
                   serializedRepresentation,
                   trancheSpecificReferenceResolver.interTrancheObjectReferenceIdTranslation
                 )
               )
-            _ = {
-              intersessionState.noteTranche(
-                trancheId,
-                TrancheLoadData(
-                  immutableObject,
-                  trancheSpecificReferenceResolver
-                    .standaloneObjectLookup()
-                )
+
+            intersessionState.noteTranche(
+              trancheId,
+              TrancheLoadData(
+                immutableObject,
+                trancheSpecificReferenceResolver
+                  .standaloneObjectLookup()
               )
-              trancheSpecificReferenceResolver.noteTrancheId(trancheId)
-            }
-          } yield trancheId
+            )
+            trancheSpecificReferenceResolver.noteTrancheId(trancheId)
+
+            trancheId
+          }.toEither
 
         case Retrieve(trancheId, clazz) =>
           Try {
@@ -355,44 +356,42 @@ class ImmutableObjectStorageImplementation[TrancheId](
             trancheIdForExternalObjectReference,
             trancheLocalObjectReferenceId
           ) =>
-        val TrancheLoadData(_, trancheSpecificReferenceResolver) =
+      val TrancheLoadData(_, objectLookup) =
           intersessionState.loadTranche(
             trancheIdForExternalObjectReference,
             loadTranche
           )
 
-        trancheSpecificReferenceResolver.objectWithReferenceId(
+      objectLookup.objectWithReferenceId(
           trancheLocalObjectReferenceId
         )
     }
 
   private def loadTranche(
       trancheId: TrancheId
-  ): TrancheLoadData =
-    (for {
-      tranche <- tranches.retrieveTranche(trancheId).toTry
-      result <- Try {
-        val trancheSpecificReferenceResolver =
-          new TrancheSpecificReadingReferenceResolver(
-            trancheId,
-            tranche.interTrancheObjectReferenceIdTranslation
-          ) with ReferenceResolverContracts
+  ): TrancheLoadData = {
+    val tranche = tranches.retrieveTranche(trancheId)
 
-        val topLevelObject =
-          sessionReferenceResolver.withValue(
-            Some(trancheSpecificReferenceResolver)
-          ) {
-            serializationFacade.fromBytes(tranche.payload)
-          }
+    val trancheSpecificReferenceResolver =
+      new TrancheSpecificReadingReferenceResolver(
+        trancheId,
+        tranche.interTrancheObjectReferenceIdTranslation
+      ) with ReferenceResolverContracts
 
-        trancheSpecificReferenceResolver.noteTrancheId(trancheId)
-
-        TrancheLoadData(
-          topLevelObject,
-          trancheSpecificReferenceResolver.standaloneObjectLookup
-        )
+    val topLevelObject =
+      sessionReferenceResolver.withValue(
+        Some(trancheSpecificReferenceResolver)
+      ) {
+        serializationFacade.fromBytes(tranche.payload)
       }
-    } yield result).get // NASTY HACK: need to decide where exactly the boundary should lie between exception-throwing code and use of `Either/Try`...
+
+    trancheSpecificReferenceResolver.noteTrancheId(trancheId)
+
+    TrancheLoadData(
+      topLevelObject,
+      trancheSpecificReferenceResolver.standaloneObjectLookup()
+    )
+  }
 
   private trait AbstractTrancheSpecificReferenceResolver
       extends ReferenceResolver
