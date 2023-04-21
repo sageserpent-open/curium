@@ -2,6 +2,7 @@ package com.sageserpent.curium
 
 import cats.free.FreeT
 import cats.implicits._
+import com.sageserpent.curium.caffeineBuilder.CaffeineArchetype
 
 import scala.reflect.runtime.universe.{TypeTag, typeOf}
 import scala.util.hashing.MurmurHash3
@@ -84,6 +85,10 @@ object ImmutableObjectStorage {
     // that are actually used as part of an object-oriented interface hierarchy
     // - the collection classes being the main offenders in that regard.
     def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean = false
+
+    def trancheCacheCustomisation(
+        caffeine: CaffeineArchetype
+    ): CaffeineArchetype = caffeine.softValues()
   }
 }
 

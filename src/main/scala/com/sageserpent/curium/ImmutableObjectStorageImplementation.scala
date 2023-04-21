@@ -6,7 +6,7 @@ import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, Pool, Util}
 import com.esotericsoftware.kryo.{Kryo, KryoCopyable, ReferenceResolver, Registration}
-import com.github.benmanes.caffeine.cache.{Cache, Scheduler}
+import com.github.benmanes.caffeine.cache.{Cache, Caffeine, Scheduler}
 import com.google.common.collect.{BiMap, BiMapFactory}
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 import net.bytebuddy.description.`type`.TypeDescription
@@ -21,7 +21,6 @@ import org.objenesis.strategy.StdInstantiatorStrategy
 
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.Modifier
-import java.util.concurrent.TimeUnit
 import java.util.{Map => JavaMap}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
@@ -214,15 +213,15 @@ class ImmutableObjectStorageImplementation[TrancheId](
         .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
 
     private val trancheIdToTrancheLoadDataCache
-        : Cache[TrancheId, TrancheLoadData] =
-      caffeineBuilder()
+        : Cache[TrancheId, TrancheLoadData] = {
+      val preconfiguredCaffeine: Caffeine[Any, Any] = caffeineBuilder()
         .scheduler(Scheduler.systemScheduler())
         .executor(_.run())
-        .expireAfterAccess(
-          30,
-          TimeUnit.SECONDS
-        ) // NASTY HACK - leave it here for now while experimenting.
+
+      configuration
+        .trancheCacheCustomisation(preconfiguredCaffeine)
         .build[TrancheId, TrancheLoadData]()
+    }
 
     def noteReferenceIdForNonProxy(
         immutableObject: AnyRef,

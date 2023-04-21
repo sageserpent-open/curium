@@ -4,7 +4,9 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage.Session
+import com.sageserpent.curium.caffeineBuilder.CaffeineArchetype
 
+import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
 import scala.collection.immutable.{AbstractMap, AbstractSet}
 import scala.collection.mutable
@@ -58,7 +60,8 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                 immutableObjectStorage.runToYieldResult(
                   immutableObjectStorage
                     .retrieve[Map[Int, Set[String]]](trancheId)
-                    .map(_.get(step - 1).getOrElse(Set.empty)))
+                    .map(_.get(step - 1).getOrElse(Set.empty))
+                )
 
               val duration = postUpdatesTime - startTime
 
@@ -170,6 +173,16 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
         (classOf[AbstractSet[_]] isAssignableFrom clazz) || (classOf[
           AbstractMap[_, _]
         ] isAssignableFrom clazz)
+
+    override def trancheCacheCustomisation(
+        caffeine: CaffeineArchetype
+    ): CaffeineArchetype =
+      super
+        .trancheCacheCustomisation(caffeine)
+        .expireAfterAccess(
+          30,
+          TimeUnit.SECONDS
+        ) // NASTY HACK - leave it here for now while experimenting.
 
   }
 }
