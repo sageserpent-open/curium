@@ -3,25 +3,21 @@ package com.sageserpent.curium
 import cats.arrow.FunctionK
 import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
-import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, Pool, Util}
-import com.esotericsoftware.kryo.{Kryo, KryoCopyable, ReferenceResolver, Registration}
+import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Registration}
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine, Scheduler}
 import com.google.common.collect.{BiMap, BiMapFactory}
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
+import net.bytebuddy.NamingStrategy
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
-import net.bytebuddy.implementation.bind.annotation.{FieldValue, Pipe, RuntimeType}
+import net.bytebuddy.implementation.bind.annotation.Pipe
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
-import net.bytebuddy.{ByteBuddy, NamingStrategy}
-import org.objenesis.instantiator.ObjectInstantiator
-import org.objenesis.strategy.StdInstantiatorStrategy
 
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.Modifier
-import java.util.{Map => JavaMap}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
 import scala.ref.WeakReference
@@ -29,62 +25,6 @@ import scala.reflect.runtime.currentMirror
 import scala.util.{DynamicVariable, Success, Try}
 
 object ImmutableObjectStorageImplementation {
-  import ImmutableObjectStorage._
-
-  protected trait ProxySupport {
-    type PipeForwarding = Function[AnyRef, Nothing]
-    val byteBuddy = new ByteBuddy()
-    /* This is tracked to workaround Kryo leaking its internal fudge as to how
-     * it registers closure serializers into calls on the tranche specific
-     * reference resolver class' methods. */
-    val kryoClosureMarkerClazz = classOf[Closure]
-    val stateAcquisitionClazz  = classOf[StateAcquisition]
-    val kryoCopyableClazz      = classOf[KryoCopyable[StateAcquisition]]
-    val instantiatorStrategy: StdInstantiatorStrategy =
-      new StdInstantiatorStrategy
-
-    def isProxyClazz(clazz: Class[_]): Boolean =
-      stateAcquisitionClazz.isAssignableFrom(clazz)
-
-    def isProxy(immutableObject: AnyRef): Boolean =
-      stateAcquisitionClazz.isInstance(immutableObject)
-
-    trait AcquiredState {
-      def underlying: AnyRef
-    }
-
-    private[curium] trait StateAcquisition {
-      def acquire(acquiredState: AcquiredState): Unit
-    }
-
-    object proxyDelayedLoading {
-      @RuntimeType
-      def apply(
-          @Pipe pipeTo: PipeForwarding,
-          @FieldValue("acquiredState") acquiredState: AcquiredState
-      ): Any = {
-        val underlying: AnyRef = acquiredState.underlying
-
-        pipeTo(underlying)
-      }
-    }
-
-    object proxyCopying {
-      @RuntimeType
-      def copy(
-          @RuntimeType kryo: Kryo,
-          @FieldValue("acquiredState") acquiredState: AcquiredState
-      ): Any = {
-        val underlying: AnyRef = acquiredState.underlying
-
-        val copyOfUnderlying = kryo.copy(underlying)
-        kryo.reference(copyOfUnderlying)
-
-        copyOfUnderlying
-      }
-    }
-
-  }
 
   object standaloneExemplarToEnticeScalaKyro
 
@@ -95,29 +35,6 @@ object ImmutableObjectStorageImplementation {
       case AssociatedValueForAlias(immutableObject) => immutableObject
       case immutableObject @ _                      => immutableObject
     }
-
-  trait ObjectLookup {
-    protected val referenceIdToLocalObjectMap: JavaMap[
-      TrancheLocalObjectReferenceId,
-      AnyRef
-    ]
-
-    def objectWithReferenceId(
-        objectReferenceId: TrancheLocalObjectReferenceId
-    ): AnyRef =
-      Option(referenceIdToLocalObjectMap.get(objectReferenceId))
-        .map(decodePlaceholder)
-        .get
-  }
-
-  case class StandaloneObjectLookup(
-      override protected val referenceIdToLocalObjectMap: JavaMap[
-        TrancheLocalObjectReferenceId,
-        AnyRef
-      ]
-  ) extends ObjectLookup
-
-  case class TrancheLoadData(topLevelObject: Any, objectLookup: ObjectLookup)
 
   private val notYetWritten = -1
 }
@@ -330,10 +247,11 @@ class ImmutableObjectStorageImplementation[TrancheId](
               TrancheLoadData(
                 immutableObject,
                 trancheSpecificReferenceResolver
-                  .standaloneObjectLookup()
               )
             )
-            trancheSpecificReferenceResolver.noteTrancheId(trancheId)
+            trancheSpecificReferenceResolver.cacheForInterTrancheReferences(
+              trancheId
+            )
 
             trancheId
           }.toEither
@@ -384,13 +302,26 @@ class ImmutableObjectStorageImplementation[TrancheId](
         serializationFacade.fromBytes(tranche.payload)
       }
 
-    trancheSpecificReferenceResolver.noteTrancheId(trancheId)
+    trancheSpecificReferenceResolver.cacheForInterTrancheReferences(trancheId)
 
     TrancheLoadData(
       topLevelObject,
-      trancheSpecificReferenceResolver.standaloneObjectLookup()
+      trancheSpecificReferenceResolver
     )
   }
+
+  private trait ObjectLookup {
+    def objectWithReferenceId(
+        objectReferenceId: TrancheLocalObjectReferenceId
+    ): AnyRef
+
+    def cacheForInterTrancheReferences(trancheId: TrancheId): Unit
+  }
+
+  private case class TrancheLoadData(
+      topLevelObject: Any,
+      objectLookup: ObjectLookup
+  )
 
   private trait AbstractTrancheSpecificReferenceResolver
       extends ReferenceResolver
@@ -406,11 +337,14 @@ class ImmutableObjectStorageImplementation[TrancheId](
       BiMapFactory.usingIdentityForInverse()
     protected var _numberOfLocalObjects: Int = 0
 
-    def standaloneObjectLookup(): ObjectLookup = StandaloneObjectLookup(
-      referenceIdToLocalObjectMap
-    )
+    override def objectWithReferenceId(
+        objectReferenceId: TrancheLocalObjectReferenceId
+    ): AnyRef =
+      Option(referenceIdToLocalObjectMap.get(objectReferenceId))
+        .map(decodePlaceholder)
+        .get
 
-    def noteTrancheId(trancheId: TrancheId): Unit = {
+    def cacheForInterTrancheReferences(trancheId: TrancheId): Unit = {
       referenceIdToLocalObjectMap.forEach {
         (objectReferenceId, immutableObject) =>
           if (allowInterTrancheReferences(immutableObject)) {
@@ -483,14 +417,14 @@ class ImmutableObjectStorageImplementation[TrancheId](
         .computeIfAbsent(
           canonicalReference,
           { _ =>
+            val interTrancheObjectReferenceId =
+              minimumInterTrancheObjectReferenceId
+
             require(
-              minimumInterTrancheObjectReferenceId > _numberOfLocalObjects
+              interTrancheObjectReferenceId > _numberOfLocalObjects
             )
 
-            val numberOfInterTrancheReferences =
-              _interTrancheObjectReferenceIdTranslation.size()
-
-            maximumObjectReferenceId - numberOfInterTrancheReferences
+            interTrancheObjectReferenceId
           }
         )
 
@@ -645,14 +579,8 @@ class ImmutableObjectStorageImplementation[TrancheId](
     )
 
   private object proxySupport extends ProxySupport {
+    import ProxySupport._
 
-    val superClazzAndInterfacesCache
-        : Cache[Class[_], Option[SuperClazzAndInterfaces]] =
-      caffeineBuilder().build()
-    val cachedProxyClassInstantiators
-        : Cache[SuperClazzAndInterfaces, ObjectInstantiator[_]] =
-      caffeineBuilder().build()
-    val proxiedClazzCache: Cache[Class[_], Class[_]] = caffeineBuilder().build()
     private val proxySuffix =
       s"delayedLoadProxyFor${configuration.tranchesImplementationName}"
     private val superClazzBag: mutable.Map[TypeDescription, Int] =
@@ -816,11 +744,6 @@ class ImmutableObjectStorageImplementation[TrancheId](
         .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
         .getLoaded
     }
-
-    case class SuperClazzAndInterfaces(
-        superClazz: Class[_],
-        interfaces: Seq[Class[_]]
-    )
   }
 
   private trait ReferenceResolverContracts extends ReferenceResolver {
@@ -873,7 +796,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
       assert(
         (proxySupport.superClazzAndInterfacesToProxy(clazz) match {
           case Some(
-                proxySupport.SuperClazzAndInterfaces(superClazz, interfaces)
+                ProxySupport.SuperClazzAndInterfaces(superClazz, interfaces)
               ) =>
             superClazz.isInstance(result) && interfaces.forall(
               _.isInstance(result)

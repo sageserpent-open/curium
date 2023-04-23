@@ -23,9 +23,6 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
           val immutableObjectStorage =
             configuration.build(tranches)
 
-          val immutableObjectStorageForQueries =
-            configuration.build(tranches)
-
           val Right(initialTrancheId: TrancheId) = {
             val session: Session[TrancheId] =
               immutableObjectStorage.store(Map.empty[Int, Set[String]])
@@ -182,7 +179,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
         .expireAfterAccess(
           30,
           TimeUnit.SECONDS
-        ) // NASTY HACK - leave it here for now while experimenting.
+        )
 
   }
 }
