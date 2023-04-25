@@ -861,35 +861,80 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           partGrowth.storeViaMultipleSessions(immutableObjectStorage)
 
         for (sampleTrancheId <- trancheIds) {
-          val samplingSession: Session[Unit] = for {
+          val retrievalSession: Session[Unit] = for {
             retrievedPartTakeOne <- immutableObjectStorage.retrieve[Part](
               sampleTrancheId
             )
             retrievedPartTakeTwo <- immutableObjectStorage.retrieve[Part](
               sampleTrancheId
             )
+            trancheIdFromStorageInThisSession <- immutableObjectStorage.store(
+              retrievedPartTakeOne
+            )
+            retrievedPartTakeThree <- immutableObjectStorage.retrieve[Part](
+              trancheIdFromStorageInThisSession
+            )
+            retrievedPartTakeFour <- immutableObjectStorage.retrieve[Part](
+              sampleTrancheId
+            )
           } yield {
             retrievedPartTakeTwo should be theSameInstanceAs retrievedPartTakeOne
+            retrievedPartTakeThree should be theSameInstanceAs retrievedPartTakeOne
+            retrievedPartTakeFour should be theSameInstanceAs retrievedPartTakeThree
           }
 
           immutableObjectStorage
-            .runForEffectsOnly(samplingSession) shouldBe a[Right[_, _]]
+            .runForEffectsOnly(retrievalSession) shouldBe a[Right[_, _]]
         }
       }
 
-  "yielding an object whose state is not stored" should "be supported" in
+  it should "preserve object identity when storing and then retrieving using the same tranche id" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .and(
-        api
-          .integers(0, maximumNumberOfPermutationsToChooseFrom - 1, 0)
-          .map(_.toDouble / maximumNumberOfPermutationsToChooseFrom)
-      )
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
-      .supplyTo { (partGrowth, permutationScale) =>
+      .supplyTo { partGrowth =>
+        val tranches = new FakeTranches
+
+        val immutableObjectStorage =
+          configuration.build(tranches)
+
+        val parts = partGrowth.parts()
+
+        for (samplePart <- parts) {
+          val retrievalSession: Session[Unit] = for {
+            trancheId <- immutableObjectStorage.store(
+              samplePart
+            )
+            retrievedPart <- immutableObjectStorage.retrieve[Part](
+              trancheId
+            )
+            trancheIdTakeTwo <- immutableObjectStorage.store(
+              retrievedPart
+            )
+            retrievedPartTakeTwo <- immutableObjectStorage.retrieve[Part](
+              trancheIdTakeTwo
+            )
+          } yield {
+            retrievedPart should be theSameInstanceAs samplePart
+            retrievedPartTakeTwo should be theSameInstanceAs retrievedPart
+          }
+
+          immutableObjectStorage
+            .runForEffectsOnly(retrievalSession) shouldBe a[Right[_, _]]
+        }
+      }
+
+  "yielding an object whose state is not stored" should "be supported" in
+    partGrowthLeadingToRootForkTrials(allowDuplicates = true)
+      .withStrategy(
+        casesLimitStrategyFactory =
+          _ => CasesLimitStrategy.timed(testCycleDuration),
+        complexityLimit = complexityLimit
+      )
+      .supplyTo { partGrowth =>
         val expectedParts = partGrowth.parts()
 
         val tranches = new FakeTranches
