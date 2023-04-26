@@ -370,7 +370,7 @@ object ImmutableObjectStorageSpec {
     } yield PartGrowth(steps, chunkSizes)
   }
 
-  private val testCycleDuration: Duration = Duration.ofSeconds(10)
+  private val testCycleDuration: Duration = Duration.ofSeconds(30)
 }
 
 class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
