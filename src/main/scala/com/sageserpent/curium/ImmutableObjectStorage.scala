@@ -6,23 +6,14 @@ import cats.implicits._
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
 import com.esotericsoftware.kryo.util.{DefaultClassResolver, Pool, Util}
-import com.esotericsoftware.kryo.{
-  Kryo,
-  KryoCopyable,
-  ReferenceResolver,
-  Registration
-}
+import com.esotericsoftware.kryo.{Kryo, KryoCopyable, ReferenceResolver, Registration}
 import com.github.benmanes.caffeine.cache.{Cache, Scheduler}
 import com.google.common.collect.{BiMap, BiMapFactory}
 import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
 import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
-import net.bytebuddy.implementation.bind.annotation.{
-  FieldValue,
-  Pipe,
-  RuntimeType
-}
+import net.bytebuddy.implementation.bind.annotation.{FieldValue, Pipe, RuntimeType}
 import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
 import net.bytebuddy.{ByteBuddy, NamingStrategy}
@@ -190,9 +181,9 @@ object ImmutableObjectStorage {
       caffeineBuilder()
         .scheduler(Scheduler.systemScheduler())
         .executor(_.run())
-        .expireAfterWrite(
-          5,
-          TimeUnit.MINUTES
+        .expireAfterAccess(
+          30,
+          TimeUnit.SECONDS
         ) // NASTY HACK - leave it here for now while experimenting.
         .build[TrancheId, (Any, ObjectLookup)]()
 
@@ -541,7 +532,8 @@ trait ImmutableObjectStorage[TrancheId] {
           _interTrancheObjectReferenceIdTranslation
             .inverse()
             .computeIfAbsent(
-              canonicalReference, {_ =>
+              canonicalReference,
+              { _ =>
                 require(
                   minimumInterTrancheObjectReferenceId > _numberOfLocalObjects
                 )
