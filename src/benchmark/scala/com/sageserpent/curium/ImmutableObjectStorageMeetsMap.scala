@@ -1,17 +1,12 @@
 package com.sageserpent.curium
 
-import cats.collections.{AvlMap, AvlSet}
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.sageserpent.americium.randomEnrichment._
-import com.sageserpent.curium.ImmutableObjectStorage.{
-  IntersessionState,
-  Session
-}
+import com.sageserpent.curium.ImmutableObjectStorage.{IntersessionState, Session}
 
-import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
+import scala.collection.immutable.{AbstractMap, AbstractSet}
 import scala.collection.mutable
 import scala.concurrent.duration.{Deadline, Duration}
 import scala.util.Random
@@ -29,7 +24,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
           val Right(initialTrancheId: TrancheId) = {
             val session: Session[TrancheId] =
-              immutableObjectStorage.store(AvlMap.empty[Int, AvlSet[String]])
+              immutableObjectStorage.store(Map.empty[Int, Set[String]])
 
             immutableObjectStorage
               .runToYieldTrancheId(session, intersessionState)(tranches)
@@ -49,9 +44,9 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
           val updateDurations: mutable.ListBuffer[Duration] =
             mutable.ListBuffer.empty
 
-          val lookbackLimit = 10000000
+          val lookbackLimit = 100000
 
-          val batchSize = 5
+          val batchSize = 100
 
           for (step <- 0 until (1000000000, batchSize)) {
             if (0 < step && step % 5000 == 0) {
@@ -60,8 +55,8 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
               val Right(contentsAtPreviousStep) =
                 immutableObjectStorage.runToYieldResult(
                   immutableObjectStorage
-                    .retrieve[AvlMap[Int, AvlSet[String]]](trancheId)
-                    .map(_.get(step - 1).getOrElse(AvlSet.empty).toScalaSet),
+                    .retrieve[Map[Int, Set[String]]](trancheId)
+                    .map(_.get(step - 1).getOrElse(Set.empty)),
                   intersessionStateForQueries
                 )(tranches)
 
@@ -89,9 +84,9 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
             val session: Session[TrancheId] = for {
               retrievedMap <- immutableObjectStorage
-                .retrieve[AvlMap[Int, AvlSet[String]]](trancheId)
+                .retrieve[Map[Int, Set[String]]](trancheId)
               mutatedMap = iterate {
-                (count, originalMap: AvlMap[Int, AvlSet[String]]) =>
+                (count, originalMap: Map[Int, Set[String]]) =>
                   val microStep = step + count
 
                   val mapWithPossibleRemoval =
@@ -100,7 +95,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                         microStep - randomBehaviour.chooseAnyNumberFromOneTo(
                           lookbackLimit min microStep
                         )
-                      originalMap.remove(elementToRemove)
+                      originalMap.removed(elementToRemove)
                     } else originalMap
 
                   mapWithPossibleRemoval + (microStep -> {
@@ -113,9 +108,9 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                             )
                         else 0
                       )
-                      .getOrElse(AvlSet.empty)
+                      .getOrElse(Set.empty)
                     if (!set.isEmpty && 1 == microStep % 11)
-                      set.remove(set.min.get)
+                      set.excl(set.min)
                     else set + microStep.toString
                   })
               }(seed = retrievedMap, numberOfIterations = batchSize)
@@ -160,5 +155,14 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
   object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
     override protected val tranchesImplementationName: String =
       classOf[RocksDbTranches].getSimpleName
+
+    override def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
+      // What goes on behind the scenes for the `HashSet` and `HashMap`
+      // implementations.
+      (clazz.getName contains "BitmapIndexed") || (clazz.getName contains "HashCollision") ||
+        (classOf[AbstractSet[_]] isAssignableFrom clazz) || (classOf[
+          AbstractMap[_, _]
+        ] isAssignableFrom clazz)
+
   }
 }
