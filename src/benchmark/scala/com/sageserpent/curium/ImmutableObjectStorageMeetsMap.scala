@@ -44,7 +44,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
           val updateDurations: mutable.ListBuffer[Duration] =
             mutable.ListBuffer.empty
 
-          val lookbackLimit = 100000
+          val lookbackLimit = 10000000
 
           val batchSize = 100
 
@@ -115,7 +115,14 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                   })
               }(seed = retrievedMap, numberOfIterations = batchSize)
 
-              newTrancheId <- immutableObjectStorage.store(mutatedMap)
+              trimmedMap =
+                if (mutatedMap.size > lookbackLimit)
+                  mutatedMap.removedAll(
+                    step + batchSize - mutatedMap.size until step + batchSize - lookbackLimit
+                  )
+                else mutatedMap
+
+              newTrancheId <- immutableObjectStorage.store(trimmedMap)
             } yield newTrancheId
 
             {
