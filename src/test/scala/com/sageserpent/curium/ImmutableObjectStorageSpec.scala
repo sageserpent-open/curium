@@ -4,7 +4,6 @@ import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import cats.free.FreeT
 import cats.implicits._
-import com.github.benmanes.caffeine.cache.{Cache, Caffeine}
 import com.sageserpent.americium.Trials
 import com.sageserpent.americium.java.CasesLimitStrategy
 import com.sageserpent.curium.ImmutableObjectStorage._
@@ -378,6 +377,8 @@ object ImmutableObjectStorageSpec {
       }
     } yield PartGrowth(steps, chunkSizes)
   }
+
+  private val testCycleDuration: Duration = Duration.ofSeconds(10)
 }
 
 class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
@@ -390,7 +391,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -418,7 +419,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       )
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { (partGrowth, permutationScale) =>
@@ -499,7 +500,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       )
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { (partGrowth, permutationScale) =>
@@ -580,7 +581,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       )
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { (partGrowth, permutationScale) =>
@@ -653,7 +654,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -693,7 +694,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     partGrowthLeadingToRootForkTrials(allowDuplicates = false)
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -738,7 +739,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     partGrowthLeadingToRootForkTrials(allowDuplicates = false)
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -776,7 +777,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     partGrowthLeadingToRootForkTrials(allowDuplicates = false)
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -822,7 +823,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -863,7 +864,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { partGrowth =>
@@ -902,7 +903,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       )
       .withStrategy(
         casesLimitStrategyFactory =
-          _ => CasesLimitStrategy.timed(Duration.ofSeconds(100)),
+          _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo { (partGrowth, permutationScale) =>
