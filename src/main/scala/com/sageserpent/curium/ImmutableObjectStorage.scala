@@ -153,14 +153,6 @@ object ImmutableObjectStorage {
         .weakKeys()
         .build[AnyRef, CanonicalObjectReferenceId[TrancheId]]()
 
-    private val referenceIdToObjectCache
-        : Cache[CanonicalObjectReferenceId[TrancheId], AnyRef] =
-      caffeineBuilder()
-        .scheduler(Scheduler.systemScheduler())
-        .executor(_.run())
-        .weakValues()
-        .build[CanonicalObjectReferenceId[TrancheId], AnyRef]()
-
     private val proxyToReferenceIdCache
         : Cache[AnyRef, CanonicalObjectReferenceId[TrancheId]] =
       caffeineBuilder()
@@ -202,12 +194,6 @@ object ImmutableObjectStorage {
           Option(objectToReferenceIdCache.getIfPresent(immutableObject))
         )
 
-    def nonProxyFor(
-        objectReferenceId: CanonicalObjectReferenceId[TrancheId],
-        population: CanonicalObjectReferenceId[TrancheId] => AnyRef
-    ): AnyRef =
-      referenceIdToObjectCache.get(objectReferenceId, population(_))
-
     def noteProxy(
         objectReferenceId: CanonicalObjectReferenceId[TrancheId],
         immutableObject: AnyRef
@@ -221,7 +207,6 @@ object ImmutableObjectStorage {
 
     def clear(): Unit = {
       objectToReferenceIdCache.invalidateAll()
-      referenceIdToObjectCache.invalidateAll()
       referenceIdToProxyCache.invalidateAll()
     }
   }
@@ -350,22 +335,19 @@ trait ImmutableObjectStorage[TrancheId] {
 
       def retrieveUnderlying(
           canonicalObjectReferenceId: CanonicalObjectReferenceId[TrancheId]
-      ): AnyRef = intersessionState
-        .nonProxyFor(
-          canonicalObjectReferenceId,
-          {
-            case (
-                  trancheIdForExternalObjectReference,
-                  trancheLocalObjectReferenceId
-                ) =>
-              val Right((_, trancheSpecificReferenceResolver)) =
-                loadTranche(trancheIdForExternalObjectReference)
-
-              trancheSpecificReferenceResolver.objectWithReferenceId(
+      ): AnyRef =
+        canonicalObjectReferenceId match {
+          case (
+                trancheIdForExternalObjectReference,
                 trancheLocalObjectReferenceId
-              )
-          }
-        )
+              ) =>
+            val Right((_, trancheSpecificReferenceResolver)) =
+              loadTranche(trancheIdForExternalObjectReference)
+
+            trancheSpecificReferenceResolver.objectWithReferenceId(
+              trancheLocalObjectReferenceId
+            )
+        }
 
       override def apply[X](operation: Operation[X]): EitherThrowableOr[X] =
         operation match {
