@@ -324,7 +324,9 @@ class ImmutableObjectStorage[TrancheId](
 
     def clear(): Unit = {
       objectToReferenceIdCache.invalidateAll()
+      proxyToReferenceIdCache.invalidateAll()
       referenceIdToProxyCache.invalidateAll()
+      trancheIdToStuffCache.invalidateAll()
     }
   }
 
