@@ -1,151 +1,117 @@
 package com.sageserpent.curium
 
-import cats.effect.IO
-import cats.effect.unsafe.implicits.global
 import com.sageserpent.americium.randomEnrichment._
-import com.sageserpent.curium.ImmutableObjectStorage.Session
-import com.sageserpent.curium.caffeineBuilder.CaffeineArchetype
 
-import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
-import scala.collection.immutable.{AbstractMap, AbstractSet}
 import scala.collection.mutable
 import scala.concurrent.duration.{Deadline, Duration}
 import scala.util.Random
 
-object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
-  type TrancheId = RocksDbTranches#TrancheId
+object ImmutableObjectStorageMeetsMap {
 
   def main(args: Array[String]): Unit = {
-    tranchesResource
-      .use(tranches =>
-        IO {
-          val immutableObjectStorage =
-            configuration.build(tranches)
+    val randomBehaviour = new Random(53278953)
 
-          val Right(initialTrancheId: TrancheId) = {
-            val session: Session[TrancheId] =
-              immutableObjectStorage.store(Map.empty[Int, Set[String]])
+    var theMap: Map[Int, Set[String]] = Map.empty
 
-            immutableObjectStorage
-              .runToYieldTrancheId(session)
-          }
+    val startTime = Deadline.now
 
-          val randomBehaviour = new Random(53278953)
+    var maximumUpdateDuration: Duration =
+      Duration.Zero
 
-          var trancheId: TrancheId = initialTrancheId
+    var minimumUpdateDuration: Duration = Duration.Inf
 
-          val startTime = Deadline.now
+    val updateDurations: mutable.ListBuffer[Duration] =
+      mutable.ListBuffer.empty
 
-          var maximumUpdateDuration: Duration =
-            Duration.Zero
+    val lookbackLimit = 10000000
 
-          var minimumUpdateDuration: Duration = Duration.Inf
+    val batchSize = 100
 
-          val updateDurations: mutable.ListBuffer[Duration] =
-            mutable.ListBuffer.empty
+    for (step <- 0 until (1000000000, batchSize)) {
+      if (0 < step && step % 5000 == 0) {
+        val postUpdatesTime = Deadline.now
 
-          val lookbackLimit = 10000000
+        val contentsAtPreviousStep =
+          theMap.get(step - 1).getOrElse(Set.empty)
 
-          val batchSize = 100
+        val duration = postUpdatesTime - startTime
 
-          for (step <- 0 until (1000000000, batchSize)) {
-            if (0 < step && step % 5000 == 0) {
-              val postUpdatesTime = Deadline.now
+        val queryDuration = Deadline.now - postUpdatesTime
 
-              val Right(contentsAtPreviousStep) =
-                immutableObjectStorage.runToYieldResult(
-                  immutableObjectStorage
-                    .retrieve[Map[Int, Set[String]]](trancheId)
-                    .map(_.get(step - 1).getOrElse(Set.empty))
-                )
+        println(
+          s"Step: $step, duration to before query: ${duration.toMillis} milliseconds, query duration: ${queryDuration.toMillis} milliseconds, minimum update duration: ${minimumUpdateDuration.toMillis} milliseconds, maximum update duration: ${maximumUpdateDuration.toMillis} milliseconds, average update duration: ${updateDurations
+              .map(_.toMillis)
+              .sum / updateDurations.size}, update durations: ${updateDurations
+              .map(_.toMillis)
+              .groupBy(identity)
+              .toSeq
+              .map { case (duration, group) =>
+                group.size -> duration
+              }
+              .sortBy { case (count, duration) => count -> -duration }} ,contents at previous step: $contentsAtPreviousStep"
+        )
 
-              val duration = postUpdatesTime - startTime
+        maximumUpdateDuration = Duration.Zero
+        minimumUpdateDuration = Duration.Inf
+        updateDurations.clear()
+      }
 
-              val queryDuration = Deadline.now - postUpdatesTime
+      {
 
-              println(
-                s"Step: $step, duration to before query: ${duration.toMillis} milliseconds, query duration: ${queryDuration.toMillis} milliseconds, minimum update duration: ${minimumUpdateDuration.toMillis} milliseconds, maximum update duration: ${maximumUpdateDuration.toMillis} milliseconds, average update duration: ${updateDurations
-                    .map(_.toMillis)
-                    .sum / updateDurations.size}, update durations: ${updateDurations
-                    .map(_.toMillis)
-                    .groupBy(identity)
-                    .toSeq
-                    .map { case (duration, group) =>
-                      group.size -> duration
-                    }
-                    .sortBy { case (count, duration) => count -> -duration }} ,contents at previous step: $contentsAtPreviousStep"
-              )
+        val updateStartTime = Deadline.now
 
-              maximumUpdateDuration = Duration.Zero
-              minimumUpdateDuration = Duration.Inf
-              updateDurations.clear()
-            }
+        {
+          val mutatedMap = iterate {
+            (count, originalMap: Map[Int, Set[String]]) =>
+              val microStep = step + count
 
-            val session: Session[TrancheId] = for {
-              retrievedMap <- immutableObjectStorage
-                .retrieve[Map[Int, Set[String]]](trancheId)
-              mutatedMap = iterate {
-                (count, originalMap: Map[Int, Set[String]]) =>
-                  val microStep = step + count
+              val mapWithPossibleRemoval =
+                if (1 == microStep % 5) {
+                  val elementToRemove =
+                    microStep - randomBehaviour.chooseAnyNumberFromOneTo(
+                      lookbackLimit min microStep
+                    )
+                  originalMap.removed(elementToRemove)
+                } else originalMap
 
-                  val mapWithPossibleRemoval =
-                    if (1 == microStep % 5) {
-                      val elementToRemove =
-                        microStep - randomBehaviour.chooseAnyNumberFromOneTo(
+              mapWithPossibleRemoval + (microStep -> {
+                val set = originalMap
+                  .get(
+                    if (0 < microStep)
+                      microStep - randomBehaviour
+                        .chooseAnyNumberFromOneTo(
                           lookbackLimit min microStep
                         )
-                      originalMap.removed(elementToRemove)
-                    } else originalMap
-
-                  mapWithPossibleRemoval + (microStep -> {
-                    val set = originalMap
-                      .get(
-                        if (0 < microStep)
-                          microStep - randomBehaviour
-                            .chooseAnyNumberFromOneTo(
-                              lookbackLimit min microStep
-                            )
-                        else 0
-                      )
-                      .getOrElse(Set.empty)
-                    if (!set.isEmpty && 1 == microStep % 11)
-                      set.excl(set.min)
-                    else set + microStep.toString
-                  })
-              }(seed = retrievedMap, numberOfIterations = batchSize)
-
-              trimmedMap =
-                if (mutatedMap.size > lookbackLimit)
-                  mutatedMap.removedAll(
-                    step + batchSize - mutatedMap.size until step + batchSize - lookbackLimit
+                    else 0
                   )
-                else mutatedMap
+                  .getOrElse(Set.empty)
+                if (!set.isEmpty && 1 == microStep % 11)
+                  set.excl(set.min)
+                else set + microStep.toString
+              })
+          }(seed = theMap, numberOfIterations = batchSize)
 
-              newTrancheId <- immutableObjectStorage.store(trimmedMap)
-            } yield newTrancheId
+          val trimmedMap =
+            if (mutatedMap.size > lookbackLimit)
+              mutatedMap.removedAll(
+                step + batchSize - mutatedMap.size until step + batchSize - lookbackLimit
+              )
+            else mutatedMap
 
-            {
-
-              val updateStartTime = Deadline.now
-
-              trancheId = immutableObjectStorage
-                .runToYieldTrancheId(session)
-                .right
-                .get
-
-              val updateDuration = Deadline.now - updateStartTime
-
-              maximumUpdateDuration = maximumUpdateDuration max updateDuration
-
-              minimumUpdateDuration = minimumUpdateDuration min updateDuration
-
-              updateDurations += updateDuration
-            }
-          }
+          theMap = trimmedMap
         }
-      )
-      .unsafeRunSync()
+
+        val updateDuration = Deadline.now - updateStartTime
+
+        maximumUpdateDuration = maximumUpdateDuration max updateDuration
+
+        minimumUpdateDuration = minimumUpdateDuration min updateDuration
+
+        updateDurations += updateDuration
+      }
+    }
+
   }
 
   def iterate[X](step: (Int, X) => X)(seed: X, numberOfIterations: Int): X = {
@@ -157,29 +123,5 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
       else seed
 
     evaluate(seed, 0)
-  }
-
-  object configuration extends ImmutableObjectStorage.Configuration {
-    override val tranchesImplementationName: String =
-      classOf[RocksDbTranches].getSimpleName
-
-    override def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
-      // What goes on behind the scenes for the `HashSet` and `HashMap`
-      // implementations.
-      (clazz.getName contains "BitmapIndexed") || (clazz.getName contains "HashCollision") ||
-        (classOf[AbstractSet[_]] isAssignableFrom clazz) || (classOf[
-          AbstractMap[_, _]
-        ] isAssignableFrom clazz)
-
-    override def trancheCacheCustomisation(
-        caffeine: CaffeineArchetype
-    ): CaffeineArchetype =
-      super
-        .trancheCacheCustomisation(caffeine)
-        .expireAfterAccess(
-          30,
-          TimeUnit.SECONDS
-        )
-
   }
 }
