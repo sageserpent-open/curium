@@ -245,9 +245,7 @@ look at the code in the configuration object that allows proxying of the standar
 internals. Nevertheless, you are in the danger zone when you configure in proxies over interfaces, be careful and
 experiment first.
 
-The fallback behaviour when an object can't be proxied is to simply to use the object itself, which means that the
-object will be stored locally in the same tranche as whatever object references it - so no structure sharing _across_
-tranches in that particular case.
+The fallback behaviour when an object can't be proxied is to simply to use the object itself - so the object can still sit in another tranche, but has to be loaded eagerly (as part of that other tranche) when a referencing object's tranche is loaded.
 
 ### What about object identity? Will the object graph be the same when a tranche is retrieved to what is was when the tranche was stored? ###
 
