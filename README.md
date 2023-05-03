@@ -47,22 +47,16 @@ Yes, that includes third party Scala and Java code too.
 When your application restarts, it uses the appropriate tranche id(s) to retrieve the relevant application state, and
 off it goes.
 
-Oh, and it all fits in memory because the application state loads lazily, even though it is immutable.
+The application state loads lazily, even though it is immutable, so if you have a gigantic data structure and only wish
+to deal with a piece of it, then Curium will load only as many objects as your code needs to run.
 
 ## Show me... ##
 
 ```scala
-// Support for resource management in this example, not mandatory for general use.
+type TrancheId = H2ViaScalikeJdbcTranches#TrancheId
 
-import cats.effect.IO
-import cats.implicits._
-
-// Curium API and its intersession state memento.
-import com.sageserpent.curium.ImmutableObjectStorage
-import ImmutableObjectStorage.IntersessionState
-
-object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
-  override protected val tranchesImplementationName: String =
+object configuration extends ImmutableObjectStorage.Configuration {
+  override val tranchesImplementationName: String =
     classOf[H2ViaScalikeJdbcTranches].getSimpleName
 }
 ```
@@ -70,93 +64,101 @@ object immutableObjectStorage extends ImmutableObjectStorage[TrancheId] {
 ...
 
 ```scala
-    // Start by obtaining a tranches object that provides backend storage and retrieval of tranche data.
-    // Use the one provided by the testing support - it spins up a temporary H2 database and uses that
-    // for its implementation; the database is torn down when the resource is relinquished.
-    tranchesResource
-        .use(tranches =>
-           IO {
-              // Next we'll have some intersession state, which is a memento object
-              // used by the immutable object storage to cache data between
-              // sessions.
+{
+  // Build an instance of `ImmutableObjectStorage` from the underlying
+  // tranches store.
+  val immutableObjectStorage =
+  configuration.build(tranches)
 
-              val intersessionState = new IntersessionState[TrancheId]
+  val initialMap =
+    Map("Huey" -> List(1, 2, 3, -1, -2, -3))
 
-              // Let's begin .. we shall store something and get back a tranche id
-              // that we hold on to.
-              val Right(firstTrancheId: TrancheId) = {
-                 // A session in which an initial immutable map with some
-                 // substructure is stored...
-                 val session = for {
-                    trancheId <- immutableObjectStorage
-                            .store[Map[Set[String], List[Int]]](
-                               Map(Set("Huey, Duey, Louie") -> List(1, 2, 3, -1, -2, -3))
-                            )
-                 } yield trancheId
+  // Let's begin .. we shall store something and get back a tranche id
+  // that we hold on to. Think of the following block as being a
+  // transaction that writes some initial data back to the tranches
+  // store.
+  val Right(trancheIdForInitialMap: TrancheId) = {
+    // A session in which an initial immutable map with some
+    // substructure is stored...
+    val session = for {
+      trancheId <- immutableObjectStorage
+        .store[Map[String, List[Int]]](initialMap)
+    } yield trancheId
 
-                 // Nothing has actually taken place yet - we have to run the session
-                 // to make imperative changes, in this case storing the initial map.
-                 // This gives us back the tranche id.
-                 immutableObjectStorage
-                         .runToYieldTrancheId(session, intersessionState)(tranches)
-              }
+    // Nothing has actually taken place yet - we have to run the session
+    // to make imperative changes, in this case storing the initial map.
+    // This gives us back the tranche id.
+    immutableObjectStorage
+      .runToYieldTrancheId(session)
+  }
 
-              // OK, so let's do some pure functional work on our initial map and
-              // store the result. We get back another tranche id that we hold on
-              // to.
-              val Right(secondTrancheId: TrancheId) = {
-                 // A session in which we retrieve the initial map, make a bigger one
-                 // and store it...
-                 val session = for {
-                    initialMap <- immutableObjectStorage
-                            .retrieve[Map[Set[String], List[Int]]](firstTrancheId)
-                    biggerMap = initialMap + (Set("Bystander") -> List.empty)
-                    trancheId <- immutableObjectStorage.store(biggerMap)
-                 } yield trancheId
+  // OK, so let's do some pure functional work on our initial map and
+  // store the result. We get back another tranche id that we hold on
+  // to. This defines another transaction that performs an update.
+  val Right(trancheIdForBiggerMap: TrancheId) = {
+    // A session in which we retrieve the initial map, make a bigger,
+    // updated one and store it...
+    val session = for {
+      initialMap <- immutableObjectStorage
+        .retrieve[Map[String, List[Int]]](trancheIdForInitialMap)
 
-                 // Again, nothing has actually taken place yet - so run the session,
-                 // etc.
-                 immutableObjectStorage
-                         .runToYieldTrancheId(session, intersessionState)(tranches)
-              }
+      mapWithUpdatedValue = initialMap.updatedWith("Huey")(
+        _.map(99 :: _)
+      )
 
-              // Let's verify what was stored.
-              val Right((initialMap, biggerMap)) = {
-                 // A session in which we retrieve the two objects from the previous
-                 // sessions and verify that they contain the correct data...
-                 val session = for {
-                    initialMap <- immutableObjectStorage
-                            .retrieve[Map[Set[String], List[Int]]](firstTrancheId)
-                    biggerMap <- immutableObjectStorage
-                            .retrieve[Map[Set[String], List[Int]]](secondTrancheId)
-                 } yield {
-                    initialMap -> biggerMap
-                 }
+      biggerMap = mapWithUpdatedValue.updated("Bystander", List.empty)
 
-                 immutableObjectStorage
-                         .runToYieldResult(session, intersessionState)(tranches)
-              }
+      trancheId <- immutableObjectStorage.store(biggerMap)
+    } yield trancheId
 
-              initialMap should be(
-                 Map(Set("Huey, Duey, Louie") -> List(1, 2, 3, -1, -2, -3))
-              )
-              biggerMap should be(
-                 Map(
-                    Set("Huey, Duey, Louie") -> List(1, 2, 3, -1, -2, -3),
-                    Set("Bystander")         -> List.empty
-                 )
-              )
-           }
-        )
+    // Again, nothing has actually taken place yet - so run the session
+    // to yield a new tranche id for the bigger map.
+    immutableObjectStorage
+      .runToYieldTrancheId(session)
+  }
+
+  // Let's query what was stored in a third transaction.
+  val Right((retrievedInitialMap, retrievedBiggerMap)) = {
+    // A session in which we retrieve the two objects from the previous
+    // sessions, using the two tranche ids from above ...
+    val session = for {
+      initialMap <- immutableObjectStorage
+        .retrieve[Map[String, List[Int]]](trancheIdForInitialMap)
+
+      biggerMap <- immutableObjectStorage
+        .retrieve[Map[String, List[Int]]](trancheIdForBiggerMap)
+    } yield {
+      initialMap -> biggerMap
+    }
+
+    immutableObjectStorage
+      .runToYieldResult(session)
+  }
+
+  retrievedInitialMap should be(
+    initialMap
+  )
+
+  retrievedBiggerMap should be(
+    Map(
+      // Note the added value of 99 nested inside the list in the map's
+      // entry...
+      "Huey" -> List(99, 1, 2, 3, -1, -2, -3),
+      // ... along with an entirely new entry contained directly within the map.
+      "Bystander" -> List.empty
+    )
+  )
+}
 ```
 
 ## Storage Backends ##
 
-There are two tranches implementations as of version 0.1.0 - one uses RocksDB and the other H2 via ScalikeJDBC, although neither technology is visible from the point of view of the tranches API
-used by Curium.
+There are two tranches implementations - one uses RocksDB and the other H2 via ScalikeJDBC, although neither technology
+is visible from the point of view of the tranches API used by Curium.
 
-The ScalikeJDBC implementation is currently the recommended one to use - class `H2ViaScalikeJdbcTranches`. Take a look
-at `H2ViaScalikeJdbcSetupResource` to see how to configure an instance of it.
+The tests include Cats resource traits to provide tranches implementation instances. For `RocksDbTranches`, take a look
+at `RocksDbTranchesResource` and for `H2ViaScalikeJdbcTranches`, take a look at `H2ViaScalikeJdbcTranchesResource` to
+see how to configure instances.
 
 There is also a test double implementation, `FakeTranches`, that is used by `ImmutableObjectStorageSpec` and which
 serves as a reference implementation.
@@ -170,8 +172,7 @@ feel free to raise a pull request if you want to get them added to Curium.
 ### How did this come about? ###
 
 This was broken out of the [Plutonium](https://github.com/sageserpent-open/plutonium) project as a standalone library,
-as I felt it could be useful in general - this is why there is quite a bit of commit history prior to the initial 0.1.0
-release; it has been extracted from the Plutonium commit history.
+as I felt it could be useful in general.
 
 ### Does this really work with real code? ###
 
@@ -202,13 +203,10 @@ __NO.__
    relational database would be. Having said that, you can just pull in tranche data into some arbitrary process that
    has the correct client code on the classpath, so it is theoretically possible to browse stored data without modifying
    the 'primary' application.
-3. The API is prolix - the approach is sound enough, but how it's packaged up for somebody writing client code leads to
-   a lot of typing; the API needs to be streamlined.
-4. There are caveats galore mentioned below about what can and can't be proxied, and supported tweaks to workaround
+3. There are caveats galore mentioned below about what can and can't be proxied, and supported tweaks to workaround
    recalcitrant classes. Don't expect to just drop Curium in to your codebase without doing a lot of benchmarking and
    experimental configuration first. This should probably be bundled up into a default configuration in the future.
-5. There are several client codebase-specific workarounds that aren't yet configurable - they should be broken out.
-6. The Kryo configuration is not visible to client code - but if we want to support data model upgrades and reuse
+4. The Kryo configuration is not visible to client code - but if we want to support data model upgrades and reuse
    existing tranches, then we should probably open this up.
 
 ### Is there any code out there that *doesn't* work with Curium? ###
@@ -263,5 +261,5 @@ Take a look at `FakeTranches` and `TranchesContracts` for guidance.
 
 True, but there is a notion of canonical object identity that subsumes Kryo's object identity; the canonical object
 identity spans across tranches - this allows the number of objects stored over a sequence of tranches to comfortably
-exceed `Integer.MAX_VALUE`. As long as the client code doesn't try to store more than that many new objects into a single
-tranche at a time, then you're good.
+exceed `Integer.MAX_VALUE`. As long as the client code doesn't try to store more than that many new objects into a
+single tranche at a time, then you're good.

@@ -23,29 +23,31 @@ class ExampleSpec
 
   "storing and retrieving a series of immutable of objects that share structure" should "work" in {
     // Start by obtaining a tranches object that provides backend storage and
-    // retrieval of tranche data. Use the one provided by the testing support -
-    // it spins up a temporary H2 database and uses that for its implementation;
-    // the database is torn down when the resource is relinquished.
+    // retrieval of tranche data. Here, we use the one provided by the testing
+    // support via a Cats resource - it spins up a temporary H2 database and
+    // uses that for its implementation; the database is torn down when the
+    // resource is relinquished.
     tranchesResource
       .use(tranches =>
         IO {
-          // Next we'll have some intersession state, which is a memento object
-          // used by the immutable object storage to cache data between
-          // sessions.
-
+          // Build an instance of `ImmutableObjectStorage` from the underlying
+          // tranches store.
           val immutableObjectStorage =
             configuration.build(tranches)
 
+          val initialMap =
+            Map("Huey" -> List(1, 2, 3, -1, -2, -3))
+
           // Let's begin .. we shall store something and get back a tranche id
-          // that we hold on to.
-          val Right(firstTrancheId: TrancheId) = {
+          // that we hold on to. Think of the following block as being a
+          // transaction that writes some initial data back to the tranches
+          // store.
+          val Right(trancheIdForInitialMap: TrancheId) = {
             // A session in which an initial immutable map with some
             // substructure is stored...
             val session = for {
               trancheId <- immutableObjectStorage
-                .store[Map[Set[String], List[Int]]](
-                  Map(Set("Huey, Duey, Louie") -> List(1, 2, 3, -1, -2, -3))
-                )
+                .store[Map[String, List[Int]]](initialMap)
             } yield trancheId
 
             // Nothing has actually taken place yet - we have to run the session
@@ -57,32 +59,39 @@ class ExampleSpec
 
           // OK, so let's do some pure functional work on our initial map and
           // store the result. We get back another tranche id that we hold on
-          // to.
-          val Right(secondTrancheId: TrancheId) = {
-            // A session in which we retrieve the initial map, make a bigger one
-            // and store it...
+          // to. This defines another transaction that performs an update.
+          val Right(trancheIdForBiggerMap: TrancheId) = {
+            // A session in which we retrieve the initial map, make a bigger,
+            // updated one and store it...
             val session = for {
               initialMap <- immutableObjectStorage
-                .retrieve[Map[Set[String], List[Int]]](firstTrancheId)
-              biggerMap = initialMap + (Set("Bystander") -> List.empty)
+                .retrieve[Map[String, List[Int]]](trancheIdForInitialMap)
+
+              mapWithUpdatedValue = initialMap.updatedWith("Huey")(
+                _.map(99 :: _)
+              )
+
+              biggerMap = mapWithUpdatedValue.updated("Bystander", List.empty)
+
               trancheId <- immutableObjectStorage.store(biggerMap)
             } yield trancheId
 
-            // Again, nothing has actually taken place yet - so run the session,
-            // etc.
+            // Again, nothing has actually taken place yet - so run the session
+            // to yield a new tranche id for the bigger map.
             immutableObjectStorage
               .runToYieldTrancheId(session)
           }
 
-          // Let's verify what was stored.
-          val Right((initialMap, biggerMap)) = {
+          // Let's query what was stored in a third transaction.
+          val Right((retrievedInitialMap, retrievedBiggerMap)) = {
             // A session in which we retrieve the two objects from the previous
-            // sessions and verify that they contain the correct data...
+            // sessions, using the two tranche ids from above ...
             val session = for {
               initialMap <- immutableObjectStorage
-                .retrieve[Map[Set[String], List[Int]]](firstTrancheId)
+                .retrieve[Map[String, List[Int]]](trancheIdForInitialMap)
+
               biggerMap <- immutableObjectStorage
-                .retrieve[Map[Set[String], List[Int]]](secondTrancheId)
+                .retrieve[Map[String, List[Int]]](trancheIdForBiggerMap)
             } yield {
               initialMap -> biggerMap
             }
@@ -91,13 +100,18 @@ class ExampleSpec
               .runToYieldResult(session)
           }
 
-          initialMap should be(
-            Map(Set("Huey, Duey, Louie") -> List(1, 2, 3, -1, -2, -3))
+          retrievedInitialMap should be(
+            initialMap
           )
-          biggerMap should be(
+
+          retrievedBiggerMap should be(
             Map(
-              Set("Huey, Duey, Louie") -> List(1, 2, 3, -1, -2, -3),
-              Set("Bystander")         -> List.empty
+              // Note the added value of 99 nested inside the list in the map's
+              // entry...
+              "Huey" -> List(99, 1, 2, 3, -1, -2, -3),
+              // ... along with an entirely new entry contained directly within
+              // the map.
+              "Bystander" -> List.empty
             )
           )
         }
