@@ -180,7 +180,10 @@ Plutonium drives Curium quite hard, in that it has some fairly gnarly data struc
 to its use of third party data structures such as the usual lists, tree sets, hash sets, tree maps, hash maps, vectors,
 the not so usual immutable multiset and finger trees, as well as the Quiver immutable graph data structure. Several
 obscure bugs in the Curium code were unearthed by running Plutonium's exhaustive Scalacheck tests; Curium's own
-Scalacheck tests have been bolstered retrospectively to reproduce these bugs, which are fixed in version 0.1.0.
+Scalacheck tests have been bolstered retrospectively to reproduce these bugs.
+
+There has also been a lot of work and fixes done thanks to this
+issue: [Dogfood](https://github.com/sageserpent-open/curium/issues/2).
 
 As usual, _caveat emptor_ - but the expectation is that any bugs you encounter should be quite obscure. Please
 contribute a bug report with a bug reproduction test if you encounter one.
@@ -191,13 +194,12 @@ Curium uses Kryo 5.3.0 in its implementation, so the guarantees that Kryo makes 
 forward compatibility are what you get with Curium. Please consult the Kryo documentation for this, there is some
 support.
 
-### Is this stable? ###
+### Is this enterprise-ready? ###
 
 __NO.__
 
-1. There are outstanding performance issues to address, see
-   here: [Dogfood](https://github.com/sageserpent-open/curium/issues/2). It _might_ work for your purposes, but I'd be
-   careful benchmarking it first.
+1. See here: [Dogfood](https://github.com/sageserpent-open/curium/issues/2). It _might_ work for your purposes, but I'd
+   be careful benchmarking it first.
 2. This is not, nor will it ever be your primary data storage technology for your application. For one thing, using a
    persistence approach via Kryo means that the stored tranches aren't readable in the same way that tables in a
    relational database would be. Having said that, you can just pull in tranche data into some arbitrary process that
@@ -209,6 +211,27 @@ __NO.__
 4. The Kryo configuration is not visible to client code - but if we want to support data model upgrades and reuse
    existing tranches, then we should probably open this up.
 
+### Is there a compelling use-case, then? ###
+
+You may have a service that needs to keep bookkeeping data that has to survive a restart of the service, but whose data
+isn't intended to be a data warehouse - so the service's data is essentially private to the process instance and largely
+in-memory. In this case Curium could be a nice fit.
+
+Here, the service would store updates frequently in multiple sessions and would persist the tranche ids, so they can be
+picked up as bookmarks to reload data when the service restarts. The service can either work almost entirely outside
+sessions, using Curium only to write finished updates and to perform an initial load on restart, or it can do its work
+in iterated sessions that load and store in the same session - you can see a skeleton of that second approach
+in `ImmutableObjectStorageMeetsMap`.
+
+You can arrange to have a leader service instance handle updates, so that only it writes new tranches, and the others
+act as query-only instances to spread the load. As another service instance acquires leadership, it takes over the job
+of writing data.
+
+Otherwise, you will have to think about having multiple service instances writing to a shared tranches backend - you may
+opt to shard your data model so that each shard deals only with its own set of tranche ids (possibly with their own
+sharded storage), or you may have to share tranche ids across your service instance fleet and use a CRDT approach to
+allow the service instances to make concurrent updates on the same shared data.
+
 ### Is there any code out there that *doesn't* work with Curium? ###
 
 Not as far as I know, but Curium builds proxies to allow lazy loading of parts of the application state across tranches;
@@ -217,9 +240,10 @@ so if a class is say, final (`RedBlackTree`, I'm looking at you), its instances 
 Curium can be configured to build proxies whose nominal type is that of an interface that a final class implements on a
 case-by-case basis - provided the code using instances of the final class only uses the interface, this will work
 nicely. An example of this can be seen
-in [WorldH2StorageImplementation](https://github.com/sageserpent-open/plutonium/blob/b648dac313d3288232ac2c973a8b8d75f5469452/src/main/scala/com/sageserpent/plutonium/WorldH2StorageImplementation.scala)
-, look at the code in the standalone object `immutableObjectStorage`. Nevertheless, you are in the danger zone when you
-configure in proxies over interfaces.
+in [ImmutableObjectStorageMeetsMap](https://github.com/sageserpent-open/curium/blob/14f8e79ab362a6cb9152890851fd5967bcb51eb5/src/benchmark/scala/com/sageserpent/curium/ImmutableObjectStorageMeetsMap.scala#L162),
+look at the code in the configuration object that allows proxying of the standard Scala `HashSet`, `HashMap` and their
+internals. Nevertheless, you are in the danger zone when you configure in proxies over interfaces, be careful and
+experiment first.
 
 The fallback behaviour when an object can't be proxied is to simply to use the object itself, which means that the
 object will be stored locally in the same tranche as whatever object references it - so no structure sharing _across_
@@ -263,3 +287,8 @@ True, but there is a notion of canonical object identity that subsumes Kryo's ob
 identity spans across tranches - this allows the number of objects stored over a sequence of tranches to comfortably
 exceed `Integer.MAX_VALUE`. As long as the client code doesn't try to store more than that many new objects into a
 single tranche at a time, then you're good.
+
+### Where is the Maven distribution? ###
+
+Right now, I still consider this an experimental technology, albeit one with a fair bit of usage. If you use it, like it
+and want it to become a more shrink-wrapped item, raise an issue on GitHub.
