@@ -200,15 +200,18 @@ __NO.__
 
 1. See here: [Dogfood](https://github.com/sageserpent-open/curium/issues/2). It _might_ work for your purposes, but I'd
    be careful benchmarking it first.
-2. This is not, nor will it ever be your primary data storage technology for your application. For one thing, using a
+2. See here: [Control recycling of objects stored from sessions](https://github.com/sageserpent-open/curium/issues/3).
+   This may or may not be a pressing issue for you, depending on whether you want wholesale proxying of your data (like
+   Hibernate) or are happy just to have the application manage its memory footprint for itself.
+3. This is not, nor will it ever be your primary data storage technology for your application. For one thing, using a
    persistence approach via Kryo means that the stored tranches aren't readable in the same way that tables in a
    relational database would be. Having said that, you can just pull in tranche data into some arbitrary process that
    has the correct client code on the classpath, so it is theoretically possible to browse stored data without modifying
    the 'primary' application.
-3. There are caveats galore mentioned below about what can and can't be proxied, and supported tweaks to workaround
+4. There are caveats galore mentioned below about what can and can't be proxied, and supported tweaks to workaround
    recalcitrant classes. Don't expect to just drop Curium in to your codebase without doing a lot of benchmarking and
    experimental configuration first. This should probably be bundled up into a default configuration in the future.
-4. The Kryo configuration is not visible to client code - but if we want to support data model upgrades and reuse
+5. The Kryo configuration is not visible to client code - but if we want to support data model upgrades and reuse
    existing tranches, then we should probably open this up.
 
 ### Is there a compelling use-case, then? ###
@@ -245,7 +248,9 @@ look at the code in the configuration object that allows proxying of the standar
 internals. Nevertheless, you are in the danger zone when you configure in proxies over interfaces, be careful and
 experiment first.
 
-The fallback behaviour when an object can't be proxied is to simply to use the object itself - so the object can still sit in another tranche, but has to be loaded eagerly (as part of that other tranche) when a referencing object's tranche is loaded.
+The fallback behaviour when an object can't be proxied is to simply to use the object itself - so the object can still
+sit in another tranche, but has to be loaded eagerly (as part of that other tranche) when a referencing object's tranche
+is loaded.
 
 ### What about object identity? Will the object graph be the same when a tranche is retrieved to what is was when the tranche was stored? ###
 
