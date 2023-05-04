@@ -48,7 +48,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
   import ImmutableObjectStorage._
   import ImmutableObjectStorageImplementation._
 
-  private val sessionReferenceResolver
+  private val operationReferenceResolver
       : DynamicVariable[Option[ReferenceResolver]] =
     new DynamicVariable(None)
   private val kryoPool: Pool[Kryo] =
@@ -228,7 +228,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
           val trancheSpecificReferenceResolver =
             new TrancheSpecificWritingReferenceResolver
               with ReferenceResolverContracts
-          val serializedRepresentation: Array[Byte] = sessionReferenceResolver
+          val serializedRepresentation: Array[Byte] = operationReferenceResolver
             .withValue(Some(trancheSpecificReferenceResolver)) {
               serializationFacade.toBytesWithClass(immutableObject)
             }
@@ -273,13 +273,13 @@ class ImmutableObjectStorageImplementation[TrancheId](
             trancheIdForExternalObjectReference,
             trancheLocalObjectReferenceId
           ) =>
-      val TrancheLoadData(_, objectLookup) =
+        val TrancheLoadData(_, objectLookup) =
           intersessionState.loadTranche(
             trancheIdForExternalObjectReference,
             loadTranche
           )
 
-      objectLookup.objectWithReferenceId(
+        objectLookup.objectWithReferenceId(
           trancheLocalObjectReferenceId
         )
     }
@@ -296,7 +296,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
       ) with ReferenceResolverContracts
 
     val topLevelObject =
-      sessionReferenceResolver.withValue(
+      operationReferenceResolver.withValue(
         Some(trancheSpecificReferenceResolver)
       ) {
         serializationFacade.fromBytes(tranche.payload)
@@ -817,27 +817,27 @@ class ImmutableObjectStorageImplementation[TrancheId](
       // NASTY HACK: when copying an object that is escaping the `Session`
       // monad, there won't be a session, but it doesn't matter - it won't be
       // used, so no need to do anything with the `Kryo` instance here.
-      sessionReferenceResolver.value.foreach(_.setKryo(kryo))
+      operationReferenceResolver.value.foreach(_.setKryo(kryo))
     }
 
     override def getWrittenId(
         immutableObject: Any
     ): TrancheLocalObjectReferenceId =
-      sessionReferenceResolver.value.get.getWrittenId(immutableObject)
+      operationReferenceResolver.value.get.getWrittenId(immutableObject)
 
     override def addWrittenObject(
         immutableObject: Any
     ): TrancheLocalObjectReferenceId =
-      sessionReferenceResolver.value.get.addWrittenObject(immutableObject)
+      operationReferenceResolver.value.get.addWrittenObject(immutableObject)
 
     override def nextReadId(clazz: Class[_]): TrancheLocalObjectReferenceId =
-      sessionReferenceResolver.value.get.nextReadId(clazz)
+      operationReferenceResolver.value.get.nextReadId(clazz)
 
     override def setReadObject(
         objectReferenceId: TrancheLocalObjectReferenceId,
         anObject: Any
     ): Unit = {
-      sessionReferenceResolver.value.get
+      operationReferenceResolver.value.get
         .setReadObject(objectReferenceId, anObject)
     }
 
@@ -845,7 +845,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
         clazz: Class[_],
         objectReferenceId: TrancheLocalObjectReferenceId
     ): AnyRef =
-      sessionReferenceResolver.value.get
+      operationReferenceResolver.value.get
         .getReadObject(clazz, objectReferenceId)
 
     override def reset(): Unit = {
@@ -858,7 +858,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
       // NASTY HACK: when copying an object that is escaping the `Session`
       // monad, there won't be a session, but it doesn't matter - just delegate
       // to the storage anyway.
-      sessionReferenceResolver.value.fold(ifEmpty =
+      operationReferenceResolver.value.fold(ifEmpty =
         storage.useReferences(clazz)
       )(_.useReferences(clazz))
     }
