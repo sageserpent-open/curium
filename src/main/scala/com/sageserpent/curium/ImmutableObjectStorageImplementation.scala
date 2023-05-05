@@ -102,6 +102,12 @@ class ImmutableObjectStorageImplementation[TrancheId](
   private val serializationFacade =
     new SerializationFacade(kryoPool, inputPool, outputPool)
 
+  private val sessionState
+      : DynamicVariable[mutable.Map[TrancheId, TrancheLoadData]] =
+    new DynamicVariable[mutable.Map[TrancheId, TrancheLoadData]](
+      mutable.Map.empty
+    )
+
   private val intersessionState: IntersessionState = new IntersessionState
 
   private class IntersessionState {
@@ -163,7 +169,9 @@ class ImmutableObjectStorageImplementation[TrancheId](
       proxyToReferenceIdCache.put(immutableObject, objectReferenceId)
     }
 
-    def proxyFor(objectReferenceId: CanonicalObjectReferenceId[TrancheId]) =
+    def proxyFor(
+        objectReferenceId: CanonicalObjectReferenceId[TrancheId]
+    ): Option[AnyRef] =
       Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
     def loadTranche(
@@ -216,7 +224,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
 
   private def unsafeRun[Result](
       session: Session[Result]
-  ): EitherThrowableOr[Result] = {
+  ): EitherThrowableOr[Result] = sessionState.withValue(mutable.Map.empty) {
     session.foldMap(sessionInterpreter)
   }
 
@@ -242,13 +250,26 @@ class ImmutableObjectStorageImplementation[TrancheId](
                 )
               )
 
-            intersessionState.noteTranche(
-              trancheId,
-              TrancheLoadData(
-                immutableObject,
-                trancheSpecificReferenceResolver
+            if (
+              configuration.forbidRecyclingOfStoredObjectsInSubsequentSessions
+            ) {
+              sessionState.value.put(
+                trancheId,
+                TrancheLoadData(
+                  immutableObject,
+                  trancheSpecificReferenceResolver
+                )
               )
-            )
+            } else {
+              intersessionState.noteTranche(
+                trancheId,
+                TrancheLoadData(
+                  immutableObject,
+                  trancheSpecificReferenceResolver
+                )
+              )
+            }
+
             trancheSpecificReferenceResolver.cacheForInterTrancheReferences(
               trancheId
             )
@@ -259,7 +280,10 @@ class ImmutableObjectStorageImplementation[TrancheId](
         case Retrieve(trancheId, clazz) =>
           Try {
             val TrancheLoadData(topLevelObject, _) =
-              intersessionState.loadTranche(trancheId, loadTranche)
+              sessionState.value.applyOrElse(
+                trancheId,
+                intersessionState.loadTranche(_, loadTranche)
+              )
             clazz.cast(topLevelObject)
           }.toEither
       }
@@ -273,11 +297,10 @@ class ImmutableObjectStorageImplementation[TrancheId](
             trancheIdForExternalObjectReference,
             trancheLocalObjectReferenceId
           ) =>
-        val TrancheLoadData(_, objectLookup) =
-          intersessionState.loadTranche(
-            trancheIdForExternalObjectReference,
-            loadTranche
-          )
+        val TrancheLoadData(_, objectLookup) = sessionState.value.applyOrElse(
+          trancheIdForExternalObjectReference,
+          intersessionState.loadTranche(_, loadTranche)
+        )
 
         objectLookup.objectWithReferenceId(
           trancheLocalObjectReferenceId

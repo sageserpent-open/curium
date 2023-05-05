@@ -71,6 +71,8 @@ object ImmutableObjectStorage {
 
     val tranchesImplementationName: String
 
+    val forbidRecyclingOfStoredObjectsInSubsequentSessions: Boolean = true
+
     def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = false
 
     // NOTE: this is a potential danger area when an override is defined -
