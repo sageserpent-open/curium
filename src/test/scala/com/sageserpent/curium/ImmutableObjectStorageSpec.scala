@@ -303,25 +303,25 @@ object ImmutableObjectStorageSpec {
   case object theOneAndOnlyStandaloneObjectExample
 
   def configuration(
-      _forbidRecyclingOfStoredObjectsInSubsequentSessions: Boolean
+      permitRecyclingOfStoredObjectsInSubsequentSessions: Boolean
   ): ImmutableObjectStorage.Configuration =
     new ImmutableObjectStorage.Configuration {
       override val tranchesImplementationName: String =
         classOf[FakeTranches].getSimpleName
 
-      override val forbidRecyclingOfStoredObjectsInSubsequentSessions: Boolean =
-        _forbidRecyclingOfStoredObjectsInSubsequentSessions
+      override val recycleStoredObjectsInSubsequentSessions: Boolean =
+        permitRecyclingOfStoredObjectsInSubsequentSessions
     }
 
   def configurationForSetsAndMaps(
-      _forbidRecyclingOfStoredObjectsInSubsequentSessions: Boolean
+      permitRecyclingOfStoredObjectsInSubsequentSessions: Boolean
   ): ImmutableObjectStorage.Configuration =
     new ImmutableObjectStorage.Configuration {
       override val tranchesImplementationName: String =
         s"${classOf[FakeTranches].getSimpleName}_specialised_for_sets_and_maps"
 
-      override val forbidRecyclingOfStoredObjectsInSubsequentSessions: Boolean =
-        _forbidRecyclingOfStoredObjectsInSubsequentSessions
+      override val recycleStoredObjectsInSubsequentSessions: Boolean =
+        permitRecyclingOfStoredObjectsInSubsequentSessions
 
       override def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
         // What goes on behind the scenes for the `HashSet` and `HashMap`

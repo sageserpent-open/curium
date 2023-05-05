@@ -250,10 +250,8 @@ class ImmutableObjectStorageImplementation[TrancheId](
                 )
               )
 
-            if (
-              configuration.forbidRecyclingOfStoredObjectsInSubsequentSessions
-            ) {
-              sessionState.value.put(
+            if (configuration.recycleStoredObjectsInSubsequentSessions) {
+              intersessionState.noteTranche(
                 trancheId,
                 TrancheLoadData(
                   immutableObject,
@@ -261,7 +259,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
                 )
               )
             } else {
-              intersessionState.noteTranche(
+              sessionState.value.put(
                 trancheId,
                 TrancheLoadData(
                   immutableObject,

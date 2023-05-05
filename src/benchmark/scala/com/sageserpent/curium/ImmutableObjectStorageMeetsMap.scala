@@ -163,6 +163,8 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
     override val tranchesImplementationName: String =
       classOf[RocksDbTranches].getSimpleName
 
+    override val recycleStoredObjectsInSubsequentSessions: Boolean = false
+
     override def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
       // What goes on behind the scenes for the `HashSet` and `HashMap`
       // implementations.
