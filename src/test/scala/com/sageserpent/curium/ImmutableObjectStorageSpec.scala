@@ -7,6 +7,7 @@ import cats.implicits._
 import com.sageserpent.americium.Trials
 import com.sageserpent.americium.java.CasesLimitStrategy
 import com.sageserpent.curium.ImmutableObjectStorage._
+import com.sageserpent.curium.caffeineBuilder.CaffeineArchetype
 import org.scalatest.Inspectors
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -311,6 +312,22 @@ object ImmutableObjectStorageSpec {
 
       override val recycleStoredObjectsInSubsequentSessions: Boolean =
         permitRecyclingOfStoredObjectsInSubsequentSessions
+    }
+
+  def configurationThatForgetsItsTranches(
+      permitRecyclingOfStoredObjectsInSubsequentSessions: Boolean
+  ): ImmutableObjectStorage.Configuration =
+    new ImmutableObjectStorage.Configuration {
+      override val tranchesImplementationName: String =
+        classOf[FakeTranches].getSimpleName
+
+      override val recycleStoredObjectsInSubsequentSessions: Boolean =
+        permitRecyclingOfStoredObjectsInSubsequentSessions
+
+      override def trancheCacheCustomisation(
+          caffeine: CaffeineArchetype
+      ): CaffeineArchetype =
+        super.trancheCacheCustomisation(caffeine).maximumSize(0)
     }
 
   def configurationForSetsAndMaps(
@@ -915,7 +932,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configurationThatForgetsItsTranches(
+              forbidRecyclingOfStoredObjectsInSubsequentSessions
+            )
               .build(tranches)
 
           val trancheIds =
@@ -962,7 +981,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configurationThatForgetsItsTranches(
+              forbidRecyclingOfStoredObjectsInSubsequentSessions
+            )
               .build(tranches)
 
           val parts = partGrowth.parts()
