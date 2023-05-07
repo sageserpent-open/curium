@@ -102,11 +102,12 @@ class ImmutableObjectStorageImplementation[TrancheId](
   private val serializationFacade =
     new SerializationFacade(kryoPool, inputPool, outputPool)
 
-  private val sessionState
-      : DynamicVariable[mutable.Map[TrancheId, TrancheLoadData]] =
-    new DynamicVariable[mutable.Map[TrancheId, TrancheLoadData]](
-      mutable.Map.empty
-    )
+  private val trancheIdToTrancheLoadDataCacheForSession
+      : Cache[TrancheId, TrancheLoadData] =
+    caffeineBuilder()
+      .scheduler(Scheduler.systemScheduler())
+      .executor(_.run())
+      .build[TrancheId, TrancheLoadData]()
 
   private val intersessionState: IntersessionState = new IntersessionState
 
@@ -224,8 +225,10 @@ class ImmutableObjectStorageImplementation[TrancheId](
 
   private def unsafeRun[Result](
       session: Session[Result]
-  ): EitherThrowableOr[Result] = sessionState.withValue(mutable.Map.empty) {
+  ): EitherThrowableOr[Result] = try {
     session.foldMap(sessionInterpreter)
+  } finally {
+    trancheIdToTrancheLoadDataCacheForSession.invalidateAll()
   }
 
   private object sessionInterpreter
@@ -258,15 +261,15 @@ class ImmutableObjectStorageImplementation[TrancheId](
                   trancheSpecificReferenceResolver
                 )
               )
-            } else {
-              sessionState.value.put(
-                trancheId,
-                TrancheLoadData(
-                  immutableObject,
-                  trancheSpecificReferenceResolver
-                )
-              )
             }
+
+            trancheIdToTrancheLoadDataCacheForSession.put(
+              trancheId,
+              TrancheLoadData(
+                immutableObject,
+                trancheSpecificReferenceResolver
+              )
+            )
 
             trancheSpecificReferenceResolver.cacheForInterTrancheReferences(
               trancheId
@@ -278,7 +281,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
         case Retrieve(trancheId, clazz) =>
           Try {
             val TrancheLoadData(topLevelObject, _) =
-              sessionState.value.applyOrElse(
+              trancheIdToTrancheLoadDataCacheForSession.get(
                 trancheId,
                 intersessionState.loadTranche(_, loadTranche)
               )
@@ -295,10 +298,11 @@ class ImmutableObjectStorageImplementation[TrancheId](
             trancheIdForExternalObjectReference,
             trancheLocalObjectReferenceId
           ) =>
-        val TrancheLoadData(_, objectLookup) = sessionState.value.applyOrElse(
-          trancheIdForExternalObjectReference,
-          intersessionState.loadTranche(_, loadTranche)
-        )
+        val TrancheLoadData(_, objectLookup) =
+          trancheIdToTrancheLoadDataCacheForSession.get(
+            trancheIdForExternalObjectReference,
+            intersessionState.loadTranche(_, loadTranche)
+          )
 
         objectLookup.objectWithReferenceId(
           trancheLocalObjectReferenceId
