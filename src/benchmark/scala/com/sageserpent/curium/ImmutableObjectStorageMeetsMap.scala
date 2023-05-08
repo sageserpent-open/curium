@@ -6,15 +6,17 @@ import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage.Session
 import com.sageserpent.curium.caffeineBuilder.CaffeineArchetype
 
-import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
 import scala.collection.immutable.{AbstractMap, AbstractSet}
 import scala.collection.mutable
-import scala.concurrent.duration.{Deadline, Duration}
 import scala.util.Random
 
 object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
   type TrancheId = RocksDbTranches#TrancheId
+
+  private val lookbackLimit = 100000
+
+  private val batchSize = 100
 
   def main(args: Array[String]): Unit = {
     tranchesResource
@@ -35,23 +37,18 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
           var trancheId: TrancheId = initialTrancheId
 
-          val startTime = Deadline.now
+          var maximumUpdateTrancheLoads: Double =
+            0
 
-          var maximumUpdateDuration: Duration =
-            Duration.Zero
+          var minimumUpdateTrancheLoads: Double = Double.MaxValue
 
-          var minimumUpdateDuration: Duration = Duration.Inf
-
-          val updateDurations: mutable.ListBuffer[Duration] =
+          val trancheLoadsSamples: mutable.ListBuffer[Double] =
             mutable.ListBuffer.empty
-
-          val lookbackLimit = 10000000
-
-          val batchSize = 100
 
           for (step <- 0 until (1000000000, batchSize)) {
             if (0 < step && step % 5000 == 0) {
-              val postUpdatesTime = Deadline.now
+              val postUpdatesTrancheLoads =
+                immutableObjectStorage.resetMeanNumberOfTrancheLoadsInASession
 
               val Right(contentsAtPreviousStep) =
                 immutableObjectStorage.runToYieldResult(
@@ -60,15 +57,11 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                     .map(_.get(step - 1).getOrElse(Set.empty))
                 )
 
-              val duration = postUpdatesTime - startTime
-
-              val queryDuration = Deadline.now - postUpdatesTime
+              val queryTrancheLoads =
+                immutableObjectStorage.resetMeanNumberOfTrancheLoadsInASession - postUpdatesTrancheLoads
 
               println(
-                s"Step: $step, duration to before query: ${duration.toMillis} milliseconds, query duration: ${queryDuration.toMillis} milliseconds, minimum update duration: ${minimumUpdateDuration.toMillis} milliseconds, maximum update duration: ${maximumUpdateDuration.toMillis} milliseconds, average update duration: ${updateDurations
-                    .map(_.toMillis)
-                    .sum / updateDurations.size}, update durations: ${updateDurations
-                    .map(_.toMillis)
+                s"Step: $step, query tranche loads: ${queryTrancheLoads}, minimum update tranche loads: ${minimumUpdateTrancheLoads}, maximum update tranche loads: ${maximumUpdateTrancheLoads}, average update tranche loads: ${trancheLoadsSamples.sum / trancheLoadsSamples.size}, update tranche loads: ${trancheLoadsSamples
                     .groupBy(identity)
                     .toSeq
                     .map { case (duration, group) =>
@@ -77,9 +70,9 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                     .sortBy { case (count, duration) => count -> -duration }} ,contents at previous step: $contentsAtPreviousStep"
               )
 
-              maximumUpdateDuration = Duration.Zero
-              minimumUpdateDuration = Duration.Inf
-              updateDurations.clear()
+              maximumUpdateTrancheLoads = 0L
+              minimumUpdateTrancheLoads = Long.MaxValue
+              trancheLoadsSamples.clear()
             }
 
             val session: Session[TrancheId] = for {
@@ -127,20 +120,24 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
             {
 
-              val updateStartTime = Deadline.now
+              val preUpdateTrancheLoads =
+                immutableObjectStorage.resetMeanNumberOfTrancheLoadsInASession
 
               trancheId = immutableObjectStorage
                 .runToYieldTrancheId(session)
                 .right
                 .get
 
-              val updateDuration = Deadline.now - updateStartTime
+              val updateTrancheLoads =
+                immutableObjectStorage.resetMeanNumberOfTrancheLoadsInASession - preUpdateTrancheLoads
 
-              maximumUpdateDuration = maximumUpdateDuration max updateDuration
+              maximumUpdateTrancheLoads =
+                maximumUpdateTrancheLoads max updateTrancheLoads
 
-              minimumUpdateDuration = minimumUpdateDuration min updateDuration
+              minimumUpdateTrancheLoads =
+                minimumUpdateTrancheLoads min updateTrancheLoads
 
-              updateDurations += updateDuration
+              trancheLoadsSamples += updateTrancheLoads
             }
           }
         }
@@ -163,6 +160,8 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
     override val tranchesImplementationName: String =
       classOf[RocksDbTranches].getSimpleName
 
+    override val recycleStoredObjectsInSubsequentSessions: Boolean = false
+
     override def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
       // What goes on behind the scenes for the `HashSet` and `HashMap`
       // implementations.
@@ -176,10 +175,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
     ): CaffeineArchetype =
       super
         .trancheCacheCustomisation(caffeine)
-        .expireAfterAccess(
-          30,
-          TimeUnit.SECONDS
-        )
+        .maximumSize(lookbackLimit / batchSize)
 
   }
 }

@@ -127,4 +127,6 @@ trait ImmutableObjectStorage[TrancheId] {
   def runToYieldResult[Result](
       session: Session[Result]
   ): EitherThrowableOr[Result]
+
+  def resetMeanNumberOfTrancheLoadsInASession: Double
 }

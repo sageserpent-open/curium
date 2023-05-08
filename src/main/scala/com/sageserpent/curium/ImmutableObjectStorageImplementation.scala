@@ -109,6 +109,10 @@ class ImmutableObjectStorageImplementation[TrancheId](
       .executor(_.run())
       .build[TrancheId, TrancheLoadData]()
 
+  private var sessionCounter: Long = 0L
+
+  private var trancheLoads: Long = 0L
+
   private val intersessionState: IntersessionState = new IntersessionState
 
   private class IntersessionState {
@@ -229,6 +233,14 @@ class ImmutableObjectStorageImplementation[TrancheId](
     session.foldMap(sessionInterpreter)
   } finally {
     trancheIdToTrancheLoadDataCacheForSession.invalidateAll()
+    sessionCounter += 1L
+  }
+
+  override def resetMeanNumberOfTrancheLoadsInASession: Double = try {
+    trancheLoads / (1L max sessionCounter)
+  } finally {
+    trancheLoads = 0
+    sessionCounter = 0
   }
 
   private object sessionInterpreter
@@ -311,7 +323,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
 
   private def loadTranche(
       trancheId: TrancheId
-  ): TrancheLoadData = {
+  ): TrancheLoadData = try {
     val tranche = tranches.retrieveTranche(trancheId)
 
     val trancheSpecificReferenceResolver =
@@ -333,6 +345,8 @@ class ImmutableObjectStorageImplementation[TrancheId](
       topLevelObject,
       trancheSpecificReferenceResolver
     )
+  } finally {
+    trancheLoads += 1L
   }
 
   private trait ObjectLookup {
