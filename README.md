@@ -1,5 +1,9 @@
 # Curium - **_Storage for your immutable Scala objects_**
 
+## WARNING ##
+
+Read the [caveats below](#is-this-enterprise-ready)!
+
 ## Why ##
 
 You have written some beautiful Scala that uses pure functional code to work on immutable Scala objects. You wrote
