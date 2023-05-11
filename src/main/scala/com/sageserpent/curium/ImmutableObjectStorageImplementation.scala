@@ -286,21 +286,18 @@ class ImmutableObjectStorageImplementation[TrancheId](
           }.toEither
 
         case Retrieve(trancheId, clazz) =>
-          val sessionCyclePermitsRecycling = 0 < sessionCycleIndex
+          val blockRecyclingOfStoredTranchesFromPreviousSessions =
+            0 == sessionCycleIndex
 
           Try {
             val TrancheLoadData(topLevelObject, _) =
-              if (sessionCyclePermitsRecycling)
-                loadTranche(trancheId, loadTranche)
-              else {
-                // NOTE: instead of calling `loadTranche` and thus potentially
-                // recycle a tranche stored in a previous session, consult only
-                // the session cache and load from scratch if it misses.
-                trancheIdToTrancheLoadDataCacheForSession.get(
-                  trancheId,
-                  loadTranche
-                )
-              }
+              loadTranche(
+                trancheId,
+                loadTranche,
+                skipIntersessionState =
+                  blockRecyclingOfStoredTranchesFromPreviousSessions
+              )
+
             clazz.cast(topLevelObject)
           }.toEither
       }
@@ -316,7 +313,8 @@ class ImmutableObjectStorageImplementation[TrancheId](
           ) =>
         val TrancheLoadData(_, objectLookup) = loadTranche(
           trancheIdForExternalObjectReference,
-          loadTranche
+          loadTranche,
+          skipIntersessionState = false
         )
 
         objectLookup.objectWithReferenceId(
@@ -326,15 +324,20 @@ class ImmutableObjectStorageImplementation[TrancheId](
 
   private def loadTranche(
       trancheId: TrancheId,
-      population: TrancheId => TrancheLoadData
-  ): TrancheLoadData = {
+      population: TrancheId => TrancheLoadData,
+      skipIntersessionState: Boolean
+  ): TrancheLoadData = if (skipIntersessionState)
+    trancheIdToTrancheLoadDataCacheForSession.get(
+      trancheId,
+      population(_)
+    )
+  else
     intersessionState.trancheFor(trancheId).getOrElse {
       trancheIdToTrancheLoadDataCacheForSession.get(
         trancheId,
         population(_)
       )
     }
-  }
 
   private def loadTranche(
       trancheId: TrancheId
