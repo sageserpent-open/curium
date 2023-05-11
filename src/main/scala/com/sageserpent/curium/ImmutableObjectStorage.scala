@@ -71,7 +71,7 @@ object ImmutableObjectStorage {
 
     val tranchesImplementationName: String
 
-    val recycleStoredObjectsInSubsequentSessions: Boolean = true
+    val sessionCycleCountWhenStoredTranchesAreNotRecycled: Int = 1
 
     def isExcludedFromBeingProxied(clazz: Class[_]): Boolean = false
 

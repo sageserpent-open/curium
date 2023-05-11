@@ -304,25 +304,27 @@ object ImmutableObjectStorageSpec {
   case object theOneAndOnlyStandaloneObjectExample
 
   def configuration(
-      permitRecyclingOfStoredObjectsInSubsequentSessions: Boolean
+      _sessionCycleCountWhenStoredTranchesAreNotRecycled: Int
   ): ImmutableObjectStorage.Configuration =
     new ImmutableObjectStorage.Configuration {
       override val tranchesImplementationName: String =
         classOf[FakeTranches].getSimpleName
 
-      override val recycleStoredObjectsInSubsequentSessions: Boolean =
-        permitRecyclingOfStoredObjectsInSubsequentSessions
+      override val sessionCycleCountWhenStoredTranchesAreNotRecycled
+          : TrancheLocalObjectReferenceId =
+        _sessionCycleCountWhenStoredTranchesAreNotRecycled
     }
 
   def configurationThatForgetsItsTranches(
-      permitRecyclingOfStoredObjectsInSubsequentSessions: Boolean
+      _sessionCycleCountWhenStoredTranchesAreNotRecycled: Int
   ): ImmutableObjectStorage.Configuration =
     new ImmutableObjectStorage.Configuration {
       override val tranchesImplementationName: String =
         classOf[FakeTranches].getSimpleName
 
-      override val recycleStoredObjectsInSubsequentSessions: Boolean =
-        permitRecyclingOfStoredObjectsInSubsequentSessions
+      override val sessionCycleCountWhenStoredTranchesAreNotRecycled
+          : TrancheLocalObjectReferenceId =
+        _sessionCycleCountWhenStoredTranchesAreNotRecycled
 
       override def trancheCacheCustomisation(
           caffeine: CaffeineArchetype
@@ -331,14 +333,15 @@ object ImmutableObjectStorageSpec {
     }
 
   def configurationForSetsAndMaps(
-      permitRecyclingOfStoredObjectsInSubsequentSessions: Boolean
+      _sessionCycleCountWhenStoredTranchesAreNotRecycled: Int
   ): ImmutableObjectStorage.Configuration =
     new ImmutableObjectStorage.Configuration {
       override val tranchesImplementationName: String =
         s"${classOf[FakeTranches].getSimpleName}_specialised_for_sets_and_maps"
 
-      override val recycleStoredObjectsInSubsequentSessions: Boolean =
-        permitRecyclingOfStoredObjectsInSubsequentSessions
+      override val sessionCycleCountWhenStoredTranchesAreNotRecycled
+          : TrancheLocalObjectReferenceId =
+        _sessionCycleCountWhenStoredTranchesAreNotRecycled
 
       override def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
         // What goes on behind the scenes for the `HashSet` and `HashMap`
@@ -398,6 +401,8 @@ object ImmutableObjectStorageSpec {
     } yield PartGrowth(steps, chunkSizes)
   }
 
+  private val sessionCycleCounts = api.integers(1, 10)
+
   private val testCycleDuration: Duration = Duration.ofSeconds(30)
 }
 
@@ -409,18 +414,18 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   "storing an immutable object" should "yield a unique tranche id and a corresponding tranche of data" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo {
-        (partGrowth, forbidRecyclingOfStoredObjectsInSubsequentSessions) =>
+        (partGrowth, sessionCycleCountWhenStoredTranchesAreNotRecycled) =>
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
               .build(tranches)
 
           val trancheIds =
@@ -440,7 +445,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           .integers(0, maximumNumberOfPermutationsToChooseFrom - 1, 0)
           .map(_.toDouble / maximumNumberOfPermutationsToChooseFrom)
       )
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
@@ -450,14 +455,14 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         (
             partGrowth,
             permutationScale,
-            forbidRecyclingOfStoredObjectsInSubsequentSessions
+            sessionCycleCountWhenStoredTranchesAreNotRecycled
         ) =>
           val expectedParts = partGrowth.parts()
 
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
               .build(tranches)
 
           val trancheIds =
@@ -526,7 +531,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           .integers(0, maximumNumberOfPermutationsToChooseFrom - 1, 0)
           .map(_.toDouble / maximumNumberOfPermutationsToChooseFrom)
       )
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
@@ -536,14 +541,14 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         (
             partGrowth,
             permutationScale,
-            forbidRecyclingOfStoredObjectsInSubsequentSessions
+            sessionCycleCountWhenStoredTranchesAreNotRecycled
         ) =>
           val expectedParts = partGrowth.parts()
 
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
               .build(tranches)
 
           val trancheIds =
@@ -611,7 +616,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           .integers(0, maximumNumberOfPermutationsToChooseFrom - 1, 0)
           .map(_.toDouble / maximumNumberOfPermutationsToChooseFrom)
       )
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
@@ -621,14 +626,14 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         (
             partGrowth,
             permutationScale,
-            forbidRecyclingOfStoredObjectsInSubsequentSessions
+            sessionCycleCountWhenStoredTranchesAreNotRecycled
         ) =>
           val expectedParts = partGrowth.parts()
 
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
               .build(tranches)
 
           val trancheIds =
@@ -687,18 +692,18 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "fail if the tranche corresponds to another pure functional object of an incompatible type" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo {
-        (partGrowth, forbidRecyclingOfStoredObjectsInSubsequentSessions) =>
+        (partGrowth, sessionCycleCountWhenStoredTranchesAreNotRecycled) =>
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
               .build(tranches)
 
           val trancheIds =
@@ -729,18 +734,18 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is corrupt" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = false)
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo {
-        (partGrowth, forbidRecyclingOfStoredObjectsInSubsequentSessions) =>
+        (partGrowth, sessionCycleCountWhenStoredTranchesAreNotRecycled) =>
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
               .build(tranches)
 
           val trancheIds =
@@ -759,7 +764,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
             val rootTrancheId = trancheIds.last
 
             val freshImmutableObjectStorage =
-              configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+              configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
                 .build(tranches)
 
             val samplingSessionWithCorruptedTranche: Session[Unit] = for {
@@ -780,18 +785,18 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "fail if the tranche or any of its predecessors in the tranche chain is missing" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = false)
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo {
-        (partGrowth, forbidRecyclingOfStoredObjectsInSubsequentSessions) =>
+        (partGrowth, sessionCycleCountWhenStoredTranchesAreNotRecycled) =>
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
               .build(tranches)
 
           val trancheIds =
@@ -803,7 +808,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
             val rootTrancheId = trancheIds.last
 
             val freshImmutableObjectStorage =
-              configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+              configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
                 .build(tranches)
 
             val samplingSessionWithMissingTranche: Session[Unit] = for {
@@ -824,18 +829,18 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "fail if the tranche or any of its predecessors contains objects whose types are incompatible with their referring objects" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = false)
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo {
-        (partGrowth, forbidRecyclingOfStoredObjectsInSubsequentSessions) =>
+        (partGrowth, sessionCycleCountWhenStoredTranchesAreNotRecycled) =>
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
               .build(tranches)
 
           val Right(alienTrancheId) =
@@ -853,7 +858,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
             val rootTrancheId = nonAlienTrancheIds.last
 
             val freshImmutableObjectStorage =
-              configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+              configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
                 .build(tranches)
 
             val samplingSessionWithTrancheForIncompatibleType: Session[Unit] =
@@ -875,19 +880,19 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "result in a smaller tranche when there is a tranche chain covering some of its substructure" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo {
-        (partGrowth, forbidRecyclingOfStoredObjectsInSubsequentSessions) =>
+        (partGrowth, sessionCycleCountWhenStoredTranchesAreNotRecycled) =>
           val isolatedSpokeTranche = {
             val isolatedSpokeTranches = new FakeTranches
 
             val immutableObjectStorage =
-              configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+              configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
                 .build(isolatedSpokeTranches)
 
             val root = partGrowth.parts().last
@@ -906,7 +911,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
               .build(tranches)
 
           val trancheIds =
@@ -921,19 +926,19 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "be idempotent in terms of object identity when retrieving using the same tranche id" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo {
-        (partGrowth, forbidRecyclingOfStoredObjectsInSubsequentSessions) =>
+        (partGrowth, sessionCycleCountWhenStoredTranchesAreNotRecycled) =>
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
             configurationThatForgetsItsTranches(
-              forbidRecyclingOfStoredObjectsInSubsequentSessions
+              sessionCycleCountWhenStoredTranchesAreNotRecycled
             )
               .build(tranches)
 
@@ -970,19 +975,19 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   it should "preserve object identity when storing and then retrieving using the same tranche id" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo {
-        (partGrowth, forbidRecyclingOfStoredObjectsInSubsequentSessions) =>
+        (partGrowth, sessionCycleCountWhenStoredTranchesAreNotRecycled) =>
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
             configurationThatForgetsItsTranches(
-              forbidRecyclingOfStoredObjectsInSubsequentSessions
+              sessionCycleCountWhenStoredTranchesAreNotRecycled
             )
               .build(tranches)
 
@@ -1014,20 +1019,20 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
   "yielding an object whose state is not stored" should "be supported" in
     partGrowthLeadingToRootForkTrials(allowDuplicates = true)
-      .and(api.booleans)
+      .and(sessionCycleCounts)
       .withStrategy(
         casesLimitStrategyFactory =
           _ => CasesLimitStrategy.timed(testCycleDuration),
         complexityLimit = complexityLimit
       )
       .supplyTo {
-        (partGrowth, forbidRecyclingOfStoredObjectsInSubsequentSessions) =>
+        (partGrowth, sessionCycleCountWhenStoredTranchesAreNotRecycled) =>
           val expectedParts = partGrowth.parts()
 
           val tranches = new FakeTranches
 
           val immutableObjectStorage =
-            configuration(forbidRecyclingOfStoredObjectsInSubsequentSessions)
+            configuration(sessionCycleCountWhenStoredTranchesAreNotRecycled)
               .build(tranches)
 
           val retrievalSession: Session[Vector[Part]] =
@@ -1050,14 +1055,14 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
           )
       }
 
-  "dealing with sets that increase in size" should "not cause problems" in api.booleans
+  "dealing with sets that increase in size" should "not cause problems" in sessionCycleCounts
     .withLimit(2)
-    .supplyTo { forbidRecyclingOfStoredObjectsInSubsequentSessions =>
+    .supplyTo { sessionCycleCountWhenStoredTranchesAreNotRecycled =>
       val tranches = new FakeTranches
 
       val immutableObjectStorage =
         configurationForSetsAndMaps(
-          forbidRecyclingOfStoredObjectsInSubsequentSessions
+          sessionCycleCountWhenStoredTranchesAreNotRecycled
         ).build(tranches)
 
       val numberOfIterations = 1400
@@ -1123,9 +1128,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
         .unsafeRunSync()
     }
 
-  "a class with an inherited final method" should "be able to be proxied" in api.booleans
+  "a class with an inherited final method" should "be able to be proxied" in sessionCycleCounts
     .withLimit(2)
-    .supplyTo { forbidRecyclingOfStoredObjectsInSubsequentSessions =>
+    .supplyTo { sessionCycleCountWhenStoredTranchesAreNotRecycled =>
       val example =
         HasAFinalMethodAndOneThatCanBeProxied("example")
 
@@ -1133,7 +1138,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
       val immutableObjectStorage =
         configurationForSetsAndMaps(
-          forbidRecyclingOfStoredObjectsInSubsequentSessions
+          sessionCycleCountWhenStoredTranchesAreNotRecycled
         ).build(tranches)
 
       val Right(trancheIdForFiveEntries) =
@@ -1164,9 +1169,9 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
       list should be(List(example, 2, example))
     }
 
-  "a hash map" should "be able to be proxied" in api.booleans
+  "a hash map" should "be able to be proxied" in sessionCycleCounts
     .withLimit(2)
-    .supplyTo { forbidRecyclingOfStoredObjectsInSubsequentSessions =>
+    .supplyTo { sessionCycleCountWhenStoredTranchesAreNotRecycled =>
       val fiveEntries =
         HashMap(1 -> "One", 2 -> "Two", 3 -> "Three", 4 -> "Four", 5 -> "Five")
 
@@ -1174,7 +1179,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
 
       val immutableObjectStorage =
         configurationForSetsAndMaps(
-          forbidRecyclingOfStoredObjectsInSubsequentSessions
+          sessionCycleCountWhenStoredTranchesAreNotRecycled
         ).build(tranches)
 
       val Right(trancheIdForFiveEntries) =

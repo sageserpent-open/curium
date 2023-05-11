@@ -18,6 +18,7 @@ import net.bytebuddy.matcher.ElementMatchers
 
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.Modifier
+import java.util.{Map => JavaMap}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
 import scala.reflect.runtime.currentMirror
@@ -108,6 +109,11 @@ class ImmutableObjectStorageImplementation[TrancheId](
       .executor(_.run())
       .build[TrancheId, TrancheLoadData]()
 
+  private val sessionCycleCountWhenStoredTranchesAreNotRecycled =
+    1 max configuration.sessionCycleCountWhenStoredTranchesAreNotRecycled
+
+  private var sessionCycleIndex: Int = 0
+
   private val intersessionState: IntersessionState = new IntersessionState
 
   private class IntersessionState {
@@ -174,20 +180,14 @@ class ImmutableObjectStorageImplementation[TrancheId](
     ): Option[AnyRef] =
       Option(referenceIdToProxyCache.getIfPresent(objectReferenceId))
 
-    def loadTranche(
-        trancheId: TrancheId,
-        population: TrancheId => TrancheLoadData
-    ): TrancheLoadData =
-      trancheIdToTrancheLoadDataCache.get(
-        trancheId,
-        population(_)
-      )
+    def trancheFor(trancheId: TrancheId): Option[TrancheLoadData] = Option(
+      trancheIdToTrancheLoadDataCache.getIfPresent(trancheId)
+    )
 
-    def noteTranche(
-        trancheId: TrancheId,
-        trancheLoadData: TrancheLoadData
+    def noteTranches(
+        tranches: JavaMap[TrancheId, TrancheLoadData]
     ): Unit = {
-      trancheIdToTrancheLoadDataCache.put(trancheId, trancheLoadData)
+      trancheIdToTrancheLoadDataCache.putAll(tranches)
     }
 
     def clear(): Unit = {
@@ -227,7 +227,12 @@ class ImmutableObjectStorageImplementation[TrancheId](
   ): EitherThrowableOr[Result] = try {
     session.foldMap(sessionInterpreter)
   } finally {
+    intersessionState.noteTranches(
+      trancheIdToTrancheLoadDataCacheForSession.asMap()
+    )
     trancheIdToTrancheLoadDataCacheForSession.invalidateAll()
+    sessionCycleIndex =
+      (1 + sessionCycleIndex) % sessionCycleCountWhenStoredTranchesAreNotRecycled
   }
 
   private object sessionInterpreter
@@ -252,16 +257,6 @@ class ImmutableObjectStorageImplementation[TrancheId](
                 )
               )
 
-            if (configuration.recycleStoredObjectsInSubsequentSessions) {
-              intersessionState.noteTranche(
-                trancheId,
-                TrancheLoadData(
-                  immutableObject,
-                  trancheSpecificReferenceResolver
-                )
-              )
-            }
-
             trancheIdToTrancheLoadDataCacheForSession.put(
               trancheId,
               TrancheLoadData(
@@ -278,12 +273,21 @@ class ImmutableObjectStorageImplementation[TrancheId](
           }.toEither
 
         case Retrieve(trancheId, clazz) =>
+          val sessionCyclePermitsRecycling = 0 < sessionCycleIndex
+
           Try {
             val TrancheLoadData(topLevelObject, _) =
-              trancheIdToTrancheLoadDataCacheForSession.get(
-                trancheId,
-                intersessionState.loadTranche(_, loadTranche)
-              )
+              if (sessionCyclePermitsRecycling)
+                loadTranche(trancheId, loadTranche)
+              else {
+                // NOTE: instead of calling `loadTranche` and thus potentially
+                // recycle a tranche stored in a previous session, consult only
+                // the session cache and load from scratch if it misses.
+                trancheIdToTrancheLoadDataCacheForSession.get(
+                  trancheId,
+                  loadTranche
+                )
+              }
             clazz.cast(topLevelObject)
           }.toEither
       }
@@ -297,16 +301,27 @@ class ImmutableObjectStorageImplementation[TrancheId](
             trancheIdForExternalObjectReference,
             trancheLocalObjectReferenceId
           ) =>
-        val TrancheLoadData(_, objectLookup) =
-          trancheIdToTrancheLoadDataCacheForSession.get(
-            trancheIdForExternalObjectReference,
-            intersessionState.loadTranche(_, loadTranche)
-          )
+        val TrancheLoadData(_, objectLookup) = loadTranche(
+          trancheIdForExternalObjectReference,
+          loadTranche
+        )
 
         objectLookup.objectWithReferenceId(
           trancheLocalObjectReferenceId
         )
     }
+
+  private def loadTranche(
+      trancheId: TrancheId,
+      population: TrancheId => TrancheLoadData
+  ): TrancheLoadData = {
+    intersessionState.trancheFor(trancheId).getOrElse {
+      trancheIdToTrancheLoadDataCacheForSession.get(
+        trancheId,
+        population(_)
+      )
+    }
+  }
 
   private def loadTranche(
       trancheId: TrancheId
