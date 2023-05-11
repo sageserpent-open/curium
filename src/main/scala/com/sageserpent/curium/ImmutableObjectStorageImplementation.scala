@@ -20,7 +20,6 @@ import java.io.ByteArrayOutputStream
 import java.lang.reflect.Modifier
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.{MapHasAsJava, MapHasAsScala}
-import scala.ref.WeakReference
 import scala.reflect.runtime.currentMirror
 import scala.util.{DynamicVariable, Success, Try}
 
@@ -397,15 +396,15 @@ class ImmutableObjectStorageImplementation[TrancheId](
   private class AcquiredState(
       canonicalObjectReferenceId: CanonicalObjectReferenceId[TrancheId]
   ) extends proxySupport.AcquiredState {
-    private var _underlying: Option[WeakReference[AnyRef]] = None
+    private var _underlying: Option[AnyRef] = None
 
     override def underlying: AnyRef = _underlying match {
-      case Some(WeakReference(result)) => result
+      case Some(result) => result
       case _ =>
         val result =
           retrieveUnderlying(canonicalObjectReferenceId)
 
-        _underlying = Some(WeakReference(result))
+        _underlying = Some(result)
 
         result
     }
