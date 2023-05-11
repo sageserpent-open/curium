@@ -113,10 +113,9 @@ class ImmutableObjectStorageImplementation[TrancheId](
 
   private var trancheLoads: Long = 0L
 
-  private val sessionCycleCountWhenStoredTranchesAreNotRecycled =
-    1 max configuration.sessionCycleCountWhenStoredTranchesAreNotRecycled
-
-  private var sessionCycleIndex: Int = 0
+  private var sessionCycleIndex: Option[Int] = Option.when(
+    0 < configuration.sessionCycleCountWhenStoredTranchesAreNotRecycled
+  )(0)
 
   private val intersessionState: IntersessionState = new IntersessionState
 
@@ -235,8 +234,13 @@ class ImmutableObjectStorageImplementation[TrancheId](
       trancheIdToTrancheLoadDataCacheForSession.asMap()
     )
     trancheIdToTrancheLoadDataCacheForSession.invalidateAll()
-    sessionCycleIndex =
-      (1 + sessionCycleIndex) % sessionCycleCountWhenStoredTranchesAreNotRecycled
+
+    sessionCycleIndex = sessionCycleIndex.map { value =>
+      assume(
+        0 < configuration.sessionCycleCountWhenStoredTranchesAreNotRecycled
+      )
+      (1 + value) % configuration.sessionCycleCountWhenStoredTranchesAreNotRecycled
+    }
 
     sessionCounter += 1L
   }
@@ -288,7 +292,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
 
         case Retrieve(trancheId, clazz) =>
           val blockRecyclingOfStoredTranchesFromPreviousSessions =
-            0 == sessionCycleIndex
+            sessionCycleIndex.fold(ifEmpty = false)(0 == _)
 
           Try {
             val TrancheLoadData(topLevelObject, _, _) =

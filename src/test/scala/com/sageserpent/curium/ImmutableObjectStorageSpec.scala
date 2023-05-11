@@ -401,7 +401,7 @@ object ImmutableObjectStorageSpec {
     } yield PartGrowth(steps, chunkSizes)
   }
 
-  private val sessionCycleCounts = api.integers(1, 10)
+  private val sessionCycleCounts = api.integers(0, 10)
 
   private val testCycleDuration: Duration = Duration.ofSeconds(30)
 }
