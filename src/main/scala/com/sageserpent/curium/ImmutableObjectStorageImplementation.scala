@@ -274,7 +274,8 @@ class ImmutableObjectStorageImplementation[TrancheId](
               trancheId,
               TrancheLoadData(
                 immutableObject,
-                trancheSpecificReferenceResolver
+                trancheSpecificReferenceResolver,
+                storedFromSession = true
               )
             )
 
@@ -290,12 +291,12 @@ class ImmutableObjectStorageImplementation[TrancheId](
             0 == sessionCycleIndex
 
           Try {
-            val TrancheLoadData(topLevelObject, _) =
+            val TrancheLoadData(topLevelObject, _, _) =
               loadTranche(
                 trancheId,
                 loadTranche,
-                skipIntersessionState =
-                  blockRecyclingOfStoredTranchesFromPreviousSessions
+                allowRecyclingOfStoredTranches =
+                  !blockRecyclingOfStoredTranchesFromPreviousSessions
               )
 
             clazz.cast(topLevelObject)
@@ -311,10 +312,10 @@ class ImmutableObjectStorageImplementation[TrancheId](
             trancheIdForExternalObjectReference,
             trancheLocalObjectReferenceId
           ) =>
-        val TrancheLoadData(_, objectLookup) = loadTranche(
+        val TrancheLoadData(_, objectLookup, _) = loadTranche(
           trancheIdForExternalObjectReference,
           loadTranche,
-          skipIntersessionState = false
+          allowRecyclingOfStoredTranches = true
         )
 
         objectLookup.objectWithReferenceId(
@@ -325,19 +326,17 @@ class ImmutableObjectStorageImplementation[TrancheId](
   private def loadTranche(
       trancheId: TrancheId,
       population: TrancheId => TrancheLoadData,
-      skipIntersessionState: Boolean
-  ): TrancheLoadData = if (skipIntersessionState)
-    trancheIdToTrancheLoadDataCacheForSession.get(
-      trancheId,
-      population(_)
-    )
-  else
-    intersessionState.trancheFor(trancheId).getOrElse {
-      trancheIdToTrancheLoadDataCacheForSession.get(
-        trancheId,
-        population(_)
-      )
-    }
+      allowRecyclingOfStoredTranches: Boolean
+  ): TrancheLoadData =
+    intersessionState
+      .trancheFor(trancheId)
+      .filter(allowRecyclingOfStoredTranches || !_.storedFromSession)
+      .getOrElse {
+        trancheIdToTrancheLoadDataCacheForSession.get(
+          trancheId,
+          population(_)
+        )
+      }
 
   private def loadTranche(
       trancheId: TrancheId
@@ -361,7 +360,8 @@ class ImmutableObjectStorageImplementation[TrancheId](
 
     TrancheLoadData(
       topLevelObject,
-      trancheSpecificReferenceResolver
+      trancheSpecificReferenceResolver,
+      storedFromSession = false
     )
   } finally {
     trancheLoads += 1L
@@ -377,7 +377,8 @@ class ImmutableObjectStorageImplementation[TrancheId](
 
   private case class TrancheLoadData(
       topLevelObject: Any,
-      objectLookup: ObjectLookup
+      objectLookup: ObjectLookup,
+      storedFromSession: Boolean
   )
 
   private trait AbstractTrancheSpecificReferenceResolver
