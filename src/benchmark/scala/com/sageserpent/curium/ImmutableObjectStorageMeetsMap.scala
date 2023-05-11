@@ -16,6 +16,10 @@ import scala.util.Random
 object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
   type TrancheId = RocksDbTranches#TrancheId
 
+  private val lookbackLimit = 10000
+
+  private val batchSize = 100
+
   def main(args: Array[String]): Unit = {
     tranchesResource
       .use(tranches =>
