@@ -14,8 +14,8 @@ lazy val settings = Seq(
   libraryDependencies += "org.typelevel" %% "cats-effect"    % "3.3.5",
   libraryDependencies += "net.bytebuddy"  % "byte-buddy"     % "1.12.7",
   libraryDependencies += "org.scala-lang.modules" %% "scala-java8-compat" % "1.0.0",
-  libraryDependencies += "io.altoo"   %% "akka-kryo-serialization" % "2.4.3",
-  libraryDependencies += "io.findify" %% "flink-scala-api"         % "1.15-2"
+  libraryDependencies += "io.altoo"   %% "scala-kryo-serialization" % "1.2.0",
+  libraryDependencies += "io.findify" %% "flink-scala-api"          % "1.15-2"
     exclude ("com.esotericsoftware.kryo", "kryo")
     exclude ("com.twitter", "chill-java"),
   libraryDependencies += "com.google.guava" % "guava" % "28.0-jre",

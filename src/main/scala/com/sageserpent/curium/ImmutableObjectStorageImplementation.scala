@@ -2,12 +2,13 @@ package com.sageserpent.curium
 
 import cats.arrow.FunctionK
 import cats.implicits._
-import com.esotericsoftware.kryo.io.{Input, Output}
-import com.esotericsoftware.kryo.util.{DefaultClassResolver, Pool, Util}
-import com.esotericsoftware.kryo.{Kryo, ReferenceResolver, Registration}
+import com.esotericsoftware.kryo.kryo5.io.{Input, Output}
+import com.esotericsoftware.kryo.kryo5.objenesis.strategy.StdInstantiatorStrategy
+import com.esotericsoftware.kryo.kryo5.util.{DefaultClassResolver, Pool, Util}
+import com.esotericsoftware.kryo.kryo5.{Kryo, ReferenceResolver, Registration}
 import com.github.benmanes.caffeine.cache.{Cache, Caffeine, Scheduler}
 import com.google.common.collect.{BiMap, BiMapFactory}
-import io.altoo.akka.serialization.kryo.serializer.scala.ScalaKryo
+import io.altoo.serialization.kryo.scala.serializer.ScalaKryo
 import net.bytebuddy.NamingStrategy
 import net.bytebuddy.description.`type`.TypeDescription
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
@@ -75,7 +76,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
 
         result.setRegistrationRequired(false)
         result.setInstantiatorStrategy(
-          new org.objenesis.strategy.StdInstantiatorStrategy
+          new StdInstantiatorStrategy
         )
 
         result.register(

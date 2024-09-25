@@ -1,12 +1,12 @@
 package com.sageserpent.curium
 
-import com.esotericsoftware.kryo.serializers.ClosureSerializer.Closure
-import com.esotericsoftware.kryo.{Kryo, KryoCopyable}
+import com.esotericsoftware.kryo.kryo5.objenesis.instantiator.ObjectInstantiator
+import com.esotericsoftware.kryo.kryo5.objenesis.strategy.StdInstantiatorStrategy
+import com.esotericsoftware.kryo.kryo5.serializers.ClosureSerializer.Closure
+import com.esotericsoftware.kryo.kryo5.{Kryo, KryoCopyable}
 import com.github.benmanes.caffeine.cache.Cache
 import net.bytebuddy.ByteBuddy
 import net.bytebuddy.implementation.bind.annotation.{FieldValue, Pipe, RuntimeType}
-import org.objenesis.instantiator.ObjectInstantiator
-import org.objenesis.strategy.StdInstantiatorStrategy
 
 object ProxySupport {
   case class SuperClazzAndInterfaces(

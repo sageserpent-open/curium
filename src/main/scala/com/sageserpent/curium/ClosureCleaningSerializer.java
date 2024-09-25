@@ -1,8 +1,9 @@
 package com.sageserpent.curium;
 
-import com.esotericsoftware.kryo.Kryo;
-import com.esotericsoftware.kryo.io.Output;
-import com.esotericsoftware.kryo.serializers.ClosureSerializer;
+
+import com.esotericsoftware.kryo.kryo5.Kryo;
+import com.esotericsoftware.kryo.kryo5.io.Output;
+import com.esotericsoftware.kryo.kryo5.serializers.ClosureSerializer;
 import io.findify.flink.api.ClosureCleaner;
 
 // NASTY HACK: this is ghastly, but those Spark, Twitter and Flink folks

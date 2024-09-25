@@ -1,8 +1,8 @@
 package com.sageserpent.curium
 
-import com.esotericsoftware.kryo.Kryo
-import com.esotericsoftware.kryo.io.{Input, Output}
-import com.esotericsoftware.kryo.util.Pool
+import com.esotericsoftware.kryo.kryo5.Kryo
+import com.esotericsoftware.kryo.kryo5.io.{Input, Output}
+import com.esotericsoftware.kryo.kryo5.util.Pool
 
 import java.io.ByteArrayOutputStream
 import scala.util.Using
