@@ -6,7 +6,7 @@ lazy val settings = Seq(
   organization := "com.sageserpent",
   name         := "curium",
   scalaVersion := "2.13.10",
-  scalacOptions += s"-target:jvm-${javaVersion}",
+  scalacOptions += s"-java-output-version:${javaVersion}",
   javacOptions ++= Seq("-source", javaVersion, "-target", javaVersion),
   libraryDependencies += "org.typelevel" %% "cats-core"      % "2.7.0",
   libraryDependencies += "org.typelevel" %% "cats-free"      % "2.7.0",
@@ -46,4 +46,4 @@ lazy val Benchmark = config("benchmark") extend Test
 lazy val curium = (project in file("."))
   .configs(Benchmark)
   .settings(settings ++ inConfig(Benchmark)(testSettings): _*)
-val javaVersion = "1.8"
+val javaVersion = "17"
