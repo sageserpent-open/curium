@@ -18,6 +18,7 @@ import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation}
 import net.bytebuddy.matcher.ElementMatchers
 
 import java.io.ByteArrayOutputStream
+import java.lang.invoke.MethodHandles
 import java.lang.reflect.Modifier
 import java.util.{Map => JavaMap}
 import scala.collection.mutable
@@ -736,6 +737,8 @@ class ImmutableObjectStorageImplementation[TrancheId](
             true
         })
 
+    private val methodHandlesLookup = MethodHandles.lookup()
+
     private def createProxyClass(
         superClazzAndInterfaces: SuperClazzAndInterfaces
     ): Class[_] = {
@@ -748,7 +751,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
             superClazzBag.updateWith(superClass)(count =>
               count.map(1 + _).orElse(Some(1))
             )
-            s"${superClass.getSimpleName}_${superClazzBag(superClass)}_$proxySuffix"
+            s"${superClass.getPackage.getActualName}.${superClass.getSimpleName}_${superClazzBag(superClass)}_$proxySuffix"
           }
         })
         .subclass(
@@ -789,7 +792,15 @@ class ImmutableObjectStorageImplementation[TrancheId](
         )
         .intercept(MethodDelegation.to(proxyCopying))
         .make
-        .load(getClass.getClassLoader, ClassLoadingStrategy.Default.INJECTION)
+        .load(
+          getClass.getClassLoader,
+          ClassLoadingStrategy.UsingLookup.of(
+            MethodHandles.privateLookupIn(
+              superClazzAndInterfaces.superClazz,
+              methodHandlesLookup
+            )
+          )
+        )
         .getLoaded
     }
   }
