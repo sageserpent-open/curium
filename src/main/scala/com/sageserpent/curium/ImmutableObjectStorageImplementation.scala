@@ -64,17 +64,6 @@ class ImmutableObjectStorageImplementation[TrancheId](
             super.getRegistration(proxySupport.nonProxyClazzFor(clazz))
         }
 
-        // NASTY HACK - treat `ScalaKryo` as a whitebox and pull out the shared
-        // instance of `ScalaObjectSerializer` that it maintains. Then tell it
-        // that, yes, it can perform a copy by simply yielding the original
-        // immutable instance. Finally, submit a pull request to:
-        // https://github.com/altoo-ag/akka-kryo-serialization .
-        result
-          .getDefaultSerializer(
-            classOf[standaloneExemplarToEnticeScalaKyro.type]
-          )
-          .setImmutable(true)
-
         result.setRegistrationRequired(false)
         result.setInstantiatorStrategy(
           new StdInstantiatorStrategy
