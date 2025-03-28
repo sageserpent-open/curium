@@ -17,8 +17,8 @@ object H2ViaScalikeJdbcTranches {
           db localTx { implicit session: DBSession =>
             sql"""
              CREATE TABLE Tranche(
-                trancheId   IDENTITY  PRIMARY KEY,
-                payload     BINARY    NOT NULL
+                trancheId   IDENTITY        PRIMARY KEY,
+                payload     BINARY VARYING  NOT NULL
              )
       """.update.apply()
             sql"""
