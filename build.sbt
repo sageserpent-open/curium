@@ -12,12 +12,10 @@ lazy val settings = Seq(
   scalaVersion := "2.13.16",
   scalacOptions += s"-java-output-version:${javaVersion}",
   javacOptions ++= Seq("-source", javaVersion, "-target", javaVersion),
-  libraryDependencies += "org.typelevel" %% "cats-core"      % "2.13.0",
-  libraryDependencies += "org.typelevel" %% "cats-free"      % "2.13.0",
-  libraryDependencies += "org.typelevel" %% "alleycats-core" % "2.13.0",
-  libraryDependencies += "org.typelevel" %% "cats-effect"    % "3.6.0",
-  libraryDependencies += "net.bytebuddy"  % "byte-buddy"     % "1.17.4",
-  libraryDependencies += "org.scala-lang.modules" %% "scala-java8-compat" % "1.0.2",
+  libraryDependencies += "org.typelevel" %% "cats-core"   % "2.13.0",
+  libraryDependencies += "org.typelevel" %% "cats-free"   % "2.13.0",
+  libraryDependencies += "org.typelevel" %% "cats-effect" % "3.6.0",
+  libraryDependencies += "net.bytebuddy"  % "byte-buddy"  % "1.17.4",
   libraryDependencies += "io.altoo"   %% "scala-kryo-serialization" % "1.2.1",
   libraryDependencies += "io.findify" %% "flink-scala-api"          % "1.15-2"
     exclude ("com.esotericsoftware.kryo", "kryo")
