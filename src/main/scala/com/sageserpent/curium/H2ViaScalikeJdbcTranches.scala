@@ -2,7 +2,11 @@ package com.sageserpent.curium
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import com.sageserpent.curium.ImmutableObjectStorage.{TrancheLocalObjectReferenceId, TrancheOfData, Tranches}
+import com.sageserpent.curium.ImmutableObjectStorage.{
+  TrancheLocalObjectReferenceId,
+  TrancheOfData,
+  Tranches
+}
 import scalikejdbc._
 
 object H2ViaScalikeJdbcTranches {
@@ -81,7 +85,7 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
               payload <-
                 sql"""
           SELECT payload FROM Tranche WHERE $trancheId = TrancheId
-       """.map(_.bytes("payload")).single().apply()
+       """.map(_.bytes("payload")).single()
 
               interTrancheObjectReferenceIdTranslation =
                 sql"""SELECT referringTrancheLocalObjectReferenceId, homeTrancheId, homeTrancheLocalObjectReferenceId FROM InterTrancheObjectReferenceIdTranslation WHERE referringTrancheId = $trancheId"""
@@ -97,7 +101,6 @@ class H2ViaScalikeJdbcTranches(connectionPool: ConnectionPool)
                     referringTrancheLocalObjectReferenceId -> (homeTrancheId, homeTrancheLocalObjectReferenceId)
                   }
                   .toIterable()
-                  .apply()
                   .toMap
             } yield TrancheOfData(
               payload = payload,
