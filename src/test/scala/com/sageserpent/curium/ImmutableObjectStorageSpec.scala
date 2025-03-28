@@ -1107,7 +1107,7 @@ class ImmutableObjectStorageSpec extends AnyFlatSpec with Matchers {
               immutableObjectStorage
                 .runToYieldResult(session)
 
-            println(anUpdatedSet)
+            if (0 == index / 100) println(anUpdatedSet)
 
             trancheIdForUpdate -> exemplarUpdate.updateSet(exemplarSet, index)
           }
