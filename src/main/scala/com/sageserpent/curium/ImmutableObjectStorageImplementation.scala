@@ -682,7 +682,10 @@ class ImmutableObjectStorageImplementation[TrancheId](
     def canBeProxied(clazz: Class[_]) =
       superClazzAndInterfacesToProxy(clazz).isDefined
 
-    def createProxy(clazz: Class[_], acquiredState: AcquiredState): AnyRef = {
+    def createProxy(
+        clazz: Class[_],
+        acquiredState: this.AcquiredState
+    ): AnyRef = {
       val proxyClassInstantiator =
         synchronized {
           cachedProxyClassInstantiators.get(
@@ -765,7 +768,7 @@ class ImmutableObjectStorageImplementation[TrancheId](
             .withBinders(Pipe.Binder.install(classOf[PipeForwarding]))
             .to(proxyDelayedLoading)
         )
-        .defineField("acquiredState", classOf[AcquiredState])
+        .defineField("acquiredState", classOf[this.AcquiredState])
         .implement(stateAcquisitionClazz)
         .method(
           ElementMatchers
