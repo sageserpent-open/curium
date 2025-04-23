@@ -15,10 +15,6 @@ import scala.util.Random
 object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
   type TrancheId = RocksDbTranches#TrancheId
 
-  private val lookbackLimit = 10000000
-
-  private val batchSize = 100
-
   def main(args: Array[String]): Unit = {
     tranchesResource
       .use(tranches =>
@@ -48,7 +44,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
           val updateDurations: mutable.ListBuffer[Duration] =
             mutable.ListBuffer.empty
 
-          val lookbackLimit = 10000000
+          val lookbackLimit = 1000000000
 
           val batchSize = 100
 
@@ -167,7 +163,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
       classOf[RocksDbTranches].getSimpleName
 
     override val sessionCycleCountWhenStoredTranchesAreNotRecycled: Int =
-      0 // Disabled!
+      10
 
     override def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
       // What goes on behind the scenes for the `HashSet` and `HashMap`
@@ -184,7 +180,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
         .trancheCacheCustomisation(caffeine)
         .maximumSize(
           1
-        ) // Only need a single tranche as recycling on permanently, and only one object as updated in a session.
+        ) // Only need a single tranche as recycling on permanently, and only one object is updated in a session.
 
   }
 }
