@@ -6,6 +6,7 @@ import com.sageserpent.americium.randomEnrichment._
 import com.sageserpent.curium.ImmutableObjectStorage.Session
 import com.sageserpent.curium.caffeineBuilder.CaffeineArchetype
 
+import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
 import scala.collection.immutable.{AbstractMap, AbstractSet}
 import scala.collection.mutable
@@ -48,7 +49,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
           val batchSize = 100
 
-          for (step <- 0 until (1000000000, batchSize)) {
+          for (step <- 0 until (lookbackLimit, batchSize)) {
             if (0 < step && step % 5000 == 0) {
               val postUpdatesTime = Deadline.now
 
@@ -56,7 +57,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                 immutableObjectStorage.runToYieldResult(
                   immutableObjectStorage
                     .retrieve[Map[Int, Set[String]]](trancheId)
-                    .map(_.get(step - 1).getOrElse(Set.empty))
+                    .map(_.getOrElse(step - 1, Set.empty))
                 )
 
               val duration = postUpdatesTime - startTime
@@ -92,36 +93,28 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
                     if (1 == microStep % 5) {
                       val elementToRemove =
                         microStep - randomBehaviour.chooseAnyNumberFromOneTo(
-                          lookbackLimit min microStep
+                          microStep
                         )
                       originalMap.removed(elementToRemove)
                     } else originalMap
 
                   mapWithPossibleRemoval + (microStep -> {
-                    val set = originalMap
-                      .get(
-                        if (0 < microStep)
-                          microStep - randomBehaviour
-                            .chooseAnyNumberFromOneTo(
-                              lookbackLimit min microStep
-                            )
-                        else 0
-                      )
-                      .getOrElse(Set.empty)
-                    if (!set.isEmpty && 1 == microStep % 11)
+                    val set = originalMap.getOrElse(
+                      if (0 < microStep)
+                        microStep - randomBehaviour
+                          .chooseAnyNumberFromOneTo(
+                            microStep
+                          )
+                      else 0,
+                      Set.empty
+                    )
+                    if (set.nonEmpty && 1 == microStep % 11)
                       set.excl(set.min)
                     else set + microStep.toString
                   })
               }(seed = retrievedMap, numberOfIterations = batchSize)
 
-              trimmedMap =
-                if (mutatedMap.size > lookbackLimit)
-                  mutatedMap.removedAll(
-                    step + batchSize - mutatedMap.size until step + batchSize - lookbackLimit
-                  )
-                else mutatedMap
-
-              newTrancheId <- immutableObjectStorage.store(trimmedMap)
+              newTrancheId <- immutableObjectStorage.store(mutatedMap)
             } yield newTrancheId
 
             {
@@ -162,8 +155,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
     override val tranchesImplementationName: String =
       classOf[RocksDbTranches].getSimpleName
 
-    override val sessionCycleCountWhenStoredTranchesAreNotRecycled: Int =
-      10
+    override val sessionCycleCountWhenStoredTranchesAreNotRecycled: Int = 10
 
     override def canBeProxiedViaSuperTypes(clazz: Class[_]): Boolean =
       // What goes on behind the scenes for the `HashSet` and `HashMap`
@@ -178,9 +170,8 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
     ): CaffeineArchetype =
       super
         .trancheCacheCustomisation(caffeine)
-        .maximumSize(
-          1
-        ) // Only need a single tranche as recycling on permanently, and only one object is updated in a session.
+        .expireAfterWrite(20, TimeUnit.SECONDS)
+    // .maximumSize(2000)
 
   }
 }
