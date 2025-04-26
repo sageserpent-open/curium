@@ -47,7 +47,7 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
 
           val lookbackLimit = 1000000000
 
-          val batchSize = 100
+          val batchSize = 10
 
           for (step <- 0 until (lookbackLimit, batchSize)) {
             if (0 < step && step % 5000 == 0) {
