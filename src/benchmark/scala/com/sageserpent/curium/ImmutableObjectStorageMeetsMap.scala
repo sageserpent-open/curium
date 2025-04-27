@@ -171,7 +171,5 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
       super
         .trancheCacheCustomisation(caffeine)
         .expireAfterWrite(20, TimeUnit.SECONDS)
-    // .maximumSize(2000)
-
   }
 }
