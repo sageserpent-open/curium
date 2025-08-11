@@ -45,11 +45,11 @@ object ImmutableObjectStorageMeetsMap extends RocksDbTranchesResource {
           val updateDurations: mutable.ListBuffer[Duration] =
             mutable.ListBuffer.empty
 
-          val lookbackLimit = 1000000000
+          val maximumNumberOfSteps = 1000000000
 
           val batchSize = 10
 
-          for (step <- 0 until (lookbackLimit, batchSize)) {
+          for (step <- 0 until (maximumNumberOfSteps, batchSize)) {
             if (0 < step && step % 5000 == 0) {
               val postUpdatesTime = Deadline.now
 
